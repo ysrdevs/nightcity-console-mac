@@ -25,6 +25,18 @@ cp runtime/red4ext_hooks.js runtime/FridaGadget.config "$APP/Contents/Resources/
 cp deps/RED4ext.dylib deps/FridaGadget.dylib            "$APP/Contents/Resources/"
 cp build/libcyberconsole_overlay.dylib                  "$APP/Contents/Resources/"
 
+if [ -f icon.png ]; then
+  echo "==> generating app icon (AppIcon.icns from icon.png)"
+  ICONSET="build/AppIcon.iconset"
+  rm -rf "$ICONSET"; mkdir -p "$ICONSET"
+  for s in 16 32 128 256 512; do
+    sips -z "$s" "$s"             icon.png --out "$ICONSET/icon_${s}x${s}.png"    >/dev/null
+    sips -z "$((s*2))" "$((s*2))" icon.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
+  done
+  iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+  rm -rf "$ICONSET"
+fi
+
 echo "==> ad-hoc signing"
 codesign -s - --deep --force "$APP" >/dev/null
 echo "built $APP"
