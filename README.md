@@ -12,6 +12,14 @@ Platform: macOS arm64. Built against Cyberpunk 2077 v2.3.1 (Steam). GOG support 
 
 ![CET Mac launcher](assets/screenshot.png)
 
+## Demo
+
+Adding relic and perk points, weapons, and money, live in-game on macOS.
+
+<video src="https://github.com/ysrdevs/CET-mac/raw/main/assets/demo.mp4" controls width="100%"></video>
+
+[Watch the demo](assets/demo.mp4) if the player above does not load.
+
 ## For players
 
 1. Download `CET-Mac.dmg` from [Releases](../../releases).
