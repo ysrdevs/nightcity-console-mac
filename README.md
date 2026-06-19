@@ -24,6 +24,10 @@ Platform: macOS arm64. Built against Cyberpunk 2077 v2.3.1 (Steam). GOG support 
 
 ## For players
 
+Prefer a walkthrough? Watch the install video:
+
+[![Watch the install video](https://img.youtube.com/vi/V5KFp34nzPg/hqdefault.jpg)](https://www.youtube.com/watch?v=V5KFp34nzPg)
+
 1. Download `CET-Mac.dmg` from [Releases](../../releases).
 2. Open it and run CET Mac (drag it to Applications if you like).
 3. Click Install, then Play.
