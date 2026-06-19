@@ -1,12 +1,18 @@
 # CET Mac
 
-An in-game cheat/mod console for Cyberpunk 2077 on macOS (Apple Silicon). It does the kind of thing
-Cyber Engine Tweaks does on Windows, on a platform where CET doesn't exist. You press a key in-game,
-a console appears, and you type commands: spawn items, add money, set perks/attributes/level, teleport,
-and more. CET item codes from the internet paste in and work as-is.
+![macOS arm64](https://img.shields.io/badge/macOS-arm64-black)
+![Cyberpunk 2077](https://img.shields.io/badge/Cyberpunk%202077-2.3.1-yellow)
+![License](https://img.shields.io/badge/license-MIT-blue)
+![Status](https://img.shields.io/badge/status-Steam%20supported-green)
 
-Single-player, personal use, on your own legally-owned copy. Not affiliated with CD PROJEKT RED.
-Back up your saves before using it.
+A native Apple Silicon in-game console for Cyberpunk 2077 on macOS.
+
+Think Cyber Engine Tweaks, but rebuilt for native macOS/Apple Silicon. CET Mac brings CET-style commands
+to the native macOS version of Cyberpunk 2077: spawn items, add money, set levels/perks/attributes,
+teleport, run CET-style commands, and debug REDengine calls from an in-game Metal overlay.
+
+Single-player, personal use, on your own legally-owned copy. Not affiliated with Cyber Engine Tweaks or
+CD PROJEKT RED. Back up your saves before using it.
 
 Platform: macOS arm64. Built against Cyberpunk 2077 v2.3.1 (Steam). GOG support is in progress.
 
