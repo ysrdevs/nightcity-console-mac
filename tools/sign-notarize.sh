@@ -42,9 +42,44 @@ echo "==> packaging the stapled app (.zip + .dmg)"
 # 1) distributable .zip: the app inside is stapled, so it passes Gatekeeper offline
 rm -f "$ZIP"
 /usr/bin/ditto -c -k --keepParent "$APP" "$ZIP"
-# 2) .dmg, then notarize + staple the dmg itself so the downloaded image also passes offline
+# 2) .dmg with an /Applications shortcut + drag-here layout, then notarize + staple
+#    the dmg itself so the downloaded image also passes Gatekeeper offline.
 rm -f "$DMG"
-hdiutil create -volname "CET Mac" -srcfolder "$APP" -ov -format UDZO "$DMG"
+VOL="CET Mac"; STAGE="build/dmg"; RWDMG="dist/_rw.dmg"; APPNAME="$(basename "$APP")"
+rm -rf "$STAGE"; mkdir -p "$STAGE"
+ditto "$APP" "$STAGE/$APPNAME"
+ln -s /Applications "$STAGE/Applications"            # the shortcut users drag into
+rm -f "$RWDMG"
+hdiutil create -volname "$VOL" -srcfolder "$STAGE" -fs HFS+ -format UDRW -ov "$RWDMG"
+MNT="/Volumes/$VOL"
+hdiutil attach "$RWDMG" -nobrowse -noverify -noautoopen >/dev/null
+# Lay the window out as icon view: app on the left, Applications on the right, with a
+# hint as the window title so it's obvious you copy the app over. Non-fatal if Finder
+# automation is unavailable - the Applications shortcut alone still conveys it.
+osascript <<EOF || echo "  (note: could not style dmg window; Applications shortcut is still present)"
+tell application "Finder"
+  tell disk "$VOL"
+    open
+    set current view of container window to icon view
+    set toolbar visible of container window to false
+    set statusbar visible of container window to false
+    set the bounds of container window to {200, 120, 760, 470}
+    set vopts to the icon view options of container window
+    set arrangement of vopts to not arranged
+    set icon size of vopts to 96
+    set text size of vopts to 12
+    set position of item "$APPNAME" of container window to {150, 200}
+    set position of item "Applications" of container window to {410, 200}
+    set name of container window to "CET Mac  -  drag the app into Applications"
+    update without registering applications
+    delay 1
+    close
+  end tell
+end tell
+EOF
+sync; hdiutil detach "$MNT" >/dev/null || hdiutil detach "$MNT" -force >/dev/null
+hdiutil convert "$RWDMG" -format UDZO -o "$DMG" >/dev/null
+rm -f "$RWDMG"; rm -rf "$STAGE"
 xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$DMG"
 
