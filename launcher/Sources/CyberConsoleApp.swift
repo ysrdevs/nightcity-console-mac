@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 enum Const {
-    static let appVersion = "1.1.0"
+    static let appVersion = "1.1.1"
     static let supportedGameVersion = "2.3.1"
     static let defaultGame = "\(NSHomeDirectory())/Library/Application Support/Steam/steamapps/common/Cyberpunk 2077"
     // Files copied from the app's Resources into <game>/red4ext/ on install.
@@ -114,11 +114,59 @@ final class Model: ObservableObject {
                 try fm.copyItem(at: src, to: dst)
             }
             stripQuarantine(red4Dir)   // files we just wrote -> make dyld load them
-            status = "Installed ✓  - click Play."
+            guard ensureGameEntitlements() else { return }   // status set on failure
+            status = "Installed - click Play."
             refresh()
         } catch {
             status = "Install failed: \(error.localizedDescription)"
         }
+    }
+
+    // Stock Cyberpunk ships signed with only allow-dyld-environment-variables + disable-library-validation.
+    // Frida is a JIT: it writes machine code at runtime. Without allow-jit / allow-unsigned-executable-memory
+    // the OS code-signing monitor SIGKILLs the game (CODESIGNING, Invalid Page) the instant Frida generates
+    // code. We re-sign the game binary ad-hoc with those entitlements. No SIP changes. Fully reversible:
+    // Steam "Verify integrity of game files" restores the original signature (and a later Play re-applies this).
+    @discardableResult
+    func ensureGameEntitlements() -> Bool {
+        if gameHasJITEntitlement() { return true }   // already done; skip the (re)sign
+        let ents = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0"><dict>
+        <key>com.apple.security.cs.allow-dyld-environment-variables</key><true/>
+        <key>com.apple.security.cs.allow-jit</key><true/>
+        <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+        <key>com.apple.security.cs.disable-executable-page-protection</key><true/>
+        <key>com.apple.security.cs.disable-library-validation</key><true/>
+        </dict></plist>
+        """
+        let plistPath = NSTemporaryDirectory() + "cetmac-entitlements.plist"
+        do { try ents.write(toFile: plistPath, atomically: true, encoding: .utf8) }
+        catch { status = "Could not prepare entitlements: \(error.localizedDescription)"; return false }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        p.arguments = ["-f", "-s", "-", "--entitlements", plistPath, binaryPath]
+        let err = Pipe(); p.standardError = err
+        do { try p.run(); p.waitUntilExit() }
+        catch { status = "Could not run codesign: \(error.localizedDescription)"; return false }
+        guard p.terminationStatus == 0 else {
+            let msg = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            status = "Re-signing the game failed: \(msg.trimmingCharacters(in: .whitespacesAndNewlines))"
+            return false
+        }
+        return true
+    }
+
+    // True if the game binary already carries the JIT entitlement (so we can skip re-signing).
+    func gameHasJITEntitlement() -> Bool {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        p.arguments = ["-d", "--entitlements", ":-", binaryPath]
+        let out = Pipe(); p.standardOutput = out; p.standardError = Pipe()
+        do { try p.run(); p.waitUntilExit() } catch { return false }
+        let s = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        return s.contains("allow-jit")
     }
 
     func uninstall() {
@@ -157,6 +205,7 @@ final class Model: ObservableObject {
         let fm = FileManager.default
         let missing = injectDylibs.filter { !fm.fileExists(atPath: "\(red4Dir)/\($0)") }
         guard missing.isEmpty else { status = "Can't launch - missing: \(missing.joined(separator: ", ")). Try Install again."; return }
+        guard ensureGameEntitlements() else { return }   // re-sign if a Steam verify/update reset it
         ensureSteam()
         let inject = "\(red4Dir)/RED4ext.dylib:\(red4Dir)/FridaGadget.dylib:\(red4Dir)/libcyberconsole_overlay.dylib"
         var env = ProcessInfo.processInfo.environment
