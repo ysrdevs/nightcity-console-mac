@@ -80,7 +80,7 @@ static void handleSubmit(const char* cmd) {
     if (strcmp(cmd, "help") == 0) {
         appendOut("items:  give <Items.X> <qty> | removeitem <Items.X> <qty> | money <n>");
         appendOut("        CET style: Game.AddToInventory(\"Items.X\", n)");
-        appendOut("char:   perks <n> | attrs <n> | relic <n> | level <n> | heal");
+        appendOut("char:   perks <n> | attrs <n> | relic <n> | level <n> | heal | godmode [off] | invis [off]");
         appendOut("world:  teleport save <name> | teleport <name> | teleport <x> <y> <z> | setfact <name> <n>");
         appendOut("misc:   call <Class> <method> [args] | sig <Class> <method> | convdump | clear | help");
         appendOut("tip: Up/Down = command history. Bookmark spots: 'teleport save home' then 'teleport home'");
@@ -382,10 +382,11 @@ static void drawQuickTab() {
     ImGui::Separator();
     ImGui::TextDisabled("One-click cheats:");
     if (ImGui::Button("Money +50k")) runLabeled("money 50000", "Money +50k"); ImGui::SameLine();
-    if (ImGui::Button("Heal")) runLabeled("heal", "Healed");
-    ImGui::BeginDisabled();   // Godmode does not work yet (the game's god-mode system isn't honoring it) - hidden until fixed
-    ImGui::Button("Godmode (not working yet)");
-    ImGui::EndDisabled();
+    if (ImGui::Button("Heal")) runLabeled("heal", "Healed"); ImGui::SameLine();
+    if (ImGui::Button("Godmode")) runLabeled("godmode", "Godmode on"); ImGui::SameLine();
+    if (ImGui::Button("Godmode off")) runLabeled("godmode off", "Godmode off");
+    if (ImGui::Button("Invisible")) runLabeled("invis", "Invisible on"); ImGui::SameLine();
+    if (ImGui::Button("Invisible off")) runLabeled("invis off", "Invisible off");
     if (ImGui::Button("Perks +10")) runLabeled("perks 10", "Perks +10"); ImGui::SameLine();
     if (ImGui::Button("Attrs +10")) runLabeled("attrs 10", "Attrs +10"); ImGui::SameLine();
     if (ImGui::Button("Relic +10")) runLabeled("relic 10", "Relic +10"); ImGui::SameLine();

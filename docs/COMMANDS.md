@@ -23,7 +23,8 @@ Item IDs are the same `Items.*` TweakDB names CET uses, so codes you find online
 | `relic <N>` | Add N relic points. |
 | `level <N>` | Set character level. |
 | `heal` | Refill health to full. |
-| `godmode [off]` | Not working yet (see note). |
+| `godmode [off]` | Toggle invulnerability - no damage at all, including fall damage. |
+| `invis [off]` | Toggle invisibility - cameras and enemies can't see you. |
 
 ## World
 | Command | Effect |
@@ -43,9 +44,9 @@ Item IDs are the same `Items.*` TweakDB names CET uses, so codes you find online
 | `clear` / `help` | Clear scrollback / list commands. |
 
 ## Notes & known limits
-- **godmode**: not working yet, disabled in the UI. It registers with the game's god-mode system, but on
-  build 2.3.1 the entity id we can resolve isn't honored by the combat/damage pipeline (you still take
-  damage and can die). Being worked on; tracked for a future update.
+- **godmode / invis**: applied as player status effects (`BaseStatusEffect.Invulnerable` / `Cloaked`) and
+  reapplied on a tick so they survive scene/vehicle transitions. Godmode blocks all damage including falls.
+  Invisibility breaks line-of-sight and camera detection; physically bumping into an enemy still alerts them.
 - **teleport** is blocked by the game during active combat; bookmarks are session-only.
 - **Quest-gated items** (e.g. `Items.mq007_skippy`) won't commit without the relevant quest active.
 - **Deferred / contributions welcome**: real vehicle summon, equip-to-slot, NPC/vehicle spawn.

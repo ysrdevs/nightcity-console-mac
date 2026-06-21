@@ -720,11 +720,44 @@ rpc.exports = {
             }
             log('  no local-player getter resolved on the player system'); return null;
         }
-        // godmode is disabled for now. It registers with the game's god-mode system, but on build 2.3.1 the
-        // entity id we can resolve isn't honored by the combat/damage pipeline (you still take damage and die).
-        // Left as a clear notice until the entity-id resolution is fixed; the UI button is disabled too.
-        function doGodmode(on, forced){
-            log('*** godmode is not working yet on this build and is disabled - tracked for a future update ***');
+        // godmode via the IsInvulnerable STAT (not the god-mode system). The damage pipeline's
+        // InvulnerabilityCheck flags DealNoDamage when GetStatValue(player, IsInvulnerable) > 0. We grant it
+        // with a +1 stat modifier through the StatsSystem (which responds to our entity id, like heal does).
+        // Note: fall damage / scripted kills carry IgnoreImmortalityModes and bypass ALL god mode by design.
+        // Apply/remove a status effect on the player (the proven CET approach for godmode/invisibility/etc).
+        // ApplyStatusEffect(objID: entEntityID, statusEffectID: TweakDBID, ...rest optional - the VM defaults them).
+        function statusApply(on, effectID){
+            const gi=getGI(); if(!gi) return false;
+            const p=authPlayer(gi); if(!p) return false;
+            const geid=resolveAny(['gameObject','gameEntity'],'GetEntityID'); if(!geid) return false;
+            const eid=callFunc(geid.fn, p, geid.retType, []);
+            const ses=getSystemFlexible(gi,'gameStatusEffectSystem','GetStatusEffectSystem'); if(!ses) return false;
+            const e=resolveAny(['gameStatusEffectSystem'], on?'ApplyStatusEffect':'RemoveStatusEffect'); if(!e) return false;
+            try{ callFunc(e.fn, ses, e.retType, [{raw:eid,n:8}, effectID]); return true; }
+            catch(ex){ log('status err: '+ex); return false; }
+        }
+        // Toggle a player status effect, reapplying on a tick (the game strips these on some transitions).
+        const statusToggles={};   // effectID -> { on, timer }
+        function toggleStatus(label, effectID, on){
+            const st=statusToggles[effectID]||(statusToggles[effectID]={on:false,timer:null});
+            st.on=on;
+            const ok=statusApply(on, effectID);
+            if(on){
+                log('*** '+label+' '+(ok?'ON':'failed - StatusEffectSystem not reachable')+' ***');
+                if(ok && !st.timer){ st.timer=setInterval(function(){ if(st.on) statusApply(true, effectID); }, 3000); }
+            } else {
+                if(st.timer){ clearInterval(st.timer); st.timer=null; }
+                log('*** '+label+' '+(ok?'OFF':'off (StatusEffectSystem not reachable)')+' ***');
+            }
+        }
+        function doGodmode(on){ toggleStatus('godmode', 'BaseStatusEffect.Invulnerable', on); }
+        function doInvisible(on){
+            toggleStatus('invisible', 'BaseStatusEffect.Cloaked', on);
+            // Cloaked is only the visual camo; SetInvisible() is what actually breaks enemy detection.
+            try{ const gi=getGI(); const p=authPlayer(gi);
+                const si=resolveAny(['gameObject','gameEntity'],'SetInvisible'); if(si) callFunc(si.fn, p, si.retType, [on?'true':'false']);
+                const uv=resolveAny(['gameObject','gameEntity'],'UpdateVisibility'); if(uv) callFunc(uv.fn, p, uv.retType, []);
+            }catch(e){ log('invis visibility err: '+e); }
         }
         function doLevel(n){
             const dd=getDevData(); if(!dd){ log('level: no PlayerDevelopmentData'); return; }
@@ -820,6 +853,18 @@ rpc.exports = {
             catch(e){ log('AddDevelopmentPoints err: '+e); } }
         // ===== Phase 2 recon: identify the Metal present path (raw libobjc; Frida ObjC bridge is absent) =====
         let mrArmed=false, mrCap=false, _objc=null, _expCache={};
+        let _rectrace=null, _recmiss=0, _rectotal=0;
+        function recTraceToggle(){
+            if(_rectrace){ try{_rectrace.detach();}catch(e){} _rectrace=null; log('rectrace OFF (total='+_rectotal+' lookups, '+_recmiss+' misses)'); return; }
+            _recmiss=0; _rectotal=0;
+            try{
+                _rectrace=Interceptor.attach(getModuleBase().add(0x2b745d0), {
+                    onEnter:function(a){ this.out=a[0]; this.id=a[2]; },
+                    onLeave:function(){ try{ _rectotal++; if(this.out.readPointer().isNull() && _recmiss<300){ _recmiss++; log('RECMISS id=0x'+this.id.and(ptr('0xffffffffff')).toString(16)); } }catch(e){} }
+                });
+                log('rectrace ON (counts recordsByID lookups, logs MISSES; run again to stop)');
+            }catch(e){ log('rectrace attach err '+e); }
+        }
         function resolveExport(name){ if(_expCache[name]!==undefined) return _expCache[name]; let r=null;
             try{ if(typeof Module!=='undefined'){
                 if(typeof Module.findExportByName==='function'){ const p=Module.findExportByName(null,name); if(p&&!p.isNull()) r=p; }
@@ -877,13 +922,16 @@ rpc.exports = {
             const ct=cetTranslate(raw); if(ct){ log('(cet) '+raw+'  ->  '+ct); raw=ct; }
             const t=raw.split(/\s+/);
             if(t[0]==='metalrecon'){ metalRecon(); return; }   // Phase-2 recon: works at menu too
+            if(t[0]==='tweakload'){ try{ var ex=resolveExport('cybermodman_tweakReload'); if(!ex||ex.isNull()){ log('tweakload: cybermodman_tweakReload export NOT FOUND'); return; } new NativeFunction(ex,'void',[])(); log('tweakload: cybermodman_tweakReload() called - check TweakXL.log'); }catch(e){ log('tweakload err '+e); } return; }   // exempt from in-game guard (drives TweakXL apply)
+            if(t[0]==='rectrace'){ recTraceToggle(); return; }   // toggle recordsByID-miss tracer
             if(!player){ log('NOT IN GAME yet: '+line); return; }
             if(t[0]==='give'&&t[1]){ doGive(t[1], Math.max(1,parseInt(t[2]||'1')||1)); return; }
             if(t[0]==='money'&&t[1]){ doGive('Items.money', Math.max(1,parseInt(t[1])||1), true); return; }   // currency: always one bulk add
             if(t[0]==='perks'&&t[1]){ addPoints(Math.max(1,parseInt(t[1])||1),'Primary'); return; }
             if(t[0]==='attrs'&&t[1]){ addPoints(Math.max(1,parseInt(t[1])||1),'Attribute'); return; }
             if(t[0]==='relic'&&t[1]){ addPoints(Math.max(1,parseInt(t[1])||1),'Espionage'); return; }
-            if(t[0]==='godmode'){ doGodmode(); return; }
+            if(t[0]==='godmode'){ doGodmode(t[1]!=='off'); return; }
+            if(t[0]==='invis'||t[0]==='invisible'){ doInvisible(t[1]!=='off'); return; }
             if((t[0]==='removeitem'||t[0]==='remove')&&t[1]){ doRemove(t[1], Math.max(1,parseInt(t[2]||'1')||1)); return; }
             if(t[0]==='heal'){ doHeal(); return; }
             if((t[0]==='setfact'||t[0]==='addfact')&&t[1]){ doSetFact(t[1], parseInt(t[2]||'1')||1); return; }

@@ -10,8 +10,8 @@ A native Apple Silicon in-game console and item browser for Cyberpunk 2077 on ma
 Think Cyber Engine Tweaks, but rebuilt for native macOS/Apple Silicon. NightCity Console brings CET-style commands
 to the native macOS version of Cyberpunk 2077, with an in-game Metal overlay you drive from the keyboard:
 search and spawn from a built-in browser of 7,552 items, pin your favorites, fire one-click cheats
-(money, heal, perks/attributes/relic, level), teleport with bookmarks, run CET-style commands,
-and debug REDengine calls.
+(money, heal, godmode, invisibility, perks/attributes/relic, level), teleport with bookmarks,
+run CET-style commands, and debug REDengine calls.
 
 > Renamed from CET Mac to NightCity Console for Mac to avoid confusion with Cyber Engine Tweaks. This is an
 > independent macOS-native project and is not affiliated with CET, WolvenKit, REDmod, CD PROJEKT RED, or
@@ -66,8 +66,8 @@ Cmd+2 / Cmd+3**:
 - **Console** (Cmd+1) - type commands directly. Up/Down for history, Cmd+V to paste, `help` for the list.
 - **Items** (Cmd+2) - type to search 7,552 items, press **Enter** to spawn the top match, **Cmd+P** to pin
   it to your favorites. Set the quantity first if you want a stack.
-- **Quick** (Cmd+3) - one-click cheats (money, heal, perks/attributes/relic, level), your pinned
-  favorites, and teleport bookmarks.
+- **Quick** (Cmd+3) - one-click cheats (money, heal, godmode, invisibility, perks/attributes/relic,
+  level), your pinned favorites, and teleport bookmarks.
 
 Every action shows a confirmation at the bottom so you can see exactly what was added.
 
@@ -93,6 +93,9 @@ Game.AddToInventory("Items.MaxDOSE", 5)    # CET-style line, also works
 - **Pinned favorites** - pin items (Cmd+P) and they persist across restarts in a Quick tab, so your go-to
   gear is one keypress away.
 - **One-click cheats** - money, full heal, perks, attributes, relic points, set character level.
+- **Godmode** - true no-damage invulnerability, including fall damage. Auto-reapplies so it survives
+  scene and vehicle transitions.
+- **Invisibility** - cameras and enemies can't see you (line-of-sight and detection break).
 - **Teleport** with saved position bookmarks (save a spot, return to it later).
 - **Action confirmations** - every command reports what it just did.
 - Quest facts, and a generic `call <Class> <Method>` bridge that can invoke any observed RTTI method.
