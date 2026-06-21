@@ -45,6 +45,7 @@ if ! codesign -d --entitlements :- "$BIN" 2>/dev/null | grep -q allow-jit; then
 <key>com.apple.security.cs.disable-library-validation</key><true/>
 </dict></plist>
 PLIST
+  find "$GAME/Cyberpunk2077.app" -name '._*' -delete 2>/dev/null   # exFAT AppleDouble sidecars break codesign
   codesign -f -s - --entitlements "$ENTS" "$BIN"
   rm -f "$ENTS"
 fi

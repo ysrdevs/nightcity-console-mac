@@ -144,6 +144,9 @@ final class Model: ObservableObject {
         let plistPath = NSTemporaryDirectory() + "nightcity-entitlements.plist"
         do { try ents.write(toFile: plistPath, atomically: true, encoding: .utf8) }
         catch { status = "Could not prepare entitlements: \(error.localizedDescription)"; return false }
+        // Non-APFS drives (exFAT game libraries) create "._" AppleDouble sidecars that codesign treats as
+        // unsigned nested code and refuses to sign. Strip them from the .app bundle before re-signing.
+        stripAppleDoubles("\(gamePath)/Cyberpunk2077.app")
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
         p.arguments = ["-f", "-s", "-", "--entitlements", plistPath, binaryPath]
@@ -167,6 +170,14 @@ final class Model: ObservableObject {
         do { try p.run(); p.waitUntilExit() } catch { return false }
         let s = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         return s.contains("allow-jit")
+    }
+
+    // Delete "._" AppleDouble sidecar files in a path (created on exFAT/non-APFS volumes; they break codesign).
+    func stripAppleDoubles(_ path: String) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/find")
+        p.arguments = [path, "-name", "._*", "-delete"]
+        try? p.run(); p.waitUntilExit()
     }
 
     func uninstall() {
