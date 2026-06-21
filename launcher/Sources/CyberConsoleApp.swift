@@ -20,8 +20,22 @@ final class Model: ObservableObject {
     @Published var gameVersion: String? = nil
     @Published var updateText: String? = nil      // set when a newer release is found on GitHub
     @Published var updateURL: String? = nil
+    @Published var needsDiskAccess: Bool = false  // set when an op fails because the game is on a drive we can't access
 
     private let defaults = UserDefaults.standard
+
+    // Game libraries on a second/external drive live under /Volumes; macOS blocks writing there without
+    // Full Disk Access, which makes copy/codesign fail with "Operation not permitted".
+    var gameOnExternalDrive: Bool { gamePath.hasPrefix("/Volumes/") }
+    func looksLikePermissionError(_ s: String) -> Bool {
+        let l = s.lowercased()
+        return l.contains("not permitted") || l.contains("permission denied") || l.contains("operation not permitted")
+    }
+    func openFullDiskAccess() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+            NSWorkspace.shared.open(url)
+        }
+    }
 
     init() {
         gamePath = defaults.string(forKey: "gamePath") ?? Const.defaultGame
@@ -103,6 +117,7 @@ final class Model: ObservableObject {
     func install() {
         guard gameFound else { status = "Game not found."; return }
         guard let res = Bundle.main.resourceURL else { status = "Bundle resources missing."; return }
+        needsDiskAccess = false
         let fm = FileManager.default
         do {
             try fm.createDirectory(atPath: red4Dir, withIntermediateDirectories: true)
@@ -118,7 +133,13 @@ final class Model: ObservableObject {
             status = "Installed - click Play."
             refresh()
         } catch {
-            status = "Install failed: \(error.localizedDescription)"
+            let msg = error.localizedDescription
+            if looksLikePermissionError(msg) || gameOnExternalDrive {
+                needsDiskAccess = true
+                status = "Can't write to your game folder. It's on a second/external drive, which macOS blocks until you grant Full Disk Access. Open Privacy settings below, enable NightCity Console, then click Install again."
+            } else {
+                status = "Install failed: \(msg)"
+            }
         }
     }
 
@@ -155,7 +176,12 @@ final class Model: ObservableObject {
         catch { status = "Could not run codesign: \(error.localizedDescription)"; return false }
         guard p.terminationStatus == 0 else {
             let msg = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            status = "Re-signing the game failed: \(msg.trimmingCharacters(in: .whitespacesAndNewlines))"
+            if looksLikePermissionError(msg) || gameOnExternalDrive {
+                needsDiskAccess = true
+                status = "Can't re-sign your game. It's on a second/external drive, which macOS blocks until you grant Full Disk Access. Open Privacy settings below, enable NightCity Console, then click Install again."
+            } else {
+                status = "Re-signing the game failed: \(msg.trimmingCharacters(in: .whitespacesAndNewlines))"
+            }
             return false
         }
         return true
@@ -292,6 +318,14 @@ struct ContentView: View {
                 Spacer()
                 Button("Uninstall NightCity Console") { m.uninstall() }
                     .disabled(!m.installed)
+            }
+
+            if m.needsDiskAccess {
+                HStack(spacing: 10) {
+                    Button("Open Privacy Settings") { m.openFullDiskAccess() }
+                    Text("Enable NightCity Console under Full Disk Access, then click Install again.")
+                        .font(.caption).foregroundColor(.orange)
+                }
             }
 
             Spacer()
