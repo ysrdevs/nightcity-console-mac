@@ -27,6 +27,9 @@
 #include <dispatch/dispatch.h>
 #include <dlfcn.h>
 #include <cctype>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <algorithm>
 #include "imgui.h"
 #include "backends/imgui_impl_metal.h"
 
@@ -58,6 +61,9 @@ static std::vector<std::string> g_history;   // submitted commands (oldest first
 static int g_historyPos = -1;                // -1 = current edit line; else index into g_history
 static const char* OUT_PATH = "/tmp/cp2077_out.txt";
 static const char* CMD_PATH = "/tmp/cp2077_cmd.txt";
+#include <ctime>
+// set by the `reload` verb + the once/sec mtime poll; consumed by the tab engine below.
+static std::atomic<bool> g_tabsDirty{true};   // true forces a rebuild on next frame
 
 // ---- bisection kill-switch (NCC_MODE env): full = hook + render (default),
 // passthru = hook present but never render, off = don't swizzle present at all.
@@ -134,6 +140,7 @@ static void appendOut(const char* s) { FILE* f = fopen(OUT_PATH, "a"); if (f) { 
 // Handle a submitted line. `clear`/`help` are local to the overlay; everything else goes to Frida.
 static void handleSubmit(const char* cmd) {
     if (strcmp(cmd, "clear") == 0) { FILE* f = fopen(OUT_PATH, "w"); if (f) fclose(f); g_lines.clear(); return; }
+    if (strcmp(cmd, "reload") == 0) { g_tabsDirty = true; appendOut("> reload"); appendOut("reloading tabs/ ..."); refreshOut(); return; }
     appendOut((std::string("> ") + cmd).c_str());
     if (strcmp(cmd, "help") == 0) {
         appendOut("items:  give <Items.X> <qty> | removeitem <Items.X> <qty> | money <n>");
@@ -718,37 +725,420 @@ static void drawCreatorTab() {
       if (!g_crStatus.empty()) { ImGui::Separator(); ImGui::TextWrapped("%s", g_crStatus.c_str()); } }
 }
 
+// ============================================================================
+// MODS TAB - loose .archive mod manager for <GAME>/archive/Mac/mod
+//   The runtime (red4ext_hooks.js installModFolderLoader) registers a Mod-scope(4)
+//   ArchiveSet for archive/mac/mod at ResourceDepot::InitializeArchives and loads
+//   every *.archive in it via the engine's own Append+LoadArchives. This tab is the
+//   front end: list / enable / disable (rename .archive <-> .archive.off) / open
+//   the folder. Archives load at startup, so changes apply on the next game RESTART.
+// ============================================================================
+struct ModEntry { std::string display; std::string filename; bool enabled; long sizeKB; };
+static std::vector<ModEntry> g_mods;
+static std::string g_modsStatus;
+static bool g_modsScanned = false;
+
+static std::string modsDir() {
+    std::string g = crGameRoot();
+    return g.empty() ? "" : g + "/archive/Mac/mod";
+}
+static bool strEndsWith(const std::string& s, const std::string& suf) {
+    return s.size() >= suf.size() && s.compare(s.size() - suf.size(), suf.size(), suf) == 0;
+}
+// Scan the mod dir for *.archive (enabled) and *.archive.off (disabled). Cheap
+// (names + stat only), so it runs synchronously on the render thread.
+static void modsScan() {
+    std::vector<ModEntry> found;
+    std::string dir = modsDir();
+    DIR* d = dir.empty() ? nullptr : opendir(dir.c_str());
+    if (d) {
+        struct dirent* e;
+        while ((e = readdir(d)) != nullptr) {
+            std::string n = e->d_name;
+            if (n.empty() || n[0] == '.') continue;                 // skip dotfiles / . / ..
+            bool disabled = strEndsWith(n, ".archive.off");
+            bool enabled  = !disabled && strEndsWith(n, ".archive");
+            if (!enabled && !disabled) continue;
+            ModEntry m; m.filename = n; m.enabled = enabled;
+            m.display = n.substr(0, n.size() - (disabled ? 12 : 8)); // strip .archive.off / .archive
+            struct stat st; m.sizeKB = (stat((dir + "/" + n).c_str(), &st) == 0) ? (long)(st.st_size / 1024) : 0;
+            found.push_back(m);
+        }
+        closedir(d);
+    }
+    std::sort(found.begin(), found.end(), [](const ModEntry& a, const ModEntry& b) { return a.display < b.display; });
+    g_mods = found; g_modsScanned = true;
+}
+// Toggle = rename .archive <-> .archive.off. By value: modsScan() below reassigns g_mods.
+static void modsToggle(ModEntry m) {
+    std::string dir = modsDir();
+    std::string from = dir + "/" + m.filename;
+    std::string to   = dir + "/" + m.display + (m.enabled ? ".archive.off" : ".archive");
+    if (rename(from.c_str(), to.c_str()) == 0)
+        g_modsStatus = std::string(m.enabled ? "Disabled \"" : "Enabled \"") + m.display + "\"  -  restart the game to apply.";
+    else
+        g_modsStatus = "FAILED to toggle \"" + m.display + "\" (rename error).";
+    modsScan();
+}
+static void modsOpenFolder() {
+    std::string dir = modsDir();
+    if (dir.empty()) return;
+    mkdir(dir.c_str(), 0755);                                        // ensure it exists
+    @autoreleasepool {
+        [[NSWorkspace sharedWorkspace] openURL:[NSURL fileURLWithPath:[NSString stringWithUTF8String:dir.c_str()] isDirectory:YES]];
+    }
+}
+static void drawModsTab() {
+    ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), "NIGHT CITY CONSOLE  -  Loose Mod Manager");
+    ImGui::TextDisabled("Drop any .archive into the folder, Enable it, restart. Loads like the Windows mod/ folder.");
+    std::string dir = modsDir();
+    if (dir.empty()) { ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "Could not locate the game folder."); return; }
+    ImGui::TextWrapped("Folder: %s", dir.c_str());
+    ImGui::Separator();
+    if (!g_modsScanned) modsScan();
+    if (ImGui::Button("Refresh")) modsScan();
+    ImGui::SameLine();
+    if (ImGui::Button("Open folder in Finder")) modsOpenFolder();
+    ImGui::SameLine();
+    if (ImGui::Button("Create folder")) { mkdir(dir.c_str(), 0755); modsScan(); g_modsStatus = "Mod folder ready."; }
+    ImGui::Separator();
+    int enabledCount = 0; for (auto& m : g_mods) if (m.enabled) enabledCount++;
+    ImGui::Text("%d mod%s found, %d enabled", (int)g_mods.size(), g_mods.size() == 1 ? "" : "s", enabledCount);
+    int toggleIdx = -1;
+    if (g_mods.empty()) {
+        ImGui::Spacing();
+        ImGui::TextDisabled("No mods yet. Click \"Open folder in Finder\", drop in .archive files, then Refresh.");
+    } else {
+        ImGui::BeginChild("modlist", ImVec2(0, 300), true);
+        for (int i = 0; i < (int)g_mods.size(); ++i) {
+            const ModEntry& m = g_mods[i];
+            ImGui::PushID(i);
+            if (m.enabled) ImGui::TextColored(ImVec4(0.30f, 0.90f, 0.40f, 1.0f), "[ON ]");
+            else           ImGui::TextColored(ImVec4(0.60f, 0.60f, 0.60f, 1.0f), "[off]");
+            ImGui::SameLine(); ImGui::Text("%s", m.display.c_str());
+            ImGui::SameLine(); ImGui::TextDisabled("(%ld KB)", m.sizeKB);
+            ImGui::SameLine(ImGui::GetWindowWidth() - 100);
+            if (ImGui::Button(m.enabled ? "Disable" : "Enable", ImVec2(84, 0))) toggleIdx = i;
+            ImGui::PopID();
+        }
+        ImGui::EndChild();
+    }
+    if (toggleIdx >= 0) modsToggle(g_mods[toggleIdx]);
+    if (!g_modsStatus.empty()) { ImGui::Separator(); ImGui::TextWrapped("%s", g_modsStatus.c_str()); }
+}
+
+// ============================================================================
+// DECLARATIVE TAB ENGINE
+//   Tabs are JSON files describing widgets. A button's "cmd" is run through the
+//   EXISTING runLabeled(subst(cmd), toast) -> submitCommand pipeline, so every
+//   verb the console already understands keeps working unchanged. New "features"
+//   become a JSON file dropped in tabs/ (ships) or ~/Library/Application
+//   Support/NightCityConsole/tabs/ (user override), hot-reloaded once/sec.
+// ============================================================================
+enum WKind {
+    WK_BUTTON = 0, WK_CHECKBOX, WK_SLIDER_INT, WK_INPUT_TEXT,
+    WK_SEPARATOR, WK_SAME_LINE, WK_TEXT
+};
+struct Widget {
+    WKind kind = WK_TEXT;
+    std::string label;     // visible label / text
+    std::string cmd;       // command template for buttons (button only); {field} placeholders substituted
+    std::string field;     // state key for checkbox / slider_int / input_text
+    std::string cmdOn;     // checkbox: command when toggled on
+    std::string cmdOff;    // checkbox: command when toggled off
+    std::string toast;     // footer confirmation label (defaults to label)
+    int imin = 0, imax = 100;  // slider_int bounds
+    int idef = 0;          // slider_int / default int
+    std::string sdef;      // input_text default
+};
+struct Tab {
+    std::string id;        // stable id (filename stem unless overridden); app-support overrides by id
+    std::string title;     // tab caption
+    bool builtin = false;  // true -> nativeDraw renders it
+    void (*nativeDraw)() = nullptr;   // builtin draw fn (Console handled specially)
+    std::string nativeKind;           // "console" | "items" | "quick" | "creator" | "" (data tab)
+    std::vector<Widget> widgets;       // data-tab widgets
+    std::string sourcePath;            // file this tab came from (for mtime polling)
+};
+static std::vector<Tab> g_tabs;
+static std::unordered_map<std::string, std::string> g_fieldStr;   // input_text state
+static std::unordered_map<std::string, int>         g_fieldInt;   // checkbox(0/1) + slider_int state
+static std::mutex g_tabsMtx;
+// g_tabsDirty is declared up top (near the command-channel globals) so handleSubmit's
+// `reload` verb can set it before the tab engine is defined.
+static int g_numTabs = 0;
+
+// Substitute {field} placeholders in a command template with current tab state.
+// {field} pulls from g_fieldStr first, then g_fieldInt (rendered as integer).
+static std::string subst(const std::string& tmpl) {
+    std::string out; out.reserve(tmpl.size());
+    for (size_t i = 0; i < tmpl.size(); ) {
+        if (tmpl[i] == '{') {
+            size_t j = tmpl.find('}', i + 1);
+            if (j != std::string::npos) {
+                std::string key = tmpl.substr(i + 1, j - i - 1);
+                auto si = g_fieldStr.find(key);
+                if (si != g_fieldStr.end()) out += si->second;
+                else { auto ii = g_fieldInt.find(key); if (ii != g_fieldInt.end()) out += std::to_string(ii->second); }
+                i = j + 1; continue;
+            }
+        }
+        out += tmpl[i++];
+    }
+    return out;
+}
+
+// Forward decls for the builtin native tab bodies (defined below / above).
+static void drawConsoleInner(int req, int myTab);
+
+// Render a declarative data tab: walk its widgets to ImGui. Buttons route every
+// command through the existing runLabeled(subst(cmd), toast) pipeline.
+static void drawDataTab(const Tab& t) {
+    int wid = 0;
+    for (const Widget& w : t.widgets) {
+        ImGui::PushID(wid++);
+        switch (w.kind) {
+            case WK_TEXT:
+                ImGui::TextWrapped("%s", w.label.c_str());
+                break;
+            case WK_SEPARATOR:
+                ImGui::Separator();
+                break;
+            case WK_SAME_LINE:
+                ImGui::SameLine();
+                break;
+            case WK_BUTTON:
+                if (ImGui::Button(w.label.c_str())) {
+                    std::string toast = w.toast.empty() ? w.label : w.toast;
+                    runLabeled(subst(w.cmd), toast);
+                }
+                break;
+            case WK_CHECKBOX: {
+                int& st = g_fieldInt[w.field];
+                bool b = st != 0;
+                if (ImGui::Checkbox(w.label.c_str(), &b)) {
+                    st = b ? 1 : 0;
+                    const std::string& c = b ? w.cmdOn : w.cmdOff;
+                    if (!c.empty()) {
+                        std::string toast = (w.toast.empty() ? w.label : w.toast) + (b ? " on" : " off");
+                        runLabeled(subst(c), toast);
+                    }
+                }
+                break;
+            }
+            case WK_SLIDER_INT: {
+                auto it = g_fieldInt.find(w.field);
+                if (it == g_fieldInt.end()) { g_fieldInt[w.field] = w.idef; it = g_fieldInt.find(w.field); }
+                int v = it->second;
+                if (ImGui::SliderInt(w.label.c_str(), &v, w.imin, w.imax)) g_fieldInt[w.field] = v;
+                break;
+            }
+            case WK_INPUT_TEXT: {
+                auto it = g_fieldStr.find(w.field);
+                if (it == g_fieldStr.end()) { g_fieldStr[w.field] = w.sdef; it = g_fieldStr.find(w.field); }
+                char buf[512];
+                snprintf(buf, sizeof(buf), "%s", it->second.c_str());
+                if (ImGui::InputText(w.label.c_str(), buf, sizeof(buf))) g_fieldStr[w.field] = buf;
+                break;
+            }
+        }
+        ImGui::PopID();
+    }
+}
+
+// ---- tab loader (NSJSONSerialization) + hot reload ----------------------
+// app-support overrides ship-dropped defaults by id; ASCII filename = order.
+static std::string tabsAppSupportDir() {
+    NSString* dir = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/NightCityConsole/tabs"];
+    return std::string([dir UTF8String]);
+}
+static std::string tabsShipDir() { return overlayDir() + "/tabs"; }
+
+static WKind wkindFromString(const std::string& s) {
+    if (s == "button")     return WK_BUTTON;
+    if (s == "checkbox")   return WK_CHECKBOX;
+    if (s == "slider_int") return WK_SLIDER_INT;
+    if (s == "input_text") return WK_INPUT_TEXT;
+    if (s == "separator")  return WK_SEPARATOR;
+    if (s == "same_line")  return WK_SAME_LINE;
+    return WK_TEXT;
+}
+static std::string nsStr(NSDictionary* d, const char* key) {
+    id v = d[[NSString stringWithUTF8String:key]];
+    return [v isKindOfClass:[NSString class]] ? std::string([(NSString*)v UTF8String]) : std::string();
+}
+static int nsInt(NSDictionary* d, const char* key, int dflt) {
+    id v = d[[NSString stringWithUTF8String:key]];
+    return [v isKindOfClass:[NSNumber class]] ? [(NSNumber*)v intValue] : dflt;
+}
+
+// Parse one tabs/*.json file into a Tab (data tab only). Returns false on error.
+static bool parseTabFile(const std::string& path, const std::string& stem, Tab& out) {
+    NSString* p = [NSString stringWithUTF8String:path.c_str()];
+    NSData* data = [NSData dataWithContentsOfFile:p];
+    if (!data) return false;
+    NSError* err = nil;
+    id root = [NSJSONSerialization JSONObjectWithData:data options:0 error:&err];
+    if (!root || ![root isKindOfClass:[NSDictionary class]]) {
+        olog("tab parse failed: %s (%s)", path.c_str(), err ? [[err localizedDescription] UTF8String] : "not an object");
+        return false;
+    }
+    NSDictionary* obj = (NSDictionary*)root;
+    out = Tab{};
+    out.id = nsStr(obj, "id"); if (out.id.empty()) out.id = stem;
+    out.title = nsStr(obj, "title"); if (out.title.empty()) out.title = out.id;
+    out.builtin = false;
+    out.sourcePath = path;
+    id widgets = obj[@"widgets"];
+    if ([widgets isKindOfClass:[NSArray class]]) {
+        for (id wi in (NSArray*)widgets) {
+            if (![wi isKindOfClass:[NSDictionary class]]) continue;
+            NSDictionary* wd = (NSDictionary*)wi;
+            Widget w;
+            w.kind  = wkindFromString(nsStr(wd, "type"));
+            w.label = nsStr(wd, "label");
+            w.cmd   = nsStr(wd, "cmd");
+            w.field = nsStr(wd, "field");
+            w.cmdOn = nsStr(wd, "cmd_on");
+            w.cmdOff= nsStr(wd, "cmd_off");
+            w.toast = nsStr(wd, "toast");
+            w.imin  = nsInt(wd, "min", 0);
+            w.imax  = nsInt(wd, "max", 100);
+            w.idef  = nsInt(wd, "default", 0);
+            w.sdef  = nsStr(wd, "default");
+            out.widgets.push_back(w);
+        }
+    }
+    return true;
+}
+
+// Scan a dir for *.json, return (stem -> path), ASCII-sorted by filename.
+static std::vector<std::pair<std::string,std::string>> scanTabDir(const std::string& dir) {
+    std::vector<std::pair<std::string,std::string>> out;
+    NSFileManager* fm = [NSFileManager defaultManager];
+    NSString* d = [NSString stringWithUTF8String:dir.c_str()];
+    NSArray* files = [fm contentsOfDirectoryAtPath:d error:nil];
+    if (!files) return out;
+    NSArray* sorted = [files sortedArrayUsingSelector:@selector(compare:)];   // ASCII order
+    for (NSString* f in sorted) {
+        if (![[f pathExtension] isEqualToString:@"json"]) continue;
+        std::string stem = std::string([[f stringByDeletingPathExtension] UTF8String]);
+        std::string full = std::string([[d stringByAppendingPathComponent:f] UTF8String]);
+        out.push_back({stem, full});
+    }
+    return out;
+}
+
+// Load all data tabs from ship dir + app-support dir (app-support overrides by id).
+// Returns them in filename(ASCII) order, app-support entries replacing same-id ship entries in place.
+static std::vector<Tab> loadTabsFromDir() {
+    std::vector<Tab> result;
+    auto ship = scanTabDir(tabsShipDir());
+    auto user = scanTabDir(tabsAppSupportDir());
+    // index user files by stem for override-by-id
+    std::unordered_map<std::string,std::string> userByStem;
+    for (auto& u : user) userByStem[u.first] = u.second;
+    std::set<std::string> consumedUser;
+    for (auto& s : ship) {
+        Tab t;
+        std::string path = s.second;
+        std::string stem = s.first;
+        auto uit = userByStem.find(stem);
+        if (uit != userByStem.end()) { path = uit->second; consumedUser.insert(stem); }   // override
+        if (parseTabFile(path, stem, t)) result.push_back(t);
+    }
+    // user-only tabs (no ship counterpart) appended in their ASCII order
+    for (auto& u : user) {
+        if (consumedUser.count(u.first)) continue;
+        Tab t;
+        if (parseTabFile(u.second, u.first, t)) result.push_back(t);
+    }
+    return result;
+}
+
+// Newest mtime across both tab dirs (and the dirs themselves, to catch add/remove).
+static time_t newestTabsMtime() {
+    time_t newest = 0;
+    NSFileManager* fm = [NSFileManager defaultManager];
+    const std::string dirs[2] = { tabsShipDir(), tabsAppSupportDir() };
+    for (const std::string& dir : dirs) {
+        NSString* d = [NSString stringWithUTF8String:dir.c_str()];
+        NSDictionary* dattr = [fm attributesOfItemAtPath:d error:nil];
+        if (dattr) { NSDate* m = dattr[NSFileModificationDate]; if (m) { time_t t = (time_t)[m timeIntervalSince1970]; if (t > newest) newest = t; } }
+        NSArray* files = [fm contentsOfDirectoryAtPath:d error:nil];
+        for (NSString* f in files) {
+            if (![[f pathExtension] isEqualToString:@"json"]) continue;
+            NSString* full = [d stringByAppendingPathComponent:f];
+            NSDictionary* attr = [fm attributesOfItemAtPath:full error:nil];
+            if (!attr) continue;
+            NSDate* m = attr[NSFileModificationDate];
+            if (m) { time_t t = (time_t)[m timeIntervalSince1970]; if (t > newest) newest = t; }
+        }
+    }
+    return newest;
+}
+
+// Rebuild g_tabs: the four builtins first (in fixed order), then every data tab.
+static void rebuildTabs() {
+    std::vector<Tab> dataTabs = loadTabsFromDir();
+    std::lock_guard<std::mutex> lk(g_tabsMtx);
+    g_tabs.clear();
+    Tab console; console.id = "console"; console.title = "Console"; console.builtin = true; console.nativeKind = "console";
+    Tab items;   items.id   = "items";   items.title   = "Items";   items.builtin = true; items.nativeKind = "items";   items.nativeDraw = drawItemsTab;
+    Tab quick;   quick.id   = "quick";   quick.title   = "Quick";   quick.builtin = true; quick.nativeKind = "quick";   quick.nativeDraw = drawQuickTab;
+    Tab creator; creator.id = "creator"; creator.title = "Creator"; creator.builtin = true; creator.nativeKind = "creator"; creator.nativeDraw = drawCreatorTab;
+    Tab mods;    mods.id    = "mods";    mods.title    = "Mods";    mods.builtin    = true; mods.nativeKind    = "mods";    mods.nativeDraw    = drawModsTab;
+    g_tabs.push_back(console);
+    g_tabs.push_back(items);
+    g_tabs.push_back(quick);
+    g_tabs.push_back(creator);
+    g_tabs.push_back(mods);
+    for (auto& dt : dataTabs) g_tabs.push_back(dt);
+    g_numTabs = (int)g_tabs.size();
+    olog("tabs rebuilt: %d total (%zu data)", g_numTabs, dataTabs.size());
+}
+
+// Console tab body, factored out so the tab loop can call it for the builtin Console tab.
+static void drawConsoleInner(int req, int myTab) {
+    ImGui::BeginChild("scroll", ImVec2(0, -ImGui::GetFrameHeightWithSpacing()), false, ImGuiWindowFlags_HorizontalScrollbar);
+    for (auto& l : g_lines) ImGui::TextUnformatted(l.c_str());
+    if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f) ImGui::SetScrollHereY(1.0f);
+    ImGui::EndChild();
+    ImGui::Separator();
+    ImGui::SetNextItemWidth(-1.0f);
+    if (g_focusInput.exchange(false)) ImGui::SetKeyboardFocusHere();
+    ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackHistory;
+    if (ImGui::InputText("##cmd", g_input, sizeof(g_input), flags, inputCallback)) {
+        if (g_input[0]) {
+            if (g_history.empty() || g_history.back() != g_input) g_history.push_back(g_input);
+            g_historyPos = -1;
+            handleSubmit(g_input);
+            g_input[0] = 0;
+        }
+        ImGui::SetKeyboardFocusHere(-1);
+    }
+}
+
 static void drawConsole() {
+    if (g_tabsDirty.exchange(false)) rebuildTabs();
     ImGui::SetNextWindowSize(ImVec2(860, 480), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowPos(ImVec2(48, 48), ImGuiCond_FirstUseEver);
     ImGui::Begin("NightCity Console  ( ` or F1 to toggle )");
-    ImGui::TextDisabled("Cmd+1 Console    Cmd+2 Items    Cmd+3 Quick");
+    ImGui::TextDisabled("Cmd+1..9 switch tabs   (`reload` re-reads tabs/)");
     int req = -1;
     if (g_tabReq.exchange(false)) req = g_activeTab.load();   // a keyboard tab-switch this frame
+    std::lock_guard<std::mutex> lk(g_tabsMtx);
     if (ImGui::BeginTabBar("cetmac_tabs")) {
-        if (ImGui::BeginTabItem("Console", nullptr, req == 0 ? ImGuiTabItemFlags_SetSelected : 0)) {
-            ImGui::BeginChild("scroll", ImVec2(0, -ImGui::GetFrameHeightWithSpacing()), false, ImGuiWindowFlags_HorizontalScrollbar);
-            for (auto& l : g_lines) ImGui::TextUnformatted(l.c_str());
-            if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f) ImGui::SetScrollHereY(1.0f);
-            ImGui::EndChild();
-            ImGui::Separator();
-            ImGui::SetNextItemWidth(-1.0f);
-            if (g_focusInput.exchange(false)) ImGui::SetKeyboardFocusHere();
-            ImGuiInputTextFlags flags = ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackHistory;
-            if (ImGui::InputText("##cmd", g_input, sizeof(g_input), flags, inputCallback)) {
-                if (g_input[0]) {
-                    if (g_history.empty() || g_history.back() != g_input) g_history.push_back(g_input);
-                    g_historyPos = -1;
-                    handleSubmit(g_input);
-                    g_input[0] = 0;
-                }
-                ImGui::SetKeyboardFocusHere(-1);
+        for (int i = 0; i < (int)g_tabs.size(); ++i) {
+            const Tab& t = g_tabs[i];
+            ImGuiTabItemFlags tf = (req == i) ? ImGuiTabItemFlags_SetSelected : 0;
+            if (ImGui::BeginTabItem(t.title.c_str(), nullptr, tf)) {
+                if (t.builtin && t.nativeKind == "console") drawConsoleInner(req, i);
+                else if (t.builtin && t.nativeDraw)         t.nativeDraw();
+                else                                        drawDataTab(t);
+                ImGui::EndTabItem();
             }
-            ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("Items", nullptr, req == 1 ? ImGuiTabItemFlags_SetSelected : 0)) { drawItemsTab(); ImGui::EndTabItem(); }
-        if (ImGui::BeginTabItem("Quick", nullptr, req == 2 ? ImGuiTabItemFlags_SetSelected : 0)) { drawQuickTab(); ImGui::EndTabItem(); }
-        if (ImGui::BeginTabItem("Creator", nullptr, req == 3 ? ImGuiTabItemFlags_SetSelected : 0)) { drawCreatorTab(); ImGui::EndTabItem(); }
         ImGui::EndTabBar();
     }
     if (!g_lastAction.empty()) {
@@ -774,6 +1164,19 @@ static void renderOverlay(id<MTLCommandBuffer> cb, id<CAMetalDrawable> drawable)
     if (!g_imguiInit) initImGui(dev);
     g_frame++;
     if ((g_frame % 60) == 0) refreshOut();
+
+    // Hot-reload tabs: poll the newest tabs/ mtime ~once/sec; on change, mark dirty.
+    // drawConsole() consumes g_tabsDirty and calls rebuildTabs() under g_tabsMtx.
+    {
+        static double s_lastPoll = 0.0;
+        static time_t s_lastMtime = 0;
+        double now = CACurrentMediaTime();
+        if (now - s_lastPoll > 1.0) {
+            s_lastPoll = now;
+            time_t m = newestTabsMtime();
+            if (m != s_lastMtime) { s_lastMtime = m; g_tabsDirty = true; }
+        }
+    }
 
     MTLRenderPassDescriptor* rpd = [MTLRenderPassDescriptor renderPassDescriptor];
     rpd.colorAttachments[0].texture = tex;
@@ -843,15 +1246,19 @@ static void my_sendEvent(id self, SEL _cmd, NSEvent* ev) {
                 if (now) { g_focusInput = true; g_recenterMouse = true; NSWindow* w = ev.window; if (w) [w setAcceptsMouseMovedEvents:YES]; }
                 return;  // swallow the toggle key
             }
-            // Cmd+1 / Cmd+2 / Cmd+3 switch tabs (the game captures the mouse, so tabs are keyboard-driven)
+            // Cmd+1 .. Cmd+9 switch tabs (the game captures the mouse, so tabs are keyboard-driven).
+            // mac virtual keycodes for the digit-row 1..9 (not contiguous: 5/6 and 7/8 are swapped).
             if (g_show.load() && (ev.modifierFlags & NSEventModifierFlagCommand)) {
-                int tab = (kc == 18) ? 0 : (kc == 19) ? 1 : (kc == 20) ? 2 : -1;
-                if (tab >= 0) {
+                static const unsigned short kNum[9] = {18, 19, 20, 21, 23, 22, 26, 28, 25};
+                int tab = -1;
+                for (int d = 0; d < 9; ++d) if (kc == kNum[d]) { tab = d; break; }
+                if (tab >= 0 && tab < g_numTabs) {
                     g_activeTab = tab; g_tabReq = true;
-                    if (tab == 0) g_focusInput = true;
-                    if (tab == 1) g_itemsTabEntered = true;
+                    if (tab == 0) g_focusInput = true;        // Console tab -> focus the input line
+                    if (tab == 1) g_itemsTabEntered = true;   // Items tab -> focus its search box
                     return;  // swallow
                 }
+                if (tab >= 0) return;  // a digit we recognize but no such tab: still swallow
                 if (kc == 35) { g_pinTopReq = true; return; }   // Cmd+P pins the current top search result
                 if (kc == 5)  { g_catFilter = (g_catFilter.load() + 1) % g_numCategories; g_catReq = true; return; }  // Cmd+G cycles item category
             }

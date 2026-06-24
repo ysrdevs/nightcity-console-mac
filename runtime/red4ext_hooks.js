@@ -1203,4 +1203,376 @@ function cmnInstall(){
 }
 try { cmnLog('=== cybermodman custom-names init ==='); cmnLoad(); cmnInstall(); } catch (e) { try { console.log('[CMN] init err '+e); } catch (_) {} }
 
+// ============================================================================
+// TASK 2 -- installModFolderLoader: register a Mod-scope(4) ArchiveSet for
+//   <gamedir>/archive/Mac/mod into the live ResourceDepot at InitializeArchives
+//   time, so loose .archive mods get scanned+loaded by the engine's own path.
+//
+// SAFETY GATE (U4): defaults to DUMP-ONLY. On first run it ONLY raw-reads the
+//   depot groups DynArray @depot+0x10 and the first ArchiveSet's bytes
+//   [0x00..0x38] and LOGS them to /tmp/cp2077_moddir.log. This PROVES the
+//   struct layout (group stride 0x38, basePath@0x08, scope@0x30 [Mod=4]) BEFORE
+//   we ever construct/append anything. Flip CP2077_MODDIR_WRITE=true ONLY after
+//   the dump confirms the offsets live.
+//
+// Offset truth (/Users/ysr/cp2077/_ghidra/offsets.json, VERIFIED):
+//   InitializeArchives outer = base+0x3ed9578  (hook onLeave of the OUTER, not
+//                                                the inner worker 0x3ed96b0)
+//   ArchiveSet::Append       = base+0x3edd568
+//   per-set enumerator       = base+0x3eda684
+//   CString(const char*)ctor = base+0x2cdb8
+//   pool CString alloc       = base+0x2c904   (mirror cmnReserve/cmnPutStr)
+//   ResourceDepot.groups @0x10 (DynArray {ptr,size,cap}); ArchiveSet stride
+//   0x38; ArchiveSet.archives@0x00 (DynArray), basePath@0x08 (CString),
+//   scope@0x30 (u32; Mod=4).
+//
+// FALLBACK NOTE (U1, enumerator arg sig uncertain): if the enumerator at
+//   base+0x3eda684 misbehaves live, fall back to a JS glob -- read the newline-
+//   separated list of absolute .archive paths from /tmp/cp2077_modlist.txt
+//   (written by the overlay's Mods tab, which has POSIX disk access Frida lacks)
+//   and feed each path to the per-file loader near base+0x3edb0a4. That path is
+//   NOT wired here (DUMP-ONLY ship); this comment records the contract.
+// ============================================================================
+(function installModFolderLoader(){
+    var MODDIR_LOG = '/tmp/cp2077_edafcc.log';
+    // U4 SAFETY GATE: DUMP-ONLY by default. Do NOT flip to true until the dump
+    // in /tmp/cp2077_moddir.log confirms stride 0x38 / basePath@0x08 / scope@0x30.
+    var CP2077_MODDIR_WRITE = true;
+    // Relative path of the mod archive folder under the game dir.
+    var MOD_REL_PATH = 'archive/Mac/mod';
+    var MOD_SCOPE = 4;            // ArchiveSet scope: Mod
+    var SET_STRIDE = 0x38;        // ArchiveSet stride within the groups DynArray
+    var OFF_GROUPS = 0x10;        // ResourceDepot.groups DynArray {ptr,size,cap}
+    var OFF_SET_ARCHIVES = 0x00;  // ArchiveSet.archives (DynArray)
+    var OFF_SET_BASEPATH = 0x10;  // ArchiveSet.basePath (CString) -- CONFIRMED via live dump (was wrongly 0x08)
+    var OFF_SET_SCOPE = 0x30;     // ArchiveSet.scope (u32) -- CONFIRMED (Content=1,DLC=2,Patch=3,Mod=4)
+    // NOTE: write path still needs the enumerator/loader flow RE'd (0x3eda684 takes 4 stack-buffer args,
+    // followed by FUN_103edafcc) before CP2077_MODDIR_WRITE can be safely enabled. Layout is pinned; the
+    // load-trigger is not. The PROVEN working loose-mod path today: prefixed archives in archive/Mac/content.
+
+    function mlog(s){
+        try { var f = new File(MODDIR_LOG, 'a'); f.write(s + '\n'); f.flush(); f.close(); } catch (e) {}
+        try { console.log('[MODDIR] ' + s); } catch (e2) {}
+    }
+    function hexb(p, n){
+        try { var b = new Uint8Array(p.readByteArray(n)); var r = ''; for (var i = 0; i < b.length; i++) r += ('0' + b[i].toString(16)).slice(-2) + ' '; return r.trim(); }
+        catch (e) { return 'ERR(' + e + ')'; }
+    }
+    // Read a CString's text without owning it: SSO inline if len<0x14 else heap ptr@0x00.
+    function readCStr(cs){
+        try {
+            var lenFlags = cs.add(0x14).readU32();
+            var len = lenFlags & 0x3FFFFFFF;
+            if (len < 0x14) return cs.readUtf8String(len < 0 ? 0 : len);
+            var p = cs.readPointer();
+            if (p.isNull()) return '<null>';
+            return p.readUtf8String(len);
+        } catch (e) { return '<cstr err ' + e + '>'; }
+    }
+
+    var base = null;
+    try { base = getModuleBase(); } catch (e) { base = null; }
+    if (!base) { mlog('module base not found; mod-folder loader NOT installed'); return; }
+
+    // CString ctor: CString::CString(this, const char*) @ base+0x2cdb8 (zeroes SSO buf + len, interns).
+    var fnCStrCtor = null;
+    try { fnCStrCtor = new NativeFunction(base.add(0x2cdb8), 'pointer', ['pointer', 'pointer']); } catch (e) { mlog('CString ctor bind err: ' + e); }
+    // pool CString grow @ base+0x2c904 (mirror cmnReserve): grows to a game-pool heap buffer.
+    var fnPoolReserve = null;
+    try { fnPoolReserve = new NativeFunction(base.add(0x2c904), 'void', ['pointer', 'uint']); } catch (e) { mlog('pool reserve bind err: ' + e); }
+    // ArchiveSet::Append(groupsDynArray*, ArchiveSet*) @ base+0x3edd568.
+    var fnAppend = null;
+    try { fnAppend = new NativeFunction(base.add(0x3edd568), 'void', ['pointer', 'pointer']); } catch (e) { mlog('Append bind err: ' + e); }
+    // Per-set enumerator (scan+load) @ base+0x3eda684. ABI uncertain (U1) -- called
+    // best-effort as (set, &set.archives, 0,0,0); guarded in try/catch.
+    var fnEnum = null;
+    try { fnEnum = new NativeFunction(base.add(0x3eda684), 'void', ['pointer', 'pointer', 'pointer', 'pointer', 'pointer']); } catch (e) { mlog('enum bind err: ' + e); }
+    // LoadArchives(depot, set, &dirCString, &outBuffer, &prefixCString, &prefix2CString) @ base+0x3edaae8.
+    // Decoded from a live args-probe: x4 = filename prefix ("ep1_"), x5 = prefix base + "\\" ("ep1\\").
+    var fnLoadArchives = null;
+    try { fnLoadArchives = new NativeFunction(base.add(0x3edaae8), 'void', ['pointer', 'pointer', 'pointer', 'pointer', 'pointer', 'pointer']); } catch (e) { mlog('LoadArchives bind err: ' + e); }
+
+    // Build a red::CString for an absolute path. Prefer the engine ctor (0x2cdb8);
+    // for long paths back it with the pool allocator (0x2c904) mirroring cmnPutStr
+    // so the engine both READS (0x40000000 flag) and FREES it via the same pool.
+    function buildCString(absPath){
+        var cs = Memory.alloc(0x20);
+        cs.writeU64(0); cs.add(0x08).writeU64(0); cs.add(0x10).writeU64(0); cs.add(0x18).writeU64(0);
+        if (absPath.length < 0x14 && fnCStrCtor) {
+            try {
+                var cstr = Memory.allocUtf8String(absPath);
+                fnCStrCtor(cs, cstr);
+                return cs;
+            } catch (e) { mlog('ctor path err (short): ' + e); }
+        }
+        // long path: pool-reserve then write text into the returned game buffer (mirror cmnPutStr).
+        if (fnPoolReserve) {
+            try {
+                cs.add(0x18).writePointer(ptr(0));            // default pool allocator
+                fnPoolReserve(cs, absPath.length);            // alloc -> ptr@0x00, cap@0x10
+                var p = cs.readPointer();
+                if (p && !p.isNull()) {
+                    p.writeUtf8String(absPath);
+                    cs.add(0x14).writeU32((absPath.length & 0x3FFFFFFF) | 0x40000000);
+                    return cs;
+                }
+            } catch (e) { mlog('pool reserve path err: ' + e); }
+        }
+        // last-ditch fallback: inline-truncate (proves layout without crash).
+        try {
+            var t = absPath.substr(0, 19);
+            cs.writeUtf8String(t);
+            cs.add(0x14).writeU32(t.length);
+            cs.add(0x18).writePointer(ptr(0));
+        } catch (e) {}
+        return cs;
+    }
+
+    // U4 SAFETY GATE -- raw-read the depot's groups DynArray and the first
+    // ArchiveSet [0x00..0x38] and LOG them. NO writes. Proves stride/offsets.
+    var dumped = false;
+    function dumpDepot(depot){
+        if (dumped) return;
+        dumped = true;
+        try {
+            mlog('=== dumpDepot @ ' + depot + ' (DUMP-ONLY safety gate) ===');
+            if (!depot || depot.isNull()) { mlog('  depot is null'); return; }
+            var groups = depot.add(OFF_GROUPS);             // DynArray {ptr,size,cap}
+            var gptr = groups.readPointer();
+            var gsize = groups.add(0x08).readU32();
+            var gcap = groups.add(0x0C).readU32();
+            mlog('  groups@0x10: ptr=' + gptr + ' size=' + gsize + ' cap=' + gcap + ' (stride expect 0x' + SET_STRIDE.toString(16) + ')');
+            mlog('  groups raw[0x10]=' + hexb(groups, 0x10));
+            if (gptr.isNull() || gsize === 0) { mlog('  no ArchiveSets present yet'); return; }
+            // BRUTE-FORCE candidate offsets across ALL sets to PIN basePath + scope exactly.
+            // Whichever basePath offset decodes "archive/mac/content|patch|ep1" is the real one;
+            // whichever scope offset reads 1/2/3 across the sets is the real scope field.
+            var bpCands = [0x08, 0x10, 0x18, 0x20];
+            var scCands = [0x28, 0x2c, 0x30, 0x34, 0x38, 0x3c];
+            for (var si = 0; si < gsize && si < 4; si++) {
+                var s = gptr.add(si * SET_STRIDE);
+                mlog('  --- set[' + si + '] @ ' + s + ' bytes=' + hexb(s, SET_STRIDE));
+                var arch = s.add(OFF_SET_ARCHIVES);
+                mlog('    archives@0x00: ptr=' + arch.readPointer() + ' size=' + arch.add(0x08).readU32());
+                for (var bi = 0; bi < bpCands.length; bi++) {
+                    var txt = readCStr(s.add(bpCands[bi]));
+                    if (txt && txt.length > 2 && txt.indexOf('<') !== 0 && /[a-z\/]/i.test(txt))
+                        mlog('    basePath@0x' + bpCands[bi].toString(16) + ' = "' + txt + '"');
+                }
+                var sc = '    scope candidates: ';
+                for (var ci = 0; ci < scCands.length; ci++) { try { sc += '0x' + scCands[ci].toString(16) + '=' + s.add(scCands[ci]).readU32() + ' '; } catch (e) {} }
+                mlog(sc);
+            }
+        } catch (e) { mlog('dumpDepot err: ' + e); }
+    }
+
+    // Resolve <gamedir> from the depot rootPath (CString @ depot+0x30 per offsets.json),
+    // falling back to the known Steam install path used elsewhere in this file.
+    function gameDirFrom(depot){
+        try {
+            var root = readCStr(depot.add(0x30));
+            if (root && root.length > 1 && root.indexOf('<') !== 0) {
+                return root.replace(/[\/\\]+$/, '');
+            }
+        } catch (e) {}
+        return '/Users/ysr/Library/Application Support/Steam/steamapps/common/Cyberpunk 2077';
+    }
+
+    var didWrite = false;
+    function appendModSet(depot){
+        if (didWrite) return;
+        didWrite = true;
+        try {
+            var gameDir = gameDirFrom(depot);
+            var absPath = gameDir + '/' + MOD_REL_PATH;
+            mlog('=== appendModSet: building Mod-scope(4) ArchiveSet for "' + absPath + '" ===');
+
+            // allocate a fresh ArchiveSet (stride 0x38), zeroed.
+            var set = Memory.alloc(SET_STRIDE);
+            Memory.protect(set, SET_STRIDE, 'rw-');
+            for (var i = 0; i < SET_STRIDE; i += 8) set.add(i).writeU64(0);
+
+            // archives@0x00 = empty DynArray (zeroed); basePath@0x08 = CString; scope@0x30 = 4.
+            var cs = buildCString(absPath);
+            Memory.copy(set.add(OFF_SET_BASEPATH), cs, 0x20);   // copy CString bytes into the set
+            set.add(OFF_SET_SCOPE).writeU32(MOD_SCOPE);
+            mlog('  set built: basePath="' + readCStr(set.add(OFF_SET_BASEPATH)) + '" scope=' + set.add(OFF_SET_SCOPE).readU32());
+
+            // append to depot.groups DynArray via ArchiveSet::Append(groups, set).
+            if (!fnAppend || !fnLoadArchives) { mlog('  fnAppend/fnLoadArchives unavailable -- aborting write'); return; }
+            var groups = depot.add(OFF_GROUPS);
+            var beforeSize = groups.add(0x08).readU32();
+            fnAppend(groups, set);
+            var afterSize = groups.add(0x08).readU32();
+            mlog('  Append: groups.size ' + beforeSize + ' -> ' + afterSize);
+            if (afterSize <= beforeSize) { mlog('  Append did not grow groups -- aborting load'); return; }
+            var gptr = groups.readPointer();
+            var newSet = gptr.add((afterSize - 1) * SET_STRIDE);
+            mlog('  newSet @ ' + newSet + ' basePath="' + readCStr(newSet.add(OFF_SET_BASEPATH)) + '" scope=' + newSet.add(OFF_SET_SCOPE).readU32());
+
+            // LoadArchives(depot, set, &dirCString, &outBuf, &prefixCString, &prefix2CString) per supported prefix.
+            // Decoded from the live args-probe (x4="ep1_", x5="ep1\\"). A mod .archive must be NAMED with a
+            // recognized prefix to be picked up; we scan for the common ones.
+            var prefixes = ['archive_', 'basegame_', 'mod_'];
+            for (var pi = 0; pi < prefixes.length; pi++) {
+                try {
+                    var pfx = prefixes[pi];
+                    var pbase = pfx.replace(/_$/, '');                 // "archive"
+                    var dirCS = buildCString(absPath);                 // dir to scan (archive/Mac/mod/)  -> x2
+                    var outBuf = Memory.alloc(0x80); for (var k = 0; k < 0x80; k += 8) outBuf.add(k).writeU64(0);  // x3 scratch
+                    var p1 = buildCString(pfx);                        // "archive_"  -> x4
+                    var p2 = buildCString(pbase + '\\');               // "archive\"  -> x5
+                    var before = newSet.add(OFF_SET_ARCHIVES).add(0x08).readU32();
+                    fnLoadArchives(depot, newSet, dirCS, outBuf, p1, p2);
+                    var after = newSet.add(OFF_SET_ARCHIVES).add(0x08).readU32();
+                    mlog('  LoadArchives prefix "' + pfx + '": archives.size ' + before + ' -> ' + after);
+                } catch (e) { mlog('  LoadArchives("' + prefixes[pi] + '") err: ' + e); }
+            }
+            var total = newSet.add(OFF_SET_ARCHIVES).add(0x08).readU32();
+            mlog('  === DONE: Mod set archives.size=' + total + ' (drop prefixed .archive in ' + absPath + ') ===');
+        } catch (e) { mlog('appendModSet err: ' + e); }
+    }
+
+    // === NEW (Option A clean write): hook FUN_103edafcc (0x3edafcc) directly.
+    //   It loops the depot's scope-config array (base ptr [depot+0x68], count
+    //   [depot+0x74], stride 0x140) and per entry runs the ENGINE'S OWN flow:
+    //     registrar 0x103449908(name) -> Append 0x103edd568(groups, seed, descriptor)
+    //       -> LoadArchives 0x103edaae8(depot, set, &descriptor, outBuf, prefix, path).
+    //   Entry layout (Ghidra-decoded): seed@0x80 (first u32 = scope), filename-prefix
+    //   CString@0x88 (LoadArchives x4, e.g. "ep1_"), path/subfolder CString@0xa8
+    //   (registrar name + LoadArchives x5, e.g. "ep1\\").
+    //   STEP 1 (this build, gate=false): DUMP every live entry -> /tmp/cp2077_edafcc.log
+    //     so we learn the exact 0x140 layout from real data.
+    //   STEP 2 (flip gate after dump confirms): clone a template entry, patch
+    //     scope->4 + path->"mod", and RE-INVOKE FUN_103edafcc with a synthetic
+    //     1-entry array so the engine itself registers+loads archive/Mac/mod.
+    var ENTRY_STRIDE = 0x140;
+    var OFF_ARR_PTR  = 0x68;   // depot+0x68 = scope-config array base ptr
+    var OFF_ARR_CNT  = 0x74;   // depot+0x74 = array count (u32)
+    var OFF_E_SEED   = 0x80;   // entry+0x80 = Append scope-seed (first u32 = scope)
+    var OFF_E_PREFIX = 0x88;   // entry+0x88 = filename-prefix CString (LoadArchives x4)
+    var OFF_E_PATH   = 0xa8;   // entry+0xa8 = path/subfolder CString (registrar name + LoadArchives x5)
+    var fnEdafcc = null;
+    try { fnEdafcc = new NativeFunction(base.add(0x3edafcc), 'void', ['pointer', 'pointer', 'pointer', 'pointer', 'pointer']); } catch (e) { mlog('edafcc bind err: ' + e); }
+
+    function dumpEntries(depot, x1, arrStart, arrEnd, x4){
+        try {
+            mlog('=== dumpEntries (FUN_103edafcc live args) ===');
+            mlog('  depot=' + depot + '  x1(depot+0x48)=' + x1 + '  x4(outBuf)=' + x4);
+            var arrPtr = depot.add(OFF_ARR_PTR).readPointer();
+            var cnt = depot.add(OFF_ARR_CNT).readU32();
+            var n = arrEnd.sub(arrStart).toInt32() / ENTRY_STRIDE;
+            mlog('  depot+0x68 arrPtr=' + arrPtr + '  depot+0x74 count=' + cnt + '  | edafcc x2=' + arrStart + ' x3=' + arrEnd + ' derivedCount=' + n);
+            for (var i = 0; i < n && i < 8; i++){
+                var e = arrStart.add(i * ENTRY_STRIDE);
+                mlog('  --- entry[' + i + '] @ ' + e);
+                mlog('    seed@0x80 scope(u32)=' + e.add(OFF_E_SEED).readU32() + '  seedBytes=' + hexb(e.add(OFF_E_SEED), 0x40));
+                mlog('    prefix@0x88 = "' + readCStr(e.add(OFF_E_PREFIX)) + '"  bytes=' + hexb(e.add(OFF_E_PREFIX), 0x20));
+                mlog('    path@0xa8   = "' + readCStr(e.add(OFF_E_PATH)) + '"  bytes=' + hexb(e.add(OFF_E_PATH), 0x20));
+                mlog('    head[0x00..0x80]=' + hexb(e, 0x80));
+            }
+        } catch (err) { mlog('dumpEntries err: ' + err); }
+    }
+
+    // captured live args (for the gated replay); MUST replay in edafcc onLeave so
+    // cap.x4 (InitializeArchives's sp+0x8 outBuf) is still a valid live pointer.
+    var cap = null;
+    // build a proper engine red::CString via the game's own ctor FUN_10002cdb8
+    // (handles long paths via the pool + sets alloc@0x18 so copy/destroy are safe).
+    function mkCStr(s){
+        var cs = Memory.alloc(0x20);
+        cs.writeU64(0); cs.add(0x08).writeU64(0); cs.add(0x10).writeU64(0); cs.add(0x18).writeU64(0);
+        try { fnCStrCtor(cs, Memory.allocUtf8String(s)); } catch (e) { mlog('mkCStr err: ' + e); }
+        return cs;
+    }
+    // DynArray layout (Ghidra-confirmed via Append/LoadArchives): ptr@0x00, cap@0x08(u32), size@0x0c(u32).
+    function replayModScope(){
+        try {
+            if (!cap) { mlog('  replay: no cap -- abort'); return; }
+            if (!fnCStrCtor || !fnLoadArchives) { mlog('  replay: missing ctor/LoadArchives -- abort'); return; }
+            // 3-arg Append: FUN_103edd568(groups, &seed, &descriptor) -> newSet (returns x0).
+            var fnAppend3 = null;
+            try { fnAppend3 = new NativeFunction(base.add(0x3edd568), 'pointer', ['pointer', 'pointer', 'pointer']); }
+            catch (e) { mlog('  Append3 bind err: ' + e); return; }
+
+            var gameDir = gameDirFrom(cap.depot);
+            var modDir = gameDir + '/archive/mac/mod/';   // lowercase mac (engine convention); FS resolves archive/Mac/mod
+            mlog('=== replayModScope (DIRECT, no registrar): Mod scope(4) for "' + modDir + '" ===');
+
+            var desc = mkCStr(modDir);                     // descriptor = scan dir (full path CString)
+            mlog('  desc="' + readCStr(desc) + '"');
+            var seed = Memory.alloc(8); seed.writeU32(MOD_SCOPE); seed.add(4).writeU32(0);  // Append reads only [seed+0]=scope
+            var groups = cap.depot.add(0x10);              // depot.groups DynArray
+            var before = groups.add(0x0c).readU32();       // size@0x0c
+            var newSet = fnAppend3(groups, seed, desc);
+            var after = groups.add(0x0c).readU32();
+            mlog('  Append -> newSet=' + newSet + '  groups.size ' + before + ' -> ' + after);
+            if (!newSet || newSet.isNull()) { mlog('  Append returned null -- abort'); return; }
+            mlog('  newSet.basePath@0x10="' + readCStr(newSet.add(0x10)) + '" scope@0x30=' + newSet.add(0x30).readU32());
+
+            // LoadArchives(depot, set, desc, outBuf=cap.x4[live], prefix, path).
+            // glob FUN_103eda360 builds the pattern (prefix + "*.archive"); an EMPTY
+            // prefix => "*.archive" => loads EVERY .archive in mod/ (true Windows-mod/
+            // parity, any filename). It also auto-globs audio_/lang_ but real loose
+            // mods don't use those names, so no dupes in practice.
+            var prefixCS = mkCStr('');
+            var pathCS = mkCStr('mod\\\\');
+            var aBefore = newSet.add(0x0c).readU32();      // set.archives.size@0x0c
+            mlog('  LoadArchives(depot, newSet, desc, cap.x4, ""=>*.archive, "mod\\\\")...');
+            fnLoadArchives(cap.depot, newSet, desc, cap.x4, prefixCS, pathCS);
+            var aAfter = newSet.add(0x0c).readU32();
+            mlog('  === DONE: Mod set archives.size ' + aBefore + ' -> ' + aAfter + ' (drop ANY *.archive in ' + modDir + ') ===');
+        } catch (err) { mlog('replayModScope err: ' + err); }
+    }
+
+    var ranOnce = false;
+    try {
+        var hookAddr = base.add(0x3edafcc); // per-scope loader (loops depot+0x68 array)
+        Interceptor.attach(hookAddr, {
+            onEnter: function (args) {
+                this.depot = args[0]; this.x1 = args[1]; this.arrStart = args[2]; this.arrEnd = args[3]; this.x4 = args[4];
+            },
+            onLeave: function (retval) {
+                if (ranOnce) return;
+                ranOnce = true;
+                try {
+                    var n = this.arrEnd.sub(this.arrStart).toInt32() / ENTRY_STRIDE;
+                    cap = { depot: this.depot, x1: this.x1, arrStart: this.arrStart, arrEnd: this.arrEnd, x4: this.x4, n: n };
+                    dumpEntries(this.depot, this.x1, this.arrStart, this.arrEnd, this.x4);
+                    if (CP2077_MODDIR_WRITE) {
+                        mlog('mode=WRITE: replaying FUN_103edafcc for Mod scope');
+                        replayModScope();
+                    } else {
+                        mlog('mode=DUMP-ONLY: entries dumped. Inspect /tmp/cp2077_edafcc.log, then flip CP2077_MODDIR_WRITE=true.');
+                    }
+                } catch (e) { mlog('onLeave err: ' + e); }
+            }
+        });
+        mlog('installed: Interceptor @ ' + hookAddr + ' (FUN_103edafcc 0x3edafcc), mode=' + (CP2077_MODDIR_WRITE ? 'WRITE' : 'DUMP-ONLY'));
+
+        // --- LoadArchives (0x3edaae8) ARGS PROBE: learn the real call pattern from the base scopes.
+        // LoadArchives(x0, x1=set, x2, x3, x4, x5) -> glob(0x3eda360) + consume(0x3eda488). We log the
+        // args + derefs for the first calls (content/ep1/patch) so we can replicate the call for archive/Mac/mod.
+        try {
+            var laCalls = 0;
+            Interceptor.attach(base.add(0x3edaae8), {
+                onEnter: function (a) {
+                    if (laCalls++ >= 6) return;
+                    var c = this.context;
+                    function hx(v){ try { return v ? ('0x' + v.toString(16)) : '0'; } catch (e) { return '?'; } }
+                    mlog('LoadArchives #' + laCalls + ': x0=' + hx(c.x0) + ' x1=' + hx(c.x1) + ' x2=' + hx(c.x2) + ' x3=' + hx(c.x3) + ' x4=' + hx(c.x4) + ' x5=' + hx(c.x5));
+                    try { if (c.x1 && !c.x1.isNull()) mlog('    x1(set).basePath@0x10="' + readCStr(c.x1.add(0x10)) + '" scope@0x30=' + c.x1.add(0x30).readU32()); } catch (e) { mlog('    x1 deref err ' + e); }
+                    try { if (c.x2 && !c.x2.isNull()) mlog('    x2 bytes=' + hexb(c.x2, 0x20) + ' asCStr="' + readCStr(c.x2) + '"'); } catch (e) {}
+                    try { if (c.x0 && !c.x0.isNull()) mlog('    x0 bytes=' + hexb(c.x0, 0x18)); } catch (e) {}
+                    try { if (c.x3 && !c.x3.isNull()) mlog('    x3 bytes=' + hexb(c.x3, 0x20) + ' asCStr="' + readCStr(c.x3) + '"'); } catch (e) {}
+                    try { if (c.x4 && !c.x4.isNull()) mlog('    x4 bytes=' + hexb(c.x4, 0x20) + ' asCStr="' + readCStr(c.x4) + '"'); } catch (e) {}
+                    try { if (c.x5 && !c.x5.isNull()) mlog('    x5 bytes=' + hexb(c.x5, 0x20) + ' asCStr="' + readCStr(c.x5) + '"'); } catch (e) {}
+                    // x3 is a stack ptr (caller scratch); x4/x5 heap (context). Knowing these = replication-ready.
+                }
+            });
+            mlog('LoadArchives args-probe attached @ ' + base.add(0x3edaae8) + ' (0x3edaae8)');
+        } catch (e) { mlog('LoadArchives probe err: ' + e); }
+    } catch (e) { mlog('install FAILED: ' + e); }
+})();
+
 })();

@@ -1,0 +1,16 @@
+{
+  "id": "test",
+  "title": "Test",
+  "widgets": [
+    { "type": "text", "label": "Declarative tab engine smoke test. The button below emits the existing 'heal' verb through the same runLabeled -> submitCommand pipeline the rest of the console uses." },
+    { "type": "separator" },
+    { "type": "button", "label": "Heal", "cmd": "heal", "toast": "Healed (from data tab)" },
+    { "type": "same_line" },
+    { "type": "button", "label": "Money +50k", "cmd": "money 50000", "toast": "Money +50k (from data tab)" },
+    { "type": "separator" },
+    { "type": "text", "label": "Field substitution demo: the slider sets {amount}, the input sets {item}; the button below substitutes both into a 'give' command." },
+    { "type": "input_text", "label": "Item id", "field": "item", "default": "Items.MoneyShard" },
+    { "type": "slider_int", "label": "Amount", "field": "amount", "min": 1, "max": 100, "default": 1 },
+    { "type": "button", "label": "Give {item} x{amount}", "cmd": "give {item} {amount}", "toast": "Gave item (from data tab)" }
+  ]
+}

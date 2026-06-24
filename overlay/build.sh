@@ -27,4 +27,13 @@ clang++ -ObjC++ -fobjc-arc -std=c++17 -O2 -arch arm64 -dynamiclib \
   -o "$OUT" $SRC
 
 codesign -s - --force --timestamp=none "$OUT"
+
+# Ship the declarative tabs next to the dylib so the overlay's loadTabsFromDir()
+# (which reads overlayDir()/tabs) finds them in a dev build.
+if [ -d "tabs" ]; then
+  rm -rf "$ROOT/build/tabs"
+  cp -R "tabs" "$ROOT/build/tabs"
+  echo "copied tabs/ -> $ROOT/build/tabs ($(ls tabs | wc -l | tr -d ' ') files)"
+fi
+
 echo "built $OUT"
