@@ -30,7 +30,7 @@ A native Apple Silicon in-game console, cheat menu, and item browser for Cyberpu
 
 ## Status
 
-macOS arm64 (Apple Silicon, M1/M2/M3/M4). Built and verified against Cyberpunk 2077 v2.3.1 (Steam). GOG support is in progress. The offsets and hashes are derived from the Steam macOS build, so other distributions are not supported yet.
+macOS arm64 (Apple Silicon, M1/M2/M3/M4). Built and verified against Cyberpunk 2077 v2.3.1 (Steam). Experimental GOG support is available via `runtime/red4ext_hooks_gog.js` (see [docs/GOG.md](docs/GOG.md)); the default script targets the Steam macOS build.
 
 ## What it does
 
@@ -117,7 +117,7 @@ For the full reverse-engineering and architecture write-up (offsets, struct layo
 
 ## Compatibility and caveats
 
-- Steam version only right now. The offsets come from the Steam macOS build; the GOG build differs, so it is not supported yet. GOG support is in progress.
+- The default engine targets the Steam macOS build. The GOG build differs structurally (offsets + non-virtual RTTI); experimental GOG support is available via `runtime/red4ext_hooks_gog.js` — see [docs/GOG.md](docs/GOG.md).
 - Built against v2.3.1. Game updates can move offsets and break it. Releases are tagged per supported game version.
 - Single-player only. Modding can corrupt saves, so keep backups.
 - Install re-signs the game binary (ad-hoc) so the console can load. This is reversible at any time via Steam's "Verify Integrity of Game Files".
