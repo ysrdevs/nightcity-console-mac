@@ -571,7 +571,7 @@ rpc.exports = {
         function ensureReg(){ if(reg) return; reg=new NativeFunction(base.add(0x2188e8c),'pointer',[])(); const rv=reg.readPointer();
             GetClass=new NativeFunction(rv.add(0x10).readPointer(),'pointer',['pointer','uint64']);
             GetEnum =new NativeFunction(rv.add(0x18).readPointer(),'pointer',['pointer','uint64']); }
-        let player=null, playerVt=null, fromtd=null, depth=0, busy=false, lastCmd=''; const pendingQ=[];
+        let player=null, playerVt=null, fromtd=null, depth=0, busy=false, lastCmd='', execListener=null, execArmedAt=0; const pendingQ=[];
         const playerCands=[], playerCandSet=new Set(); let devOwner=null;  // cached dev-data owner (the local player)
         function addCand(ctx){ const k=ctx.toString(); if(playerCandSet.has(k)) return; playerCandSet.add(k); playerCands.push(ctx); if(playerCands.length>8){ const old=playerCands.shift(); playerCandSet.delete(old.toString()); } }
         const instReg={}, seenVt=new Set(); let nameHookInstalled=false;
@@ -1072,7 +1072,7 @@ rpc.exports = {
             log('unknown: '+line); }
         setInterval(function(){ try{ const c=readFile(CMD); const s=(c||'').trim();
             if(!s){ lastCmd=''; return; }                 // file empty -> re-arm so an identical next command fires again
-            if(s!==lastCmd){ lastCmd=s; const cmd=s.replace(/^\d+\t/,''); pendingQ.push(cmd); clearFile(CMD); log('queued: '+cmd); } }catch(e){} }, 120);
+            if(s!==lastCmd){ lastCmd=s; const cmd=s.replace(/^\d+\t/,''); pendingQ.push(cmd); clearFile(CMD); armExecutorHook(); log('queued: '+cmd); } }catch(e){} }, 120);
         // Clean shutdown: the game's static-destructor teardown segfaults with hooks attached (cosmetic,
         // happens AFTER the game has saved + quit). Route exit() -> _exit() to skip that teardown so the
         // process exits cleanly (no macOS crash dialog, exit code 0).
@@ -1089,26 +1089,40 @@ rpc.exports = {
                 Interceptor.attach(base.add(0x31e18), { onLeave:function(){ try{ clearFile(CMD); }catch(e){} _x2(0); } });
                 log('shutdown-exit hook installed (Main+0x31e18)'); }
             else log('shutdown-exit: _exit unresolved'); }catch(e){ log('shutdown-exit err: '+e); }
-        log('==== MINI-CET v3 (universal call + perks/attrs/relic) ready ====');
-        Interceptor.attach(execAddr,{
-            onEnter:function(args){ depth++; if(busy) return;
-                try{ const fn=args[0],ctx=args[1]; if(fn.isNull()||ctx.isNull()) return;
-                    if(!fromtd){ const nm='0x'+fn.add(0x08).readU64().toString(16); if(nm==='0x150155547ef75590'){ const rp=fn.add(0x18).readPointer(); fromtd={fn:fn,ctx:ctx,retType:rp.isNull()?ptr(0):rp.readPointer()}; } }
-                    const vt=ctx.readPointer(); if(vt.isNull()) return;
-                    // Observe dispatch (zero cost when no observers registered). Must run BEFORE the
-                    // player/seenVt early-returns below, or observers would fire at most once per vtable.
-                    if(obsCount){ const omh='0x'+fn.add(0x10).readU64().toString(16); const olist=obsByMethod[omh];
-                        if(olist){ let cmeta=null; try{ cmeta=new NativeFunction(vt.add(8).readPointer(),'pointer',['pointer'])(ctx); }catch(e){}
-                            for(let oi=0;oi<olist.length;oi++){ const ob=olist[oi]; if(ob.classHash && (cmeta===null || !classIsA(cmeta, ob.classHash))) continue; obsFire(ob, ctx, args[2], fn); } } }
-                    if(playerVt && vt.equals(playerVt)){ player=ctx; addCand(ctx); return; }
-                    const vk=vt.toString(); if(seenVt.has(vk)) return; seenVt.add(vk);
-                    const fn0=vt.readPointer(); if(fn0.isNull()) return;
-                    const meta=new NativeFunction(vt.add(8).readPointer(),'pointer',['pointer'])(ctx);  // GetType -> CClass
-                    if(meta.isNull()) return; const fv=meta.sub(base).add(FV0).toString(16); instReg[fv]=ctx;
-                    if(nameOf(meta)===PLAYER){ playerVt=vt; player=ctx; addCand(ctx); }
-                }catch(e){} },
-            onLeave:function(r){ depth--; if(busy) return; if(pendingQ.length&&depth===0){ const cmd=pendingQ.shift(); busy=true; try{ execute(cmd); }catch(e){ log('exec err '+e); } busy=false; } }
-        });
+        log('==== MINI-CET v3 (on-demand executor hook) ready ====');
+        function pendingCommandReady(){
+            if(!pendingQ.length||Date.now()-execArmedAt<500) return false;
+            if(player&&fromtd) return true;
+            // These diagnostics intentionally work before a game session has produced player/runtime objects.
+            return /^(metalrecon|tweakload|tweakdumpflat|cmnreload|archiveload|archiveprobe|archiveinject|archivehookname|archivename|observe|mkobj|field|props|mkmods|modsbutton)(?:\s|$)/.test(pendingQ[0]);
+        }
+        function armExecutorHook(){
+            if(execListener) return;
+            depth=0; execArmedAt=Date.now();
+            execListener=Interceptor.attach(execAddr,{
+                onEnter:function(args){ depth++; if(busy) return;
+                    try{ const fn=args[0],ctx=args[1]; if(fn.isNull()||ctx.isNull()) return;
+                        if(!fromtd){ const nm='0x'+fn.add(0x08).readU64().toString(16); if(nm==='0x150155547ef75590'){ const rp=fn.add(0x18).readPointer(); fromtd={fn:fn,ctx:ctx,retType:rp.isNull()?ptr(0):rp.readPointer()}; } }
+                        const vt=ctx.readPointer(); if(vt.isNull()) return;
+                        // Observe dispatch (zero cost when no observers registered). Must run BEFORE the
+                        // player/seenVt early-returns below, or observers would fire at most once per vtable.
+                        if(obsCount){ const omh='0x'+fn.add(0x10).readU64().toString(16); const olist=obsByMethod[omh];
+                            if(olist){ let cmeta=null; try{ cmeta=new NativeFunction(vt.add(8).readPointer(),'pointer',['pointer'])(ctx); }catch(e){}
+                                for(let oi=0;oi<olist.length;oi++){ const ob=olist[oi]; if(ob.classHash && (cmeta===null || !classIsA(cmeta, ob.classHash))) continue; obsFire(ob, ctx, args[2], fn); } } }
+                        if(playerVt && vt.equals(playerVt)){ player=ctx; addCand(ctx); return; }
+                        const vk=vt.toString(); if(seenVt.has(vk)) return; seenVt.add(vk);
+                        const fn0=vt.readPointer(); if(fn0.isNull()) return;
+                        const meta=new NativeFunction(vt.add(8).readPointer(),'pointer',['pointer'])(ctx);  // GetType -> CClass
+                        if(meta.isNull()) return; const fv=meta.sub(base).add(FV0).toString(16); instReg[fv]=ctx;
+                        if(nameOf(meta)===PLAYER){ playerVt=vt; player=ctx; addCand(ctx); }
+                    }catch(e){} },
+                onLeave:function(r){ depth--; if(busy||depth!==0||!pendingCommandReady()) return;
+                    busy=true; while(pendingQ.length){ const cmd=pendingQ.shift(); try{ execute(cmd); }catch(e){ log('exec err '+e); } } busy=false;
+                    if(obsCount===0){ const listener=execListener; execListener=null; setImmediate(function(){ listener.detach(); log('executor hook idle'); }); }
+                    else log('executor hook retained for '+obsCount+' observer(s)'); }
+            });
+            log('executor hook armed');
+        }
     }catch(e){ log('MINI-CET v3 FAILED: '+e); }
 
 // ===== cybermodman cmn loc-hook (re-merged after CET update) =====
