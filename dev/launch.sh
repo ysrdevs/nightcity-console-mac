@@ -11,6 +11,21 @@ RED4="$GAME/red4ext"
 
 [ -f "$BIN" ] || { echo "Game not found at: $GAME  (set CP2077_DIR to override)"; exit 1; }
 
+# Match the GUI's store detection before building or changing the game.
+BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$GAME/Cyberpunk2077.app/Contents/Info.plist" 2>/dev/null || true)
+if [ "$BUNDLE_ID" = "com.cdprojektred.cyberpunk.gog" ] || \
+   [ -f "$GAME/Cyberpunk2077.app/Contents/Frameworks/libGameServicesGOG.dylib" ]; then
+  HOOK="red4ext_hooks_gog.js"
+  unset SteamAppId
+  unset RED4EXT_GUM_HOOKS RED4EXT_GUM_HOOK_OFFSETS RED4EXT_GUM_MANUAL_OFFSETS
+elif [[ "$GAME" == *"/steamapps/"* ]]; then
+  HOOK="red4ext_hooks.js"
+  export SteamAppId=1091500
+else
+  echo "Unsupported game build at: $GAME (select a Steam or GOG install)"
+  exit 1
+fi
+
 echo "==> building overlay"
 "$ROOT/overlay/build.sh"
 
@@ -20,7 +35,10 @@ echo "==> fetching deps"
 echo "==> staging payload into $RED4"
 mkdir -p "$RED4"
 cp "$ROOT/runtime/red4ext_hooks.js"   "$RED4/red4ext_hooks.js"
+cp "$ROOT/runtime/red4ext_hooks_gog.js" "$RED4/red4ext_hooks_gog.js"
 cp "$ROOT/runtime/FridaGadget.config" "$RED4/FridaGadget.config"
+/usr/bin/plutil -replace interaction.path -string "./$HOOK" "$RED4/FridaGadget.config"
+/usr/bin/plutil -convert json "$RED4/FridaGadget.config"
 cp "$ROOT/deps/RED4ext.dylib"         "$RED4/RED4ext.dylib"
 cp "$ROOT/deps/FridaGadget.dylib"     "$RED4/FridaGadget.dylib"
 OVERLAY="$ROOT/build/libcyberconsole_overlay.dylib"
@@ -30,7 +48,7 @@ xattr -dr com.apple.quarantine "$RED4" "$OVERLAY" 2>/dev/null || true
 
 # Stock Cyberpunk is signed without the JIT entitlements Frida needs, so the game gets
 # SIGKILL'd (CODESIGNING, Invalid Page) the instant Frida generates code. Re-sign the binary
-# ad-hoc with allow-jit / allow-unsigned-executable-memory. Idempotent; Steam verify reverts it.
+# ad-hoc with allow-jit / allow-unsigned-executable-memory. Steam Verify or GOG Verify/Repair reverts it.
 if ! codesign -d --entitlements :- "$BIN" 2>/dev/null | grep -q allow-jit; then
   echo "==> re-signing game with JIT entitlements (Frida needs them)"
   ENTS="$(mktemp /tmp/cetmac-ents.XXXXXX.plist)"
@@ -51,9 +69,10 @@ PLIST
 fi
 
 export DYLD_INSERT_LIBRARIES="$RED4/RED4ext.dylib:$RED4/FridaGadget.dylib:$OVERLAY"
+if [ "$HOOK" = "red4ext_hooks_gog.js" ]; then
+  export DYLD_INSERT_LIBRARIES="$RED4/FridaGadget.dylib:$OVERLAY"
+fi
 export DYLD_FORCE_FLAT_NAMESPACE=1
-export SteamAppId=1091500
-
 cd "$GAME"
 echo "==> launching (toggle the console in-game with \` or F1)"
 exec "$BIN" "$@"

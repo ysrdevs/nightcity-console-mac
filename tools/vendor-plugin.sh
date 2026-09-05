@@ -9,7 +9,16 @@ LIBS=( "/opt/homebrew/opt/spdlog/lib/libspdlog.1.17.dylib"
        "/opt/homebrew/opt/fmt/lib/libfmt.12.dylib"
        "/opt/homebrew/opt/yaml-cpp/lib/libyaml-cpp.0.9.dylib" )
 for L in "${LIBS[@]}"; do
-  BN="$(basename "$L")"; cp "$L" "$DEST/$BN"; chmod u+w "$DEST/$BN"
+  BN="$(basename "$L")"
+  # Prefer the exact sibling shipped with the verified plugin instead of a different Homebrew ABI.
+  SIBLING="$(dirname "$SRC")/$BN"
+  if [ ! -f "$SIBLING" ]; then SIBLING="$(dirname "$SRC")/plugins/$(basename "$SRC" .dylib)/$BN"; fi
+  if [ -f "$SIBLING" ]; then
+    cp "$SIBLING" "$DEST/$BN"
+  else
+    cp "$L" "$DEST/$BN"
+  fi
+  chmod u+w "$DEST/$BN"
   install_name_tool -id "@loader_path/$BN" "$DEST/$BN"
   install_name_tool -change "$L" "@loader_path/$BN" "$PLUGIN"
 done

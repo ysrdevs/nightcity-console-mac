@@ -17,7 +17,7 @@ and the game exits cleanly.
 
 ### Requirements
 - macOS on Apple Silicon (arm64).
-- Cyberpunk 2077 **v2.3.1**, **Steam**. GOG support is in progress (not supported yet; engine offsets differ).
+- Cyberpunk 2077 **v2.3.1**, **Steam**. Experimental GOG support: use `runtime/red4ext_hooks_gog.js` (see `docs/GOG.md`).
 
 ### What you can do
 - Items: `give Items.X <qty>`, `removeitem`, `money`, plus CET-style `Game.AddToInventory("Items.X", n)`.

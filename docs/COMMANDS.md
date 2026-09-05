@@ -21,6 +21,8 @@ Item IDs are the same `Items.*` TweakDB names CET uses, so codes you find online
 | `perks <N>` | Add N perk points. |
 | `attrs <N>` | Add N attribute points. |
 | `relic <N>` | Add N relic points. |
+| `resetperks` | Reset allocated perk points so they can be reassigned. |
+| `resetattrs` | Reset allocated attribute points so they can be reassigned. |
 | `level <N>` | Set character level. |
 | `streetcred <N>` | Set street cred level (alias `sc`; 1-50). |
 | `heal` | Refill health to full. |
@@ -30,6 +32,12 @@ Item IDs are the same `Items.*` TweakDB names CET uses, so codes you find online
 | `time <h> [m]` | Set the in-game time of day (24h). |
 | `slowmo [factor\|off]` | Slow motion (default 0.3x; e.g. `slowmo 0.1`). |
 | `nopolice [off]` | Disable / re-enable the police response. |
+
+Load a save and make a manual save before using `resetperks` or `resetattrs`. Run each command
+separately and wait for it to finish. These commands resolve the player's development data
+internally and refuse to call a missing method, a static method, or a method requiring arguments.
+You do not need to run `findinst` first. Both reset commands have been tested in-game on GOG
+macOS v2.3.1; the Steam handlers use the same guards but have not been play-tested in this change.
 
 ## World
 | Command | Effect |

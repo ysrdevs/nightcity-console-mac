@@ -495,7 +495,8 @@ static void handleSubmit(const char* cmd) {
     if (strcmp(cmd, "help") == 0) {
         appendOut("items:  give <Items.X> <qty> | removeitem <Items.X> <qty> | money <n>");
         appendOut("        CET style: Game.AddToInventory(\"Items.X\", n)");
-        appendOut("char:   perks <n> | attrs <n> | relic <n> | level <n> | streetcred <n> | heal | godmode [off] | invis [off] | infammo [off]");
+        appendOut("char:   perks <n> | attrs <n> | resetperks | resetattrs | relic <n> | level <n> | streetcred <n>");
+        appendOut("        heal | godmode [off] | invis [off] | infammo [off]");
         appendOut("world:  time <h> [m] | slowmo [factor|off] | nopolice [off]");
         appendOut("        teleport save <name> | teleport <name> | teleport <x> <y> <z> | setfact <name> <n>");
         appendOut("misc:   call <Class> <method> [args] | sig <Class> <method> | convdump | clear | help");

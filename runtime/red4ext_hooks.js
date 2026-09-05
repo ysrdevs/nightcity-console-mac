@@ -549,6 +549,7 @@ rpc.exports = {
 // ============================================================================
 // CP2077SaveKit MINI-CET v3 -- universal RTTI call + enums + chains.
 //   give <Items.NAME> <qty> | money <amt> | call <Class> <method> [args] | perks <n> | attrs <n> | relic <n>
+//   resetperks | resetattrs
 // Resolves ANY method via CClass.funcs (+0x48), walks parents; live instance per class; enum args by name.
 // ============================================================================
 (function () {
@@ -943,6 +944,17 @@ rpc.exports = {
             log('  AddDevelopmentPoints '+sigStr(adp.fn));
             try{ callFunc(adp.fn, devData, adp.retType, [''+n, member]); log('*** '+member+' points +'+n+' DONE ***'); }
             catch(e){ log('AddDevelopmentPoints err: '+e); } }
+        // Resolve PlayerDevelopmentData through the live player/system chain instead of relying on the
+        // generic call command's player fallback. Refuse to invoke a changed/overloaded signature.
+        function resetDevelopment(method, label){
+            const devData=getDevData(); if(!devData){ log(label+': no PlayerDevelopmentData; load a save and retry'); return; }
+            const reset=resolveFunc('PlayerDevelopmentData',method); if(!reset){ log(label+': '+method+' not found'); return; }
+            if(reset.isStatic){ log(label+': refusing '+method+'; expected an instance method'); return; }
+            let count; try{ count=reset.fn.add(0x30).readU32(); }catch(e){ log(label+': could not inspect '+method+' signature'); return; }
+            if(count!==0){ log(label+': refusing '+method+'; expected 0 params, found '+count); return; }
+            try{ callFunc(reset.fn, devData, reset.retType, []); log('*** '+label+' reset DONE ***'); }
+            catch(e){ log(label+' reset err: '+e); }
+        }
         // ===== Phase 2 recon: identify the Metal present path (raw libobjc; Frida ObjC bridge is absent) =====
         let mrArmed=false, mrCap=false, _objc=null, _expCache={};
         function resolveExport(name){ if(_expCache[name]!==undefined) return _expCache[name]; let r=null;
@@ -1057,6 +1069,8 @@ rpc.exports = {
             if(t[0]==='perks'&&t[1]){ addPoints(Math.max(1,parseInt(t[1])||1),'Primary'); return; }
             if(t[0]==='attrs'&&t[1]){ addPoints(Math.max(1,parseInt(t[1])||1),'Attribute'); return; }
             if(t[0]==='relic'&&t[1]){ addPoints(Math.max(1,parseInt(t[1])||1),'Espionage'); return; }
+            if(t[0]==='resetperks'){ resetDevelopment('ResetNewPerks','perks'); return; }
+            if(t[0]==='resetattrs'){ resetDevelopment('ResetAttributes','attributes'); return; }
             if(t[0]==='godmode'){ doGodmode(t[1]!=='off'); return; }
             if(t[0]==='invis'||t[0]==='invisible'){ doInvisible(t[1]!=='off'); return; }
             if(t[0]==='infammo'||t[0]==='ammo'){ doInfammo(t[1]!=='off'); return; }

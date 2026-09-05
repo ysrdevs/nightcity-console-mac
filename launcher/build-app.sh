@@ -16,12 +16,17 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp launcher/Info.plist "$APP/Contents/Info.plist"
 
 echo "==> compiling launcher"
-swiftc -O -parse-as-library -target arm64-apple-macos12 \
+MODULE_CACHE="$PWD/build/module-cache"
+mkdir -p "$MODULE_CACHE/clang" "$MODULE_CACHE/swift"
+CLANG_MODULE_CACHE_PATH="$MODULE_CACHE/clang" swiftc \
+  -module-cache-path "$MODULE_CACHE/swift" \
+  -O -parse-as-library -target arm64-apple-macos12 \
   -o "$APP/Contents/MacOS/NightCityConsole" \
   launcher/Sources/*.swift
 
 echo "==> bundling payload into Resources"
-cp runtime/red4ext_hooks.js runtime/FridaGadget.config runtime/cet_catalog.tsv "$APP/Contents/Resources/"
+cp runtime/red4ext_hooks.js runtime/red4ext_hooks_gog.js \
+   runtime/FridaGadget.config runtime/cet_catalog.tsv "$APP/Contents/Resources/"
 cp deps/RED4ext.dylib deps/FridaGadget.dylib            "$APP/Contents/Resources/"
 cp build/libcyberconsole_overlay.dylib                  "$APP/Contents/Resources/"
 # CyberModMan creator payload: seed the names file + RED4ext's config.ini (enables plugin loading) + AddressLib.

@@ -30,7 +30,7 @@ A native Apple Silicon in-game console, cheat menu, and item browser for Cyberpu
 
 ## Status
 
-macOS arm64 (Apple Silicon, M1/M2/M3/M4). Built and verified against Cyberpunk 2077 v2.3.1 (Steam). GOG support is in progress. The offsets and hashes are derived from the Steam macOS build, so other distributions are not supported yet.
+macOS arm64 (Apple Silicon, M1/M2/M3/M4). Built and verified against Cyberpunk 2077 v2.3.1 (Steam). The launcher selects experimental GOG console support automatically (see [docs/GOG.md](docs/GOG.md)); advanced mod loading remains Steam-only.
 
 ## What it does
 
@@ -51,7 +51,7 @@ See [docs/COMMANDS.md](docs/COMMANDS.md) for the full command list and known lim
 
 - Apple Silicon Mac (arm64). Intel is not supported.
 - macOS 26 or newer; tested on macOS 26 and 27.
-- Cyberpunk 2077 v2.3.1, macOS, Steam build.
+- Cyberpunk 2077 v2.3.1, macOS, Steam build or experimental GOG console support.
 - A legally-owned copy of the game. No CD PROJEKT RED files are distributed by this project.
 
 ## Install and usage (players)
@@ -93,11 +93,13 @@ Game.AddToInventory("Items.MaxDOSE", 5)    # CET-style line, also works
 
 ```bash
 git clone <this repo> && cd nightcity-console-mac
-./tools/fetch-deps.sh        # pulls FridaGadget + RED4ext into deps/ (copies from a local install if present)
+./tools/fetch-deps.sh        # checks deps/ and fills gaps from an existing console installation
 ./dev/launch.sh              # builds the overlay, stages the payload into your game, and launches it
 ```
 
-`dev/launch.sh` honors `CP2077_DIR` if your game is not at the default Steam path. The third-party runtime binaries (`RED4ext.dylib`, `FridaGadget.dylib`) are not committed (see `.gitignore`); they are fetched into `deps/` and bundled into the release `.dmg`.
+For a fresh checkout, first import missing runtime dependencies from the official release ZIP using `./tools/fetch-deps.sh --from-zip /path/to/NightCity-Console-for-Mac.zip`. See [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) for the exact release, checksums, upstream's pinned TweakXL build, and optional mod-tool requirements. Imported binaries remain ignored by Git.
+
+`dev/launch.sh` honors `CP2077_DIR` if your game is not at the default Steam path and selects the Steam or GOG command engine automatically. The GUI also detects GOG installations; see [docs/GOG.md](docs/GOG.md) for setup.
 
 To build the signed, notarized app for distribution, run `tools/sign-notarize.sh` (needs an Apple Developer ID). It re-signs everything inside-out with a hardened runtime, notarizes the `.app` and the `.dmg` with `notarytool`, staples the tickets, and produces both a `.dmg` and a `.zip` in `dist/`.
 
@@ -117,7 +119,7 @@ For the full reverse-engineering and architecture write-up (offsets, struct layo
 
 ## Compatibility and caveats
 
-- Steam version only right now. The offsets come from the Steam macOS build; the GOG build differs, so it is not supported yet. GOG support is in progress.
+- The default engine targets the Steam macOS build. The GOG build differs structurally (offsets + non-virtual RTTI); experimental GOG support is available via `runtime/red4ext_hooks_gog.js` — see [docs/GOG.md](docs/GOG.md).
 - Built against v2.3.1. Game updates can move offsets and break it. Releases are tagged per supported game version.
 - Single-player only. Modding can corrupt saves, so keep backups.
 - Install re-signs the game binary (ad-hoc) so the console can load. This is reversible at any time via Steam's "Verify Integrity of Game Files".
