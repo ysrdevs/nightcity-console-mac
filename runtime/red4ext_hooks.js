@@ -614,6 +614,7 @@ rpc.exports = {
             const ch=className?('0x'+fnv(className).toString(16)):null;
             const ob={ classHash:ch, className:className||'*', methodName:methodName, cb:cb||null, hits:0, diag:(!cb)||!!(opts&&opts.diag) };
             (obsByMethod[mh]=obsByMethod[mh]||[]).push(ob); obsCount++;
+            ensureExecHookAttached();
             log('observe + '+ob.className+'.'+methodName+'  (methodHash '+mh+(ch?(', classHash '+ch):'')+')');
             return ob;
         }
@@ -1085,7 +1086,7 @@ rpc.exports = {
             log('unknown: '+line); }
         setInterval(function(){ try{ const c=readFile(CMD); const s=(c||'').trim();
             if(!s){ lastCmd=''; }                          // file empty -> re-arm so an identical next command fires again
-            else if(s!==lastCmd){ lastCmd=s; const cmd=s.replace(/^\d+\t/,''); pendingQ.push(cmd); clearFile(CMD); log('queued: '+cmd); }
+            else if(s!==lastCmd){ lastCmd=s; const cmd=s.replace(/^\d+\t/,''); pendingQ.push(cmd); clearFile(CMD); ensureExecHookAttached(); log('queued: '+cmd); }
             // Q7: Lua Game.* call bridge - a separate synchronous channel (lreq -> lres), queued like a command
             const lq=readFile(LREQ); const ls=(lq||'').trim();
             if(!ls){ lastLReq=''; }
@@ -1107,25 +1108,44 @@ rpc.exports = {
                 log('shutdown-exit hook installed (Main+0x31e18)'); }
             else log('shutdown-exit: _exit unresolved'); }catch(e){ log('shutdown-exit err: '+e); }
         log('==== MINI-CET v3 (universal call + perks/attrs/relic) ready ====');
-        Interceptor.attach(execAddr,{
-            onEnter:function(args){ depth++; if(busy) return;
-                try{ const fn=args[0],ctx=args[1]; if(fn.isNull()||ctx.isNull()) return;
-                    if(!fromtd){ const nm='0x'+fn.add(0x08).readU64().toString(16); if(nm==='0x150155547ef75590'){ const rp=fn.add(0x18).readPointer(); fromtd={fn:fn,ctx:ctx,retType:rp.isNull()?ptr(0):rp.readPointer()}; } }
-                    const vt=ctx.readPointer(); if(vt.isNull()) return;
-                    // Observe dispatch (zero cost when no observers registered). Must run BEFORE the
-                    // player/seenVt early-returns below, or observers would fire at most once per vtable.
-                    if(obsCount){ const omh='0x'+fn.add(0x10).readU64().toString(16); const olist=obsByMethod[omh];
-                        if(olist){ let cmeta=null; try{ cmeta=new NativeFunction(vt.add(8).readPointer(),'pointer',['pointer'])(ctx); }catch(e){}
-                            for(let oi=0;oi<olist.length;oi++){ const ob=olist[oi]; if(ob.classHash && (cmeta===null || !classIsA(cmeta, ob.classHash))) continue; obsFire(ob, ctx, args[2], fn); } } }
-                    if(playerVt && vt.equals(playerVt)){ player=ctx; addCand(ctx); return; }
-                    const vk=vt.toString(); if(seenVt.has(vk)) return; seenVt.add(vk);
-                    const fn0=vt.readPointer(); if(fn0.isNull()) return;
-                    const meta=new NativeFunction(vt.add(8).readPointer(),'pointer',['pointer'])(ctx);  // GetType -> CClass
-                    if(meta.isNull()) return; const fv=meta.sub(base).add(FV0).toString(16); instReg[fv]=ctx;
-                    if(nameOf(meta)===PLAYER){ playerVt=vt; player=ctx; addCand(ctx); }
-                }catch(e){} },
-            onLeave:function(r){ depth--; if(busy) return; if(pendingQ.length&&depth===0){ const cmd=pendingQ.shift(); busy=true; try{ execute(cmd); }catch(e){ log('exec err '+e); } busy=false; } }
-        });
+        // execAddr is the game's global RTTI/script-function dispatcher - EVERY REDscript call in the
+        // whole game funnels through it, so while this Interceptor.attach is installed, every one of
+        // those calls pays a native->JS round trip (even when the JS handler does ~nothing). Normal
+        // play makes relatively few such calls/frame, but quickhack/scan vision evaluates every nearby
+        // hackable/targetable entity via REDscript every frame, so the call volume - and the round-trip
+        // tax - spikes hard exactly while scanning (matches the press/hold-trigger FPS drop 1:1).
+        // Fix: detach once idle (player found, fromtd resolved, no queued command, no observers) and
+        // only re-attach on demand (command queued below, or cmObserve() registers something) via
+        // ensureExecHookAttached(). instReg discovery for classes not yet seen at detach time simply
+        // resumes the next time the hook is re-attached.
+        let execHookListener = null;
+        function installExecHook(){
+            execHookListener = Interceptor.attach(execAddr,{
+                onEnter:function(args){ depth++; if(busy) return;
+                    try{ const fn=args[0],ctx=args[1]; if(fn.isNull()||ctx.isNull()) return;
+                        if(!fromtd){ const nm='0x'+fn.add(0x08).readU64().toString(16); if(nm==='0x150155547ef75590'){ const rp=fn.add(0x18).readPointer(); fromtd={fn:fn,ctx:ctx,retType:rp.isNull()?ptr(0):rp.readPointer()}; } }
+                        const vt=ctx.readPointer(); if(vt.isNull()) return;
+                        // Observe dispatch (zero cost when no observers registered). Must run BEFORE the
+                        // player/seenVt early-returns below, or observers would fire at most once per vtable.
+                        if(obsCount){ const omh='0x'+fn.add(0x10).readU64().toString(16); const olist=obsByMethod[omh];
+                            if(olist){ let cmeta=null; try{ cmeta=new NativeFunction(vt.add(8).readPointer(),'pointer',['pointer'])(ctx); }catch(e){}
+                                for(let oi=0;oi<olist.length;oi++){ const ob=olist[oi]; if(ob.classHash && (cmeta===null || !classIsA(cmeta, ob.classHash))) continue; obsFire(ob, ctx, args[2], fn); } } }
+                        if(playerVt && vt.equals(playerVt)){ player=ctx; addCand(ctx); return; }
+                        const vk=vt.toString(); if(seenVt.has(vk)) return; seenVt.add(vk);
+                        const fn0=vt.readPointer(); if(fn0.isNull()) return;
+                        const meta=new NativeFunction(vt.add(8).readPointer(),'pointer',['pointer'])(ctx);  // GetType -> CClass
+                        if(meta.isNull()) return; const fv=meta.sub(base).add(FV0).toString(16); instReg[fv]=ctx;
+                        if(nameOf(meta)===PLAYER){ playerVt=vt; player=ctx; addCand(ctx); }
+                    }catch(e){} },
+                onLeave:function(r){ depth--; if(busy) return;
+                    if(pendingQ.length&&depth===0){ const cmd=pendingQ.shift(); busy=true; try{ execute(cmd); }catch(e){ log('exec err '+e); } busy=false; }
+                    else if(depth===0 && playerVt && fromtd && !pendingQ.length && !obsCount){ detachExecHook(); }
+                }
+            });
+        }
+        function detachExecHook(){ if(!execHookListener) return; try{ execHookListener.detach(); }catch(e){} execHookListener=null; log('exec hook idle - detached (re-attaches on command/observe)'); }
+        function ensureExecHookAttached(){ if(!execHookListener) installExecHook(); }
+        installExecHook();
 
         // ---- AUTO-LOAD: apply installed mods on launch, no console needed (NightCity Console increment 4).
         // Queue `tweakload` then `archiveload` into pendingQ so they run on the ENGINE thread (drained by the
@@ -1138,7 +1158,7 @@ rpc.exports = {
                 var alDelays = [6000, 14000, 26000, 45000];
                 alDelays.forEach(function (d) {
                     setTimeout(function () {
-                        try { pendingQ.push('tweakload'); pendingQ.push('archiveload');
+                        try { pendingQ.push('tweakload'); pendingQ.push('archiveload'); ensureExecHookAttached();
                               log('[AUTOLOAD] queued tweakload+archiveload (+' + d + 'ms)'); }
                         catch (e) { log('[AUTOLOAD] queue err ' + e); }
                     }, d);
