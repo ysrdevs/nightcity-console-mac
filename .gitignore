@@ -32,3 +32,6 @@ docs/EXECUTE-AND-SHIP-PLAN.md
 docs/MACOS-MODDING-PLATFORM-PLAN.md
 docs/SESSION-CHECKPOINT.md
 overlay/lua-5.1.5/
+
+# cet-lua: LuaJIT/sol2/CET-reference clones + SDK symlink are fetched by cet-lua/build.sh
+cet-lua/vendor/
