@@ -12,6 +12,7 @@ function harness(overrides = {}) {
     hasRecord() { return state.existing || (state.reloaded && !state.importFails); },
     quantity() { return state.count; },
     give() { state.gives++; if (state.refuses) return false; if (!state.deferred) state.count++; return true; },
+    inventoryEvidence() { return { queryItemID: 'query-seed-1', giveItemID: 'instance-seed-3', lastQuantity: state.count }; },
   };
   const context = vm.createContext({
     CREQ: 'request', CRES: 'response', pendingQ: queue, cmnMap: { 1: 'name', 2: 'flavor', 3: 'ability' },
@@ -44,6 +45,7 @@ for (const conditions of [{ importFails: true }, { existing: true }, { unavailab
   assert.equal(h.response(), null); assert.equal(h.state.gives, 1);
   h.state.count = 1; h.timers.shift()(); h.drain();
   assert.equal(h.response().ok, true); assert.equal(h.response().after, 1); assert.equal(h.state.gives, 1);
+  assert.equal(h.response().before, 0); assert.equal(h.response().queryItemID, 'query-seed-1');
   // Retransmission is acknowledged without giving a second item, even after another request.
   h.poll(h.req('next-check', 'check')); h.drain(); h.poll(h.req()); h.drain();
   assert.equal(h.response().id, 'request-1'); assert.equal(h.response().ok, true); assert.equal(h.state.gives, 1);
@@ -62,6 +64,8 @@ for (const conditions of [{ importFails: true }, { existing: true }, { unavailab
   const h = harness({ deferred: true }); h.poll(h.req()); h.drain();
   h.state.now = 22000; h.context.bridge.creatorPoll();
   assert.equal(h.response().ok, false); assert.match(h.response().message, /Check inventory/);
+  assert.equal(h.response().before, 0); assert.equal(h.response().after, 0);
+  assert.equal(h.response().giveItemID, 'instance-seed-3');
   h.state.count = 1; h.timers.shift()(); h.drain(); assert.equal(h.response().ok, false); assert.equal(h.state.gives, 1);
 }
 {

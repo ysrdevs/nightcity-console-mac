@@ -97,6 +97,33 @@ source SHA-256. `tests/creator-rtti.mjs` runs the actual runtime resolver and Cr
 against those array placements. Native calls remain test boundaries, so this catches the false
 static-table rejection without pretending to establish live engine execution.
 
+### Inventory query identity
+
+The next manual test created a working weapon, but the UI reported an inventory-confirmation
+timeout. Quantity checks were constructing a new `ItemID.FromTDBID` every time. That is an item
+instance constructor, not a query for all instances of a record.
+
+In the retained 2.5 binary, the `FromTDBID` wrapper at RVA `0x1712e68` calls constructor
+`0x1712090` with seed `-1`. For unique weapons, the path at `0x1712198`–`0x17121cc` generates a
+new random seed of at least 3. The `CreateQuery` wrapper at `0x1713184` instead writes the TDBID
+followed by the 64-bit value 1: `rngSeed=1`, with counter/structure/flags zero. The inventory
+matcher at `0x1712b68` compares only the TDBID's CRC and length when either seed is 1; otherwise
+it also compares seed, unique counter and flags. `GetItemQuantity` reaches that matcher through
+`0x21aa3f8` → virtual slot `0x2f8` → `0x21aa51c` → `0x2156f38` → `0x2157098` → `0x2157298`.
+
+Creator now resolves native static `gameItemID.CreateQuery(TweakDBID)`, validates its signature,
+and caches the resulting query for all before/after quantity checks. `FromTDBID` is called only
+for the one item given. The success condition remains an observed quantity increase. Logs and
+acknowledgements include the before/after count, query ItemID bytes and given ItemID bytes; count
+polls log only when the value changes. Timeouts preserve the latest observed inventory evidence
+and never repeat GiveItem.
+
+The RTTI integration regression models the verified unique-seed/query-seed matching rule. It
+runs the actual Creator context code and checks quantity 0 → GiveItem once → quantity 1 on
+repeated reads, with exactly one query construction and one instance construction. This would
+reject the previous fresh-FromTDBID polling behavior. Live acknowledgement and persistence
+verification remain separate from that regression.
+
 The overlay sends a dedicated JSON request to `/tmp/cp2077_creator_request.json`. It includes a
 unique ID, current game PID, operation (`check` or `apply`), and a 20-second deadline. Apply also
 includes the generated record and three localization keys. The runtime processes requests on

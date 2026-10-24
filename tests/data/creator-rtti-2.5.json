@@ -21,6 +21,15 @@
         "GetItemQuantity"
       ],
       "staticFuncs": []
+    },
+    "gameItemID": {
+      "parent": "",
+      "funcs": [],
+      "staticFuncs": [
+        "FromTDBID",
+        "CreateQuery",
+        "IsQuery"
+      ]
     }
   }
 }

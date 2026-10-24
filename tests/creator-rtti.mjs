@@ -35,7 +35,8 @@ function harness(options = {}) {
   // Frida memory operations are replaced at the boundary. The actual resolver walks the
   // CClass arrays and parents, and the actual Creator preflight consumes its result.
   const cells = new Map(), types = new Map(), classes = new Map(), methods = new Map();
-  const events = [], logs = []; let next = 0x10000;
+  const events = [], logs = [], inventory = [], itemIDs = new Map();
+  const constructed = { fromTDBID: 0, query: 0 }; let next = 0x10000, nextSeed = 3;
   class Ptr {
     constructor(address = 0) { this.address = address; }
     add(offset) { return new Ptr(this.address + offset); }
@@ -53,7 +54,7 @@ function harness(options = {}) {
   const ptr = value => value instanceof Ptr ? value : new Ptr(Number(value));
   const alloc = (size = 0x100) => { const p = ptr(next); next += size + 0x10; return p; };
   const type = name => { const p = alloc(); types.set(p.address, '0x' + fnv(name).toString(16)); return p; };
-  const tdbType = type('TweakDBID'), handleType = type('handle:gamedataWeaponItem_Record');
+  const tdbType = type('TweakDBID'), handleType = type('handle:gamedataWeaponItem_Record'), itemType = type('gameItemID');
   for (const [name, cls] of Object.entries(fixture.classes)) {
     const meta = alloc(0x80); classes.set(name, meta);
     for (const [table, offset] of [['funcs', 0x48], ['staticFuncs', 0x58]]) {
@@ -62,25 +63,33 @@ function harness(options = {}) {
       names.forEach((method, i) => {
         const f = alloc(0x100), ret = alloc(), params = alloc(), param = alloc();
         methods.set(f.address, method); array.add(i * 8).writePointer(f);
-        f.add(0x10).writeU64(fnv(method)); f.add(0x18).writePointer(ret); ret.writePointer(handleType);
+        f.add(0x10).writeU64(fnv(method)); f.add(0x18).writePointer(ret);
+        ret.writePointer(name === 'gameItemID' ? itemType : handleType);
         f.add(0x28).writePointer(params); params.writePointer(param); param.writePointer(tdbType);
         f.add(0x30).writeU32(options.badSignature ? 2 : 1);
       });
     }
   }
   const owner = alloc(), tx = alloc(), outerContext = alloc();
+  const setItem = (address, name, seed) => { itemIDs.set(address.address, { name, seed }); return address; };
   const context = vm.createContext({
     fnv, u64: value => value, ptr, clsByName: name => classes.get(name) ?? null,
     T_TDB: '0x' + fnv('TweakDBID').toString(16),
+    T_ITEM: '0x' + fnv('gameItemID').toString(16),
     cmnAttached: true, cmnReserve: {}, fromtd: options.noItemID ? null : {}, player: options.menu ? null : owner,
     nameOf: p => types.get(p.address), sigStr: () => 'signature', log: message => logs.push(message),
+    hexp: p => JSON.stringify(itemIDs.get(p.address)),
     authPlayer: () => options.noPlayer ? null : owner,
     instOf: name => name === 'SingleplayerMenuGameController' ? (options.menuReady ? outerContext : null)
       : (options.noTransaction ? null : tx),
     tweakReloadMethod: () => () => events.push('reload'),
     Memory: { alloc }, tdbidBytes: name => name,
-    fromTDBID: (name, out) => cells.set(out.address, name),
+    // Exact 2.5 constructor semantics: unique instances get fresh seed >=3; queries use seed1.
+    fromTDBID: (name, out) => { constructed.fromTDBID++; setItem(out, name, nextSeed++); },
     callFunc: (fn, receiver, ret, args) => {
+      if (methods.get(fn.address) === 'CreateQuery') {
+        constructed.query++; return setItem(alloc(), args[0], 1);
+      }
       assert.match(methods.get(fn.address), /^Get(?:WeaponItem|Item)Record$/);
       // The native wrapper ignores x0, but its nonstatic executor route requires a live context.
       assert(receiver === owner || receiver === outerContext);
@@ -90,12 +99,19 @@ function harness(options = {}) {
     },
     callFuncRaw: (fn, receiver, ret, args) => {
       assert.equal(receiver, tx); assert.equal(args[0].inst, owner);
-      events.push([methods.get(fn.address), cells.get(args[1].ptr.address)]);
-      const result = alloc(); result.writeU32(1); return result;
+      const method = methods.get(fn.address), id = itemIDs.get(args[1].ptr.address);
+      events.push([method, id.name, id.seed]);
+      const result = alloc();
+      if (method === 'GiveItem') { inventory.push({ ...id }); result.writeU32(1); }
+      else if (method === 'GetItemQuantity') {
+        // Inventory matcher0x1712b68: query seed1 matches by TDBID; otherwise the seed must match.
+        result.writeU32(inventory.filter(item => item.name === id.name && (id.seed === 1 || item.seed === id.seed)).length);
+      } else throw Error('Unexpected inventory method ' + method);
+      return result;
     },
   });
   vm.runInContext(resolve + resolveAny + contextCode + dispatch + ';globalThis.test={resolveFunc,creatorContext,creatorProbe,canDispatchCommand};', context);
-  return { ...context.test, events, logs, outerContext };
+  return { ...context.test, events, logs, outerContext, constructed, inventory };
 }
 
 {
@@ -107,8 +123,13 @@ function harness(options = {}) {
   const creator = h.creatorContext();
   assert.equal(creator.hasRecord('Items.Preset_Lexington_Default'), true);
   assert.equal(creator.hasRecord('Items.CyberModManAbsent'), false);
-  assert.equal(creator.quantity('Items.Preset_Lexington_Default'), 1);
+  assert.equal(creator.quantity('Items.Preset_Lexington_Default'), 0);
   assert.equal(creator.give('Items.Preset_Lexington_Default'), true);
+  assert.equal(creator.quantity('Items.Preset_Lexington_Default'), 1);
+  assert.equal(creator.quantity('Items.Preset_Lexington_Default'), 1);
+  assert.deepEqual(h.constructed, { fromTDBID: 1, query: 1 });
+  assert.equal(h.inventory[0].seed, 3);
+  assert.equal(JSON.parse(creator.inventoryEvidence('Items.Preset_Lexington_Default').queryItemID).seed, 1);
 }
 {
   const h = harness({ missing: 'GetWeaponItemRecord' });
@@ -117,6 +138,7 @@ function harness(options = {}) {
 for (const [conditions, expected] of [
   [{ missing: 'GetItemQuantity' }, /gameTransactionSystem\.GetItemQuantity/],
   [{ missing: 'GiveItem' }, /gameTransactionSystem\.GiveItem/],
+  [{ missing: 'CreateQuery' }, /gameItemID\.CreateQuery/],
   [{ noPlayer: true }, /local player/], [{ noTransaction: true }, /gameTransactionSystem/],
   [{ noItemID: true }, /ItemID\.FromTDBID/], [{ badSignature: true }, /unsupported signature/],
 ]) {

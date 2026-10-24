@@ -800,11 +800,20 @@ rpc.exports = {
             if (!context || context.isNull()) throw new Error('Creator record lookup needs a current script context.');
             return !callFunc(record.fn,context,record.retType,[name]).readPointer().isNull();
         }
+        function creatorQueryMethod() {
+            const e=resolveAny(['gameItemID','ItemID'],'CreateQuery');
+            if (!e) throw new Error('Creator cannot find gameItemID.CreateQuery in RTTI.');
+            const params=e.fn.add(0x28).readPointer(), count=e.fn.add(0x30).readU32();
+            if (!e.isStatic || count!==1 || params.isNull() || nameOf(params.readPointer().readPointer())!==T_TDB ||
+                e.retType.isNull() || nameOf(e.retType)!==T_ITEM)
+                throw new Error('Creator inventory query has an unsupported signature: '+creatorMethodInfo(e));
+            return e;
+        }
         function creatorProbe(context) {
             // Read-only, usable at the main menu: no reload, file generation or inventory mutation.
             for (const pair of [['gamedataTweakDBInterface','GetWeaponItemRecord'],['gamedataTweakDBInterface','GetItemRecord'],
                 ['TweakDBInterface','GetWeaponItemRecord'],['gameTransactionSystem','GetItemQuantity'],
-                ['gameTransactionSystem','GiveItem'],['TweakXL','Reload']]) {
+                ['gameTransactionSystem','GiveItem'],['gameItemID','CreateQuery'],['TweakXL','Reload']]) {
                 const e=resolveFunc(pair[0],pair[1]);
                 log('creatorprobe '+pair.join('.')+': '+creatorMethodInfo(e));
             }
@@ -819,18 +828,44 @@ rpc.exports = {
             if (!owner || owner.isNull()) throw new Error('Creator cannot find the local player. Load a save first.');
             if (!tx || tx.isNull()) throw new Error('Creator has not captured gameTransactionSystem. Open your inventory and try again.');
             if (!fromtd) throw new Error('Creator has not captured ItemID.FromTDBID. Open your inventory and try again.');
-            const record=creatorRecordMethod();
+            const record=creatorRecordMethod(), query=creatorQueryMethod();
             const quantity=resolveFunc('gameTransactionSystem','GetItemQuantity'), give=resolveFunc('gameTransactionSystem','GiveItem');
             if (!quantity) throw new Error('Creator cannot find gameTransactionSystem.GetItemQuantity in RTTI.');
             if (!give) throw new Error('Creator cannot find gameTransactionSystem.GiveItem in RTTI.');
-            function itemID(name){ const id=Memory.alloc(16); id.writeU64(0); id.add(8).writeU64(0); fromTDBID(tdbidBytes(name),id); return id; }
+            const queryIDs=new Map(), giveIDs=new Map(), lastCounts=new Map();
+            function queryID(name) {
+                // CreateQuery uses rngSeed=1: match this TDBID regardless of the instance's random seed.
+                if (!queryIDs.has(name)) queryIDs.set(name,callFunc(query.fn,owner,query.retType,[name]));
+                return queryIDs.get(name);
+            }
+            function giveID(name) {
+                if (!giveIDs.has(name)) {
+                    const id=Memory.alloc(16); id.writeU64(0); id.add(8).writeU64(0);
+                    fromTDBID(tdbidBytes(name),id); giveIDs.set(name,id);
+                }
+                return giveIDs.get(name);
+            }
             return {
                 reload: reload,
                 hasRecord: function(name){ return creatorHasRecord(record,name,owner); },
-                quantity: function(name){ return callFuncRaw(quantity.fn,tx,quantity.retType,
-                    [{kind:'handle',inst:owner},{kind:'item16',ptr:itemID(name)}]).readS32(); },
-                give: function(name){ return callFuncRaw(give.fn,tx,give.retType,
-                    [{kind:'handle',inst:owner},{kind:'item16',ptr:itemID(name)},{kind:'i32',v:1}]).readU8() !== 0; }
+                quantity: function(name){
+                    const id=queryID(name), count=callFuncRaw(quantity.fn,tx,quantity.retType,
+                        [{kind:'handle',inst:owner},{kind:'item16',ptr:id}]).readS32();
+                    if (lastCounts.get(name)!==count)
+                        log('Creator inventory '+name+': count='+count+' queryItemID=['+hexp(id,16)+']');
+                    lastCounts.set(name,count); return count;
+                },
+                give: function(name){
+                    const id=giveID(name);
+                    log('Creator give '+name+': itemID=['+hexp(id,16)+']');
+                    return callFuncRaw(give.fn,tx,give.retType,
+                        [{kind:'handle',inst:owner},{kind:'item16',ptr:id},{kind:'i32',v:1}]).readU8() !== 0;
+                },
+                inventoryEvidence: function(name){ return {
+                    queryItemID:queryIDs.has(name)?hexp(queryIDs.get(name),16):null,
+                    giveItemID:giveIDs.has(name)?hexp(giveIDs.get(name),16):null,
+                    lastQuantity:lastCounts.has(name)?lastCounts.get(name):null
+                }; }
             };
         }
         // END CREATOR CONTEXT
@@ -839,6 +874,10 @@ rpc.exports = {
         // operation. All engine calls run from the executor queue; timers only enqueue verification.
         let creatorActive=null;
         const creatorCompleted=new Map();
+        function creatorInventoryEvidence(req,state) {
+            return state ? Object.assign({record:req.record,before:state.before,after:state.after},
+                state.ctx.inventoryEvidence(req.record)) : {};
+        }
         function creatorRespond(req,ok,message,extra) {
             const response=Object.assign({id:req.id,ok:ok,message:message},extra||{});
             creatorCompleted.set(req.id,response);
@@ -858,8 +897,10 @@ rpc.exports = {
                 if (req.op!=='check' && req.op!=='apply') throw new Error('Unknown Creator operation.');
                 if (state) {
                     const count=state.ctx.quantity(req.record);
+                    state.after=count;
+                    if (creatorActive && creatorActive.req.id===req.id) creatorActive.state=state;
                     if (count>state.before) {
-                        creatorRespond(req,true,'Created and added '+req.record+' to inventory.',{record:req.record,before:state.before,after:count});
+                        creatorRespond(req,true,'Created and added '+req.record+' to inventory.',creatorInventoryEvidence(req,state));
                     } else {
                         setTimeout(function(){ pendingQ.push({creator:req,state:state}); },100);
                     }
@@ -880,19 +921,26 @@ rpc.exports = {
                 if (!ctx.hasRecord(req.record))
                     throw new Error('TweakXL did not create '+req.record+'. Files are saved; check TweakXL.log. No item was given.');
                 const before=ctx.quantity(req.record);
+                log('Creator inventory before '+req.record+': '+before);
                 if (before<0) throw new Error('Could not read the current inventory quantity. No item was given.');
                 if (!ctx.give(req.record)) throw new Error('The game refused to add the weapon. Files are saved.');
                 if (creatorActive && creatorActive.req.id===req.id) creatorActive.given=true;
                 // Give exactly once. Confirmation can take another game tick; a retry only reads quantity.
-                creatorRun(req,{ctx:ctx,before:before});
-            } catch(e) { creatorRespond(req,false,String(e.message||e)); }
+                creatorRun(req,{ctx:ctx,before:before,after:before});
+            } catch(e) {
+                const evidence=creatorInventoryEvidence(req,state);
+                if (state) log('Creator inventory not confirmed: '+JSON.stringify(evidence));
+                creatorRespond(req,false,String(e.message||e),evidence);
+            }
         }
         function creatorPoll() {
             if (creatorActive && Date.now()>creatorActive.req.deadline) {
                 const pending=creatorActive;
+                const evidence=creatorInventoryEvidence(pending.req,pending.state);
+                if (pending.state) log('Creator inventory timeout: '+JSON.stringify(evidence));
                 creatorRespond(pending.req,false,pending.given ?
                     'The item request was sent, but inventory confirmation timed out. Check inventory before trying again.' :
-                    'Creator request expired while waiting for the game. Resume gameplay and try again.');
+                    'Creator request expired while waiting for the game. Resume gameplay and try again.',evidence);
             }
             const raw=readFile(CREQ); if (!raw || !raw.trim()) return;
             let req; try { req=JSON.parse(raw); } catch(e) { return; } // writer may still be finishing
