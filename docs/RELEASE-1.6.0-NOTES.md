@@ -39,8 +39,9 @@ acceptance steps, [RELEASE-BUILD.md](RELEASE-BUILD.md) for assembly/signing, and
   the tested weapon kept its custom name, Iconic identity/effects and equip/fire behavior.
 - Close the native custom-stat hook reliability gate under the complete injected
   stack; one successful creation is not a substitute for that check.
-- Complete the public-feature smoke tests and the 2.3.1 regression check before
-  claiming full parity or newly verified support for both game versions.
+- Complete the public-feature smoke tests on 2.5 before claiming full parity.
+  Retain the public 2.3.1 compatibility payload without claiming a new old-game
+  validation; an unavailable 2.3.1 replay does not block the targeted 2.5 release.
 - Freeze the accepted source revision and candidate file hashes. Recheck the
   final signed payload after any JS, native, overlay or launcher change.
 - Prepare final ZIP/DMG files from the accepted candidate. Local Developer ID

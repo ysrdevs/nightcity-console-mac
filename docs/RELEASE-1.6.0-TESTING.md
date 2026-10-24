@@ -69,7 +69,7 @@ See RELEASE-BUILD.md and ../native25/README.md for inputs and source provenance.
 - All changes are local commits under ysrdevs. No push, release upload or notarization
   submission has been performed.
 
-## Manual test now required
+## Acceptance procedure (Creator passed)
 
 1. Use the prepared test launcher and click Play. It targets an isolated game copy;
    the game profile and saves were backed up before testing.
@@ -88,9 +88,12 @@ the live development installation during this first test.
 
 ## Remaining release gates
 
-Manual Creator and persistence results, public-feature smoke tests, and actual
-2.3.1 runtime regression checks remain outstanding. Preserved 2.3.1 binaries and
-static checks are not evidence of a new live 2.3.1 pass. The native source recipe's
-patch replay and generated SDK hashes were verified; a fresh end-to-end orchestration
-build has not yet been run. A final distribution package should be made only after
-acceptance; the current app is signed locally but not notarized.
+Creator creation, acknowledgement, uniqueness and persistence have passed. Remaining
+2.5 checks are the public-feature smoke test and the observed custom-stat hook crash,
+followed by packaging and extraction/signature verification of the accepted app.
+
+Preserved 2.3.1 binaries and static checks are not evidence of a new live 2.3.1 pass.
+An unavailable old-game replay does not block a release explicitly validated for 2.5;
+do not advertise a new 2.3.1 validation. The native source recipe's patch replay and
+generated SDK hashes were verified; a fresh end-to-end orchestration build has not
+yet been run. The current app is signed locally but not notarized.
