@@ -129,10 +129,6 @@ This is free and open source. If it saved you some hassle and you want to suppor
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/ysrdevs)
 
-Game 2.5 support (native TweakXL/ArchiveXL) by fentz26:
-
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/fentz26)
-
 ## Credits and acknowledgements
 
 macOS port and reverse engineering by ysrdevs (Yuvraj Singh).
