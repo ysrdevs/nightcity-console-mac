@@ -12,9 +12,11 @@ session; it does not establish every effect combination or restart persistence.
 The user is testing persistence in a new manual save slot.
 
 The same creation attempt produced a false failure indication: the inventory
-acknowledgement timed out after GiveItem. The discrepancy between the Creator
-message and the actual inventory is under investigation. Do not label this
-candidate release-ready or suggest repeating Create solely because of that message.
+acknowledgement timed out after GiveItem. The quantity check generated fresh unique
+ItemIDs instead of a record query. Commit `9437697` changes it to native
+`ItemID.CreateQuery`; the separately signed third candidate needs a live retest.
+Do not label this candidate release-ready or suggest repeating Create solely
+because of the earlier message.
 
 The public scope is the existing console/item-browser/cheat workflow plus the
 Iconic weapon Creator on native macOS Steam game 2.5.0. TweakXL and ArchiveXL are

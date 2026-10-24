@@ -27,6 +27,14 @@ visible result is successful creation, while the automatic quantity check did no
 confirm it. No second item should be given to work around this timeout. A new-slot
 save/relaunch persistence check has been requested from the user.
 
+Commit `9437697` fixes the quantity check to use the game's `ItemID.CreateQuery`
+wildcard identity, while retaining one unique ItemID for GiveItem. Constructor and
+inventory-matching semantics were verified in the 2.5 binary; focused tests cover
+the previously failing unique-weapon case. The separately signed third candidate
+changes only runtime JavaScript resources, preserving all other test2 resources
+byte-for-byte. It is prepared but not installed while the user tests persistence.
+Its live success acknowledgement remains unverified.
+
 The broader custom-stat scenario also reproduced a separate native near-allocation
 failure with the full injected stack. That remains a release gate; a previous passing
 run did not establish reliable custom-stat hook installation. The second Creator
