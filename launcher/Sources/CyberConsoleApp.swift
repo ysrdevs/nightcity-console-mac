@@ -93,7 +93,12 @@ final class Model: ObservableObject {
     var injectDylibs: [String] { ["RED4ext.dylib", "FridaGadget.dylib", "libcyberconsole_overlay.dylib"] }
     func fullyInstalled() -> Bool {
         let fm = FileManager.default
-        let core = payloadFiles.allSatisfy { fm.fileExists(atPath: "\(red4Dir)/\($0)") }
+        guard let resources = Bundle.main.resourceURL else { return false }
+        // Play must refresh an older Creator bridge/overlay even when the native loader is unchanged.
+        // User-created names are seed-only data and are intentionally outside payloadFiles.
+        let core = payloadFiles.allSatisfy {
+            fm.contentsEqual(atPath: "\(red4Dir)/\($0)", andPath: resources.appendingPathComponent($0).path)
+        }
         let tweakXL = fm.fileExists(atPath: "\(gamePath)/red4ext/plugins/TweakXL/TweakXL.dylib")
         let archiveXL = fm.fileExists(atPath: "\(gamePath)/red4ext/plugins/ArchiveXL/ArchiveXL.dylib")
         // scc (the redscript compiler) is required only when the app bundle actually ships it, so old
