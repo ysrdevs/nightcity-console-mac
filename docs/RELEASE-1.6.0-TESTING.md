@@ -2,6 +2,26 @@
 
 Status: ready for manual Creator testing on macOS game 2.5.0. Not a validated public release yet.
 
+## Second local candidate
+
+The first manual test failed before writing weapon files: Creator incorrectly required
+the native record getter to be registered in the static-function array. The real 2.5
+RTTI table registers it as an instance function. The corrected code validates its
+signature and passes the resolved player as the script executor's calling context.
+The native wrapper itself ignores that object, but the executor requires it.
+
+A read-only probe using the corrected call found `Items.Preset_Lexington_Default`
+in the actual 2.5 menu session. Early startup probes were inconclusive because the
+database was not loaded; the probe now waits for a menu/player context. The final
+menu scenario exited normally with its checks passing, although the harness still
+reported zero core-hook counters before the early exit. This proves the record
+lookup, not inventory creation or hot reload. Manual Create & Apply remains pending.
+
+The broader custom-stat scenario also reproduced a separate native near-allocation
+failure with the full injected stack. That remains a release gate; a previous passing
+run did not establish reliable custom-stat hook installation. The second Creator
+candidate retains the existing native payload while this is investigated separately.
+
 The candidate preserves the public 1.5.0 ZIP's game-2.3.1 native dependencies and
 adds a separate 2.5 loader, address database, TweakXL and ArchiveXL. Codeware,
 CET-Lua and Virtual Atelier development are outside this candidate's release scope.
