@@ -7,7 +7,7 @@
       "name": "RED4ext",
       "url": "https://github.com/fentz26/RED4ext-macos.git",
       "upstream_commit": "a70a5e4e70deeb46ab5671abb4b448605677e744",
-      "patched_tree": "efe328af66093c2662ab2d87fd9ef68a3a5afe51",
+      "patched_tree": "a8c2153c496cc6a0f1d18d6833276fa5b54ff4a9",
       "patches": [
         {
           "path": "patches/RED4ext/0001-63ff33f.patch",
@@ -23,6 +23,16 @@
           "path": "patches/RED4ext/0003-d5d7b8a.patch",
           "commit": "d5d7b8ae2b86c4185d47521f43e81af4dea91b79",
           "sha256": "452d783223e1ef20defd21111605b010c6ecfa77aa83eafd75f75f51141c8ac2"
+        },
+        {
+          "path": "patches/RED4ext/0004-5dcda66.patch",
+          "commit": "5dcda66e994ff0371a6d6e97b348b09e832eb580",
+          "sha256": "12c0394e2f99803c83432f613af707d1347a632b197c94cea98df667467c9107"
+        },
+        {
+          "path": "patches/RED4ext/0005-27566e1.patch",
+          "commit": "27566e1ced6640b69ab62cf4bf03c8814b3eab1c",
+          "sha256": "299d9ac09eeed8b628a89569c9f399519102525f51cb2f596d3f6f3294179c07"
         }
       ],
       "submodules": [

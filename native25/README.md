@@ -6,12 +6,14 @@ The upstream macOS ports and their authors retain their history and attribution.
 
 | Component | Pinned upstream | Local changes |
 | --- | --- | --- |
-| [RED4ext](https://github.com/fentz26/RED4ext-macos) | `a70a5e4e70deeb46ab5671abb4b448605677e744` | Host application library paths for background tests; retry hook transactions when threads exit; keep hook island searches inside the ARM64 branch window |
+| [RED4ext](https://github.com/fentz26/RED4ext-macos) | `a70a5e4e70deeb46ab5671abb4b448605677e744` | Host application library paths for background tests; retry hook transactions when threads exit; keep hook island searches inside the ARM64 branch window; diagnose exhausted allocation windows and use a guarded absolute hook fallback |
 | [RED4ext.SDK](https://github.com/fentz26/RED4ext.SDK-macos) | `64c1cd0095084ebbed65e725d1f9bc589d7a6e73` | None; generate the 2.5 layouts from its committed RTTI dump |
 | [TweakXL](https://github.com/fentz26/cp2077-tweak-xl-macos) | `040d54cabf5a6b5fa46453d59537dc236d8fa0ea` | Preserve the launcher's staged scripts between launches |
 | [ArchiveXL](https://github.com/fentz26/cp2077-archive-xl-macos) | `fcfc94a2cf23cdee51e267377977f0ac4693f2a0` | Preserve the launcher's staged scripts between launches |
 
 The manifest records every local patch's original commit and SHA-256, the resulting Git tree, and the macOS build submodule pins. It excludes Windows-only dependencies and the unused vendor SDKs. Both plugins' pinned CMake sources fetch spdlog 1.16.0 and yaml-cpp 0.8.0 with SHA-256 verification; the same pins are listed in the manifest for review.
+
+The RED4ext series includes allocation diagnostics (`5dcda66`) and the absolute-hook fallback (`27566e1`). When the near and ADRP allocation windows are exhausted, the fallback uses a 16-byte entry patch after validating function boundaries, relocation, page boundaries, interior branches and return addresses. Its forced-exhaustion regression tests ship in the patch. Source replay and CTest results do not replace a live check of the final payload under the complete injected stack.
 
 ## Build
 

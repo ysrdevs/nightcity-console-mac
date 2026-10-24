@@ -1,0 +1,545 @@
+From 27566e1ced6640b69ab62cf4bf03c8814b3eab1c Mon Sep 17 00:00:00 2001
+From: ysrdevs <singh.yuvraj31@icloud.com>
+Date: Sat, 24 Oct 2026 05:30:41 -0500
+Subject: [PATCH] macOS: fall back to absolute hooks when branch windows are
+ full
+
+---
+ src/dll/Platform/NativeHook.cpp | 105 +++++++++++++---
+ src/dll/Platform/NativeHook.hpp |  10 +-
+ tests/native_hook/main.cpp      | 207 ++++++++++++++++++++++++++++++++
+ 3 files changed, 300 insertions(+), 22 deletions(-)
+
+diff --git a/src/dll/Platform/NativeHook.cpp b/src/dll/Platform/NativeHook.cpp
+index 747a7be..c2cfd90 100644
+--- a/src/dll/Platform/NativeHook.cpp
++++ b/src/dll/Platform/NativeHook.cpp
+@@ -51,9 +51,10 @@ struct Node
+ struct Site
+ {
+     uintptr_t target = 0;
+-    uint32_t original[3]{};
++    uint32_t original[4]{};
+     uint32_t patchBytes = 4;
+     bool far = false;
++    bool absolute = false;
+     uint8_t* page = nullptr;
+     uint32_t tramp[40]{};
+     uint32_t trampCount = 0;
+@@ -90,6 +91,7 @@ bool g_open = false;
+ std::atomic<bool> g_writesAllowed{true};
+ #ifdef RED4EXT_NATIVE_HOOK_TEST
+ std::atomic<bool> g_forceFar{false};
++std::atomic<bool> g_forceAbsolute{false};
+ #endif
+ 
+ ProtectOp g_protLog[64]{};
+@@ -304,12 +306,26 @@ bool InAdrpRange(uintptr_t pc, uintptr_t dest)
+ bool WantFar()
+ {
+ #ifdef RED4EXT_NATIVE_HOOK_TEST
+-    return g_forceFar.load(std::memory_order_relaxed);
++    return g_forceFar.load(std::memory_order_relaxed) || g_forceAbsolute.load(std::memory_order_relaxed);
+ #else
+     return false;
+ #endif
+ }
+ 
++bool WantAbsolute()
++{
++#ifdef RED4EXT_NATIVE_HOOK_TEST
++    return g_forceAbsolute.load(std::memory_order_relaxed);
++#else
++    return false;
++#endif
++}
++
++const char* PatchName(const Site* site)
++{
++    return site->absolute ? "abs" : site->far ? "far" : "near";
++}
++
+ bool NeedsCopy(uintptr_t page)
+ {
+     vm_region_extended_info_data_t info{};
+@@ -691,7 +707,7 @@ void DestroySite(Site* site)
+ int32_t FailSite(Site* site, int32_t kr)
+ {
+     const uintptr_t target = site->target;
+-    const char* patch = site->far ? "far" : "near";
++    const char* patch = PatchName(site);
+     DestroySite(site);
+     return FailAttach(target, kr, patch);
+ }
+@@ -961,7 +977,16 @@ bool PatchSites(Site** sites, uint32_t siteCount, const uintptr_t* hotPages, uin
+             const bool live = SiteHasLive(site);
+             if (!site->installed && live)
+             {
+-                if (site->far)
++                if (site->absolute)
++                {
++                    // A literal address reaches an island anywhere in the
++                    // process, even after the entire ADRP window is mapped.
++                    uint32_t words[4] = {0x58000051u, 0xD61F0220u, 0, 0};
++                    const uint64_t island = reinterpret_cast<uint64_t>(site->page);
++                    std::memcpy(words + 2, &island, sizeof(island));
++                    std::memcpy(reinterpret_cast<void*>(site->target), words, sizeof(words));
++                }
++                else if (site->far)
+                 {
+                     uint32_t words[3]{};
+                     if (!EncodeFar(site->target, reinterpret_cast<uintptr_t>(site->page), words))
+@@ -1088,8 +1113,8 @@ bool StopAndPatch(Site** sites, uint32_t siteCount)
+         const bool live = SiteHasLive(site);
+         if ((!site->installed && live) || (site->installed && !live))
+         {
+-            // Near patches refuse the whole target page. Far patches only
+-            // care about the 12-byte window, checked below.
++            // Near patches refuse the whole target page. Far and absolute
++            // patches check their overwritten instruction window below.
+             if (!site->far)
+             {
+                 addHot(PageOf(site->target));
+@@ -1211,8 +1236,8 @@ bool StopAndPatch(Site** sites, uint32_t siteCount)
+             }
+ 
+             const uint64_t pc = arm_thread_state64_get_pc(state);
+-            // Far patches overwrite 12 bytes. A stopped thread with PC in
+-            // (target, target+12) would resume mid-patch. PC is not rewritten:
++            // A stopped thread inside a far or absolute patch's overwritten
++            // instructions would resume mid-patch. PC is not rewritten:
+             // Commit retries, then fails closed, same as a hot near page.
+             bool farInterior = false;
+             for (uint32_t s = 0; s < siteCount; ++s)
+@@ -1603,7 +1628,7 @@ bool DescribeFunction(uintptr_t target, FnSpan* out)
+     return false;
+ }
+ 
+-bool BranchesIntoPatch(uintptr_t target, uintptr_t end)
++bool BranchesIntoPatch(uintptr_t target, uintptr_t end, uint32_t patchBytes)
+ {
+     if (end < target)
+     {
+@@ -1618,7 +1643,7 @@ bool BranchesIntoPatch(uintptr_t target, uintptr_t end)
+         const uint64_t pc = reinterpret_cast<uint64_t>(instr);
+         uint64_t dest = 0;
+         bool branch = false;
+-        if ((word & 0xFC000000u) == 0x14000000u)
++        if ((word & 0x7C000000u) == 0x14000000u)
+         {
+             dest = pc + static_cast<uint64_t>(SignExtend(word & 0x03FFFFFFu, 26) << 2);
+             branch = true;
+@@ -1639,7 +1664,7 @@ bool BranchesIntoPatch(uintptr_t target, uintptr_t end)
+             branch = true;
+         }
+ 
+-        if (branch && (dest == target + 4 || dest == target + 8))
++        if (branch && dest > target && dest < target + patchBytes)
+         {
+             return true;
+         }
+@@ -1648,7 +1673,7 @@ bool BranchesIntoPatch(uintptr_t target, uintptr_t end)
+     return false;
+ }
+ 
+-int32_t FarRefusal(uintptr_t target)
++int32_t FarRefusal(uintptr_t target, uint32_t patchBytes = 12)
+ {
+     FnSpan span;
+     if (!DescribeFunction(target, &span) || !span.start)
+@@ -1662,17 +1687,35 @@ int32_t FarRefusal(uintptr_t target)
+         limit = span.next;
+     }
+ 
+-    if (limit < target + 12)
++    if (limit < target + patchBytes)
+     {
+         return kErrFunctionTooShort;
+     }
+ 
+-    if (PageOf(target) != PageOf(target + 11))
++    if (PageOf(target) != PageOf(target + patchBytes - 1))
+     {
+         return kErrSpansPage;
+     }
+ 
+-    if (BranchesIntoPatch(target, limit))
++    if (patchBytes == 16)
++    {
++        // A thread already inside a callee may have a saved return address
++        // in the overwritten entry, even when its current PC is elsewhere.
++        // Refuse widening over such calls instead of invalidating that return.
++        const auto* words = reinterpret_cast<const uint32_t*>(target);
++        for (uint32_t i = 0; i + 1 < patchBytes / 4; ++i)
++        {
++            const bool bl = (words[i] & 0xFC000000u) == 0x94000000u;
++            const bool linkedRegisterBranch = (words[i] & 0xFE000000u) == 0xD6000000u &&
++                                              (words[i] & 0x00200000u) != 0;
++            if (bl || linkedRegisterBranch)
++            {
++                return kErrInteriorReturn;
++            }
++        }
++    }
++
++    if (BranchesIntoPatch(target, limit, patchBytes))
+     {
+         return kErrInteriorBranch;
+     }
+@@ -1682,7 +1725,7 @@ int32_t FarRefusal(uintptr_t target)
+ 
+ int32_t BuildTrampoline(Site* site)
+ {
+-    const uint32_t countInsns = site->far ? 3u : 1u;
++    const uint32_t countInsns = site->patchBytes / 4;
+     uint32_t count = 0;
+     uint64_t dst = reinterpret_cast<uint64_t>(site->page + 16);
+     const auto* src = reinterpret_cast<const uint32_t*>(site->target);
+@@ -1948,6 +1991,11 @@ void ForceFar(bool on)
+ {
+     g_forceFar.store(on, std::memory_order_relaxed);
+ }
++
++void ForceAbsolute(bool on)
++{
++    g_forceAbsolute.store(on, std::memory_order_relaxed);
++}
+ #endif
+ 
+ void SetIdentity(void* target, const char* name, const char* owner)
+@@ -1992,6 +2040,7 @@ int32_t Attach(void** ppPointer, void* detour)
+     {
+         uint8_t* page = nullptr;
+         bool far = false;
++        bool absolute = false;
+         if (!WantFar() && AllocateNear(target, &page))
+         {
+             far = false;
+@@ -2004,9 +2053,24 @@ int32_t Attach(void** ppPointer, void* detour)
+                 return FailAttach(target, why, "far");
+             }
+ 
+-            if (!AllocateFar(target, &page))
++            if (WantAbsolute() || !AllocateFar(target, &page))
+             {
+-                return FailAttach(target, kErrUnreachable, "far");
++                // Late plugin hooks can arrive after every page in the
++                // +/-4 GiB window is occupied. Only widen the patch after
++                // checking all four overwritten instructions are safe.
++                const int32_t absoluteWhy = FarRefusal(target, 16);
++                if (absoluteWhy != 0)
++                {
++                    return FailAttach(target, absoluteWhy, "abs");
++                }
++
++                mach_vm_address_t anywhere = 0;
++                if (mach_vm_allocate(mach_task_self(), &anywhere, PageSize(), VM_FLAGS_ANYWHERE) != KERN_SUCCESS)
++                {
++                    return FailAttach(target, kErrUnreachable, "abs");
++                }
++                page = reinterpret_cast<uint8_t*>(anywhere);
++                absolute = true;
+             }
+ 
+             far = true;
+@@ -2015,7 +2079,8 @@ int32_t Attach(void** ppPointer, void* detour)
+         site = new Site;
+         site->target = target;
+         site->far = far;
+-        site->patchBytes = far ? 12u : 4u;
++        site->absolute = absolute;
++        site->patchBytes = absolute ? 16u : far ? 12u : 4u;
+         std::memcpy(site->original, reinterpret_cast<void*>(target), site->patchBytes);
+         site->page = page;
+         site->next = g_sites;
+@@ -2284,7 +2349,7 @@ uint32_t CopyHookStats(HookInfo* out, uint32_t cap)
+                 info.installKr = site->installKr;
+                 info.installed = site->installed && node->committed && !node->detach;
+                 info.hits = node->hits.load(std::memory_order_relaxed);
+-                CopyStr(info.patch, sizeof(info.patch), site->far ? "far" : "near");
++                CopyStr(info.patch, sizeof(info.patch), PatchName(site));
+             }
+ 
+             ++count;
+diff --git a/src/dll/Platform/NativeHook.hpp b/src/dll/Platform/NativeHook.hpp
+index ec2a34b..cd4322f 100644
+--- a/src/dll/Platform/NativeHook.hpp
++++ b/src/dll/Platform/NativeHook.hpp
+@@ -8,9 +8,12 @@
+ // Native arm64 hook engine. No MAP_JIT.
+ // Near: a 4-byte B to an island within ±128 MiB.
+ // Far: ADRP x17; ADD x17, x17, #pageoff; BR x17 to an island within ±4 GiB.
++// If that window is exhausted, an absolute patch uses LDR x17; BR x17;
++// a 64-bit island address (16 bytes total), with no distance constraint.
+ // A far patch is only installed at an LC_FUNCTION_STARTS entry. The first
+-// three instructions are relocated; an unsupported PC-relative form, a
+-// function shorter than 12 bytes, or a branch into entry+4/+8 is refused.
++// three instructions (four for absolute) are relocated. Unsupported relocation,
++// too-short functions, page crossings, or branches into the patch are refused.
++// Absolute patches also refuse calls with a return address inside the patch.
+ // x0-x8 stay untouched. x16/x17 are the veneer scratches.
+ 
+ namespace NativeHook
+@@ -27,6 +30,7 @@ inline constexpr int32_t kErrInteriorBranch = -4;
+ inline constexpr int32_t kErrRelocate = -5;
+ inline constexpr int32_t kErrUnreachable = -6;
+ inline constexpr int32_t kErrSpansPage = -7;
++inline constexpr int32_t kErrInteriorReturn = -8;
+ 
+ struct ProtectOp
+ {
+@@ -64,6 +68,8 @@ struct HookInfo
+ void Begin();
+ #ifdef RED4EXT_NATIVE_HOOK_TEST
+ void ForceFar(bool on);
++// Simulate exhausted near and ADRP allocation windows.
++void ForceAbsolute(bool on);
+ #endif
+ int32_t Attach(void** ppPointer, void* detour);
+ int32_t Detach(void** ppPointer, void* detour);
+diff --git a/tests/native_hook/main.cpp b/tests/native_hook/main.cpp
+index 83ef631..b1a5401 100644
+--- a/tests/native_hook/main.cpp
++++ b/tests/native_hook/main.cpp
+@@ -510,6 +510,12 @@ struct NhBig
+     uint64_t v[8];
+ };
+ 
++struct NhRange
++{
++    float min;
++    float max;
++};
++
+ extern "C" uint64_t NhAdd(uint64_t);
+ extern "C" uint64_t NhAddNext();
+ extern "C" uint64_t NhHi(uint64_t);
+@@ -529,6 +535,15 @@ extern "C" uint64_t NhBad();
+ extern "C" uint64_t NhBadNext();
+ extern "C" NhBig NhStruct(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t);
+ extern "C" uint64_t NhStructNext();
++extern "C" NhRange NhAbsoluteRange(uint64_t, uint32_t);
++extern "C" uint64_t NhAbsoluteShort();
++extern "C" uint64_t NhAbsoluteShortNext();
++extern "C" uint64_t NhAbsoluteBack();
++extern "C" uint64_t NhAbsoluteBackNext();
++extern "C" uint64_t NhAbsoluteCall();
++extern "C" uint64_t NhAbsoluteCallNext();
++extern "C" uint64_t NhAbsoluteCallRegister();
++extern "C" uint64_t NhAbsoluteEdge();
+ 
+ __asm__(R"(
+ .text
+@@ -644,6 +659,66 @@ _NhStruct:
+ .globl _NhStructNext
+ _NhStructNext:
+     ret
++.globl _NhAbsoluteRange
++_NhAbsoluteRange:
++    movi v1.2d, #0
++    movi v0.2d, #0
++    cmp w1, #0x6af
++    b.hi LabsoluteExit
++    fmov s0, #1.0
++    fmov s1, #2.0
++LabsoluteExit:
++    ret
++.globl _NhAbsoluteShort
++_NhAbsoluteShort:
++    mov w0, #5
++    nop
++    ret
++.globl _NhAbsoluteShortNext
++_NhAbsoluteShortNext:
++    ret
++.globl _NhAbsoluteBack
++_NhAbsoluteBack:
++    mov w0, #0
++    nop
++    nop
++LabsoluteBack:
++    add w0, w0, #1
++    cmp w0, #3
++    b.lt LabsoluteBack
++    ret
++.globl _NhAbsoluteBackNext
++_NhAbsoluteBackNext:
++    ret
++.globl _NhAbsoluteCall
++_NhAbsoluteCall:
++    stp x29, x30, [sp, #-16]!
++    bl LabsoluteCallee
++    ldp x29, x30, [sp], #16
++    ret
++LabsoluteCallee:
++    mov w0, #7
++    ret
++.globl _NhAbsoluteCallNext
++_NhAbsoluteCallNext:
++    ret
++.globl _NhAbsoluteCallRegister
++_NhAbsoluteCallRegister:
++    stp x29, x30, [sp, #-16]!
++    adr x9, LabsoluteCallee
++    blr x9
++    ldp x29, x30, [sp], #16
++    ret
++.section __TEXT,__nhabsedge,regular,pure_instructions
++.p2align 14
++    .space 16372
++.globl _NhAbsoluteEdge
++_NhAbsoluteEdge:
++    mov w0, #9
++    nop
++    nop
++    ret
++.text
+ )");
+ 
+ struct FarScope
+@@ -976,6 +1051,135 @@ static void TestFarStruct()
+     std::printf("PASS far x8\n");
+ }
+ 
++struct AbsoluteScope
++{
++    AbsoluteScope()
++    {
++        NativeHook::ForceAbsolute(true);
++    }
++
++    ~AbsoluteScope()
++    {
++        NativeHook::ForceAbsolute(false);
++    }
++};
++
++static NhRange (*g_rangeOrig)(uint64_t, uint32_t) = nullptr;
++
++static NhRange RangeDetour(uint64_t owner, uint32_t stat)
++{
++    return g_rangeOrig(owner, stat);
++}
++
++static void TestAbsolutePatch()
++{
++    AbsoluteScope scope;
++    uint32_t before[4];
++    std::memcpy(before, reinterpret_cast<void*>(NhAbsoluteRange), sizeof(before));
++    void* slot = reinterpret_cast<void*>(NhAbsoluteRange);
++    NativeHook::SetIdentity(slot, "AbsoluteRange", "RED4ext");
++    const bool attached = Hook(&slot, reinterpret_cast<void*>(RangeDetour));
++    CHECK(attached);
++    if (!attached)
++    {
++        return;
++    }
++    g_rangeOrig = reinterpret_cast<NhRange (*)(uint64_t, uint32_t)>(slot);
++
++    const auto* words = reinterpret_cast<const uint32_t*>(NhAbsoluteRange);
++    CHECK(words[0] == 0x58000051u && words[1] == 0xD61F0220u);
++    uint64_t island = 0;
++    std::memcpy(&island, words + 2, sizeof(island));
++    CHECK(island + 16 == reinterpret_cast<uint64_t>(slot));
++
++    // The fourth instruction is the conditional branch from the actual
++    // StatsDataSystem entry. Exercise both paths and its SIMD HFA return.
++    const NhRange inRange = NhAbsoluteRange(123, 0x6af);
++    const NhRange outOfRange = NhAbsoluteRange(123, 0x6b0);
++    CHECK(inRange.min == 1.0f && inRange.max == 2.0f);
++    CHECK(outOfRange.min == 0.0f && outOfRange.max == 0.0f);
++    NativeHook::HookInfo infos[64]{};
++    const uint32_t count = NativeHook::CopyHookStats(infos, 64);
++    bool found = false;
++    for (uint32_t i = 0; i < count && i < 64; ++i)
++    {
++        if (std::strcmp(infos[i].name, "AbsoluteRange") == 0)
++        {
++            found = true;
++            CHECK(std::strcmp(infos[i].patch, "abs") == 0);
++            CHECK(infos[i].installed && infos[i].hits == 2);
++        }
++    }
++    CHECK(found);
++    {
++        Tx tx;
++        CHECK(NativeHook::Detach(&slot, reinterpret_cast<void*>(RangeDetour)) == 0);
++        CHECK(tx.Commit());
++    }
++    CHECK(slot == reinterpret_cast<void*>(NhAbsoluteRange));
++    CHECK(std::memcmp(before, reinterpret_cast<void*>(NhAbsoluteRange), sizeof(before)) == 0);
++    CHECK(NhAbsoluteRange(0, 0x6af).max == 2.0f);
++
++    // An aborted transaction must also leave the entire 16-byte entry intact.
++    {
++        Tx tx;
++        CHECK(NativeHook::Attach(&slot, reinterpret_cast<void*>(RangeDetour)) == 0);
++        CHECK(NativeHook::Abort() == 0);
++    }
++    CHECK(slot == reinterpret_cast<void*>(NhAbsoluteRange));
++    CHECK(std::memcmp(before, reinterpret_cast<void*>(NhAbsoluteRange), sizeof(before)) == 0);
++    std::printf("PASS absolute fourth-instruction branch, HFA, restore and abort\n");
++}
++
++static void TestAbsoluteRefuse()
++{
++    AbsoluteScope scope;
++    CHECK(reinterpret_cast<uintptr_t>(NhAbsoluteShortNext) - reinterpret_cast<uintptr_t>(NhAbsoluteShort) == 12);
++    CHECK(Refuse(reinterpret_cast<void*>(NhAbsoluteShort), reinterpret_cast<void*>(TextDetour)) ==
++          NativeHook::kErrFunctionTooShort);
++    CHECK(NhAbsoluteShort() == 5);
++    CHECK(NhAbsoluteBack() == 3);
++    CHECK(NhAbsoluteCall() == 7);
++    CHECK(NhAbsoluteCallRegister() == 7);
++    CHECK(Refuse(reinterpret_cast<void*>(NhAbsoluteCallRegister), reinterpret_cast<void*>(TextDetour)) ==
++          NativeHook::kErrInteriorReturn);
++    CHECK(NhAbsoluteCallRegister() == 7);
++    CHECK(Refuse(reinterpret_cast<void*>(NhAbsoluteCall), reinterpret_cast<void*>(TextDetour)) ==
++          NativeHook::kErrInteriorReturn);
++    CHECK(NhAbsoluteCall() == 7);
++    CHECK(Refuse(reinterpret_cast<void*>(NhAbsoluteBack), reinterpret_cast<void*>(TextDetour)) ==
++          NativeHook::kErrInteriorBranch);
++    CHECK(NhAbsoluteBack() == 3);
++    CHECK(reinterpret_cast<uintptr_t>(NhAbsoluteEdge) % vm_page_size == vm_page_size - 12);
++    CHECK(Refuse(reinterpret_cast<void*>(NhAbsoluteEdge), reinterpret_cast<void*>(TextDetour)) ==
++          NativeHook::kErrSpansPage);
++    CHECK(NhAbsoluteEdge() == 9);
++    CHECK(Refuse(reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(NhAbsoluteRange) + 4),
++                 reinterpret_cast<void*>(TextDetour)) == NativeHook::kErrNotFunctionStart);
++    std::printf("PASS absolute short function, interior branch and interior return refused\n");
++}
++
++static void TestAbsoluteStruct()
++{
++    AbsoluteScope scope;
++    g_structOrig = NhStruct;
++    void* slot = reinterpret_cast<void*>(NhStruct);
++    const bool attached = Hook(&slot, reinterpret_cast<void*>(StructDetour));
++    CHECK(attached);
++    if (!attached)
++    {
++        return;
++    }
++    g_structOrig = reinterpret_cast<decltype(g_structOrig)>(slot);
++    const NhBig hooked = NhStruct(10, 20, 30, 40, 50, 60, 70, 80);
++    CHECK(hooked.v[0] == 11 && hooked.v[1] == 20 && hooked.v[2] == 30 && hooked.v[3] == 40);
++    CHECK(hooked.v[4] == 50 && hooked.v[5] == 60 && hooked.v[6] == 70 && hooked.v[7] == 80);
++    Tx tx;
++    CHECK(NativeHook::Detach(&slot, reinterpret_cast<void*>(StructDetour)) == 0);
++    CHECK(tx.Commit());
++    std::printf("PASS absolute x0-x8 preservation\n");
++}
++
+ int main()
+ {
+     std::signal(SIGALRM, OnAlarm);
+@@ -997,6 +1201,9 @@ int main()
+     TestFarReloc();
+     TestFarRefuse();
+     TestFarStruct();
++    TestAbsolutePatch();
++    TestAbsoluteRefuse();
++    TestAbsoluteStruct();
+     TestRefuseWrites();
+     TestMainOnly();
+ 
