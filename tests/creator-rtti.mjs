@@ -67,7 +67,7 @@ function harness(options = {}) {
       });
     }
   }
-  const owner = alloc(), tx = alloc();
+  const owner = alloc(), tx = alloc(), outerContext = alloc();
   const context = vm.createContext({
     fnv, u64: value => value, ptr, clsByName: name => classes.get(name) ?? null,
     T_TDB: '0x' + fnv('TweakDBID').toString(16),
@@ -79,7 +79,8 @@ function harness(options = {}) {
     fromTDBID: (name, out) => cells.set(out.address, name),
     callFunc: (fn, receiver, ret, args) => {
       assert.match(methods.get(fn.address), /^Get(?:WeaponItem|Item)Record$/);
-      assert.equal(receiver.isNull(), true); // Verified native wrapper ignores x0.
+      // The native wrapper ignores x0, but its nonstatic executor route requires a live context.
+      assert(receiver === owner || receiver === outerContext);
       events.push(['lookup', args[0]]);
       const result = alloc(); if (args[0] === 'Items.Preset_Lexington_Default') result.writePointer(alloc());
       return result;
@@ -91,7 +92,7 @@ function harness(options = {}) {
     },
   });
   vm.runInContext(resolve + resolveAny + contextCode + ';globalThis.test={resolveFunc,creatorContext,creatorProbe};', context);
-  return { ...context.test, events, logs };
+  return { ...context.test, events, logs, outerContext };
 }
 
 {
@@ -122,9 +123,14 @@ for (const [conditions, expected] of [
 }
 {
   const h = harness({ menu: true, noPlayer: true, noTransaction: true, noItemID: true });
-  h.creatorProbe();
+  h.creatorProbe(h.outerContext);
   assert.deepEqual(h.events, [['lookup', 'Items.Preset_Lexington_Default']]);
   assert(h.logs.some(line => line.endsWith('Items.Preset_Lexington_Default: FOUND')));
   assert(source.indexOf("if(t[0]==='creatorprobe')") < source.indexOf("if(!player){ log('NOT IN GAME yet:"));
+}
+{
+  const h = harness({ menu: true });
+  assert.throws(() => h.creatorProbe(null), /current script context/);
+  assert.deepEqual(h.events, []); // Refuse before reaching the native executor's null-context fallback.
 }
 console.log('Real 2.5 RTTI table resolution, Creator preflight and read-only menu probe passed.');

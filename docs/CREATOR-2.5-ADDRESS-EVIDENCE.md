@@ -76,10 +76,14 @@ The game's registration initializer at RVA `0x32b05e4` supplies the weapon-recor
 `0x32afc80` to `CClassFunction_ctor` (`0x109b8a4`) with input flags `w6=0`, then registers it through
 `0x10c3e9c` in `funcs`. The wrapper ignores incoming `x0`, keeps the script frame from `x1` and result
 address from `x2`, reads one eight-byte TweakDBID, calls the global getter at `0x2310df0`, and writes
-a sixteen-byte reference handle. It does not require a TweakDBInterface instance. The Creator
-therefore checks the actual one-TweakDBID signature, and calls this accessor with a null context
-through the existing executor, without treating array placement as a static-call requirement.
-The universal resolver's classification is unchanged.
+a sixteen-byte reference handle. It does not require a TweakDBInterface instance. However, the
+executor checks the static flag at `0x1099c44`: its nonstatic path retrieves the context at
+`0x109d20c`, and the null check at `0x1099c80` sends a null context through a class fallback at
+`0x1099d60`. A live menu probe confirmed that null context faults before the accessor is reached.
+Creator now passes its resolved player to the executor. The menu probe borrows the immediate
+outer executor invocation's context, without caching it for later calls. Both check the actual
+one-TweakDBID signature, without treating array placement as a static-call requirement. The
+universal resolver's classification is unchanged.
 
 `creatorprobe` is available at the main menu. It prints the real array placement, function flags,
 parameter and result type hashes, and relevant capture state. It then reads

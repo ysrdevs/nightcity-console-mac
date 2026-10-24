@@ -794,10 +794,13 @@ rpc.exports = {
                 throw new Error('Creator record lookup has an unsupported signature: '+creatorMethodInfo(e));
             return e;
         }
-        function creatorHasRecord(record, name) {
-            return !callFunc(record.fn,ptr(0),record.retType,[name]).readPointer().isNull();
+        function creatorHasRecord(record, name, context) {
+            // The wrapper ignores this object, but the executor's nonstatic dispatch requires it.
+            // Use the resolved player (Creator) or the current outer call's context (menu probe).
+            if (!context || context.isNull()) throw new Error('Creator record lookup needs a current script context.');
+            return !callFunc(record.fn,context,record.retType,[name]).readPointer().isNull();
         }
-        function creatorProbe() {
+        function creatorProbe(context) {
             // Read-only, usable at the main menu: no reload, file generation or inventory mutation.
             for (const pair of [['gamedataTweakDBInterface','GetWeaponItemRecord'],['gamedataTweakDBInterface','GetItemRecord'],
                 ['TweakDBInterface','GetWeaponItemRecord'],['gameTransactionSystem','GetItemQuantity'],
@@ -808,7 +811,7 @@ rpc.exports = {
             log('creatorprobe state: player='+!!player+' transaction='+!!instOf('gameTransactionSystem')+
                 ' ItemID.FromTDBID='+!!fromtd+' localization='+!!cmnAttached);
             const record=creatorRecordMethod(), name='Items.Preset_Lexington_Default';
-            log('creatorprobe '+name+': '+(creatorHasRecord(record,name)?'FOUND':'NOT FOUND'));
+            log('creatorprobe '+name+': '+(creatorHasRecord(record,name,context)?'FOUND':'NOT FOUND'));
         }
         function creatorContext() {
             if (!cmnAttached || !cmnReserve) throw new Error('Custom weapon names are unavailable on this game build.');
@@ -823,7 +826,7 @@ rpc.exports = {
             function itemID(name){ const id=Memory.alloc(16); id.writeU64(0); id.add(8).writeU64(0); fromTDBID(tdbidBytes(name),id); return id; }
             return {
                 reload: reload,
-                hasRecord: function(name){ return creatorHasRecord(record,name); },
+                hasRecord: function(name){ return creatorHasRecord(record,name,owner); },
                 quantity: function(name){ return callFuncRaw(quantity.fn,tx,quantity.retType,
                     [{kind:'handle',inst:owner},{kind:'item16',ptr:itemID(name)}]).readS32(); },
                 give: function(name){ return callFuncRaw(give.fn,tx,give.retType,
@@ -1292,7 +1295,7 @@ rpc.exports = {
             }
             f.close(); log('itemdump: wrote '+ok+' records ('+miss+' not item records) to '+OUTF);
         }
-        function execute(line){
+        function execute(line, outerContext){
             if (line && typeof line==='object' && line.creator) { creatorRun(line.creator,line.state); return; }
             let raw=line.trim();
             if(raw.indexOf('lua-call\t')===0){ handleLuaCall(raw); return; }   // Q7 bridge: handle before the generic whitespace split
@@ -1337,7 +1340,7 @@ rpc.exports = {
                 }catch(e){ log('modsbutton cb err '+e); } });
                 log('modsbutton: armed (read-only sig capture). Open a menu so AddMenuItem fires; "modsbutton off" clears.'); return; }   // capture PushData contract before we call it
             if(t[0]==='itemdump'){ doItemDump(t[1]); return; }   // TweakDB is readable from the main menu
-            if(t[0]==='creatorprobe'){ try{ creatorProbe(); }catch(e){ log('creatorprobe FAILED: '+e); } return; }
+            if(t[0]==='creatorprobe'){ try{ creatorProbe(outerContext); }catch(e){ log('creatorprobe FAILED: '+e); } return; }
             if(!player){ log('NOT IN GAME yet: '+line); return; }
             if(t[0]==='give'&&t[1]){ doGive(t[1], Math.max(1,parseInt(t[2]||'1')||1)); return; }
             if(t[0]==='money'&&t[1]){ doGive('Items.money', Math.max(1,parseInt(t[1])||1), true); return; }   // currency: always one bulk add
@@ -1397,10 +1400,11 @@ rpc.exports = {
             else log('shutdown-exit: _exit unresolved'); }catch(e){ log('shutdown-exit err: '+e); }
         log('==== MINI-CET v3 (universal call + perks/attrs/relic) ready ====');
         Interceptor.attach(execAddr,{
-            onEnter:function(args){ const tid=this.threadId; depthByTid[tid]=(depthByTid[tid]||0)+1; if(busy) return;
+            onEnter:function(args){ this.commandContext=null; const tid=this.threadId; depthByTid[tid]=(depthByTid[tid]||0)+1; if(busy) return;
                 try{ const fn=args[0],ctx=args[1]; if(fn.isNull()||ctx.isNull()) return;
                     if(!fromtd){ const nm='0x'+fn.add(0x08).readU64().toString(16); if(nm==='0x150155547ef75590'){ const rp=fn.add(0x18).readPointer(); fromtd={fn:fn,ctx:ctx,retType:rp.isNull()?ptr(0):rp.readPointer()}; } }
                     const vt=ctx.readPointer(); if(vt.isNull()) return;
+                    this.commandContext=ctx; // borrowed only while dispatching at this invocation's onLeave
                     // Observe dispatch (zero cost when no observers registered). Must run BEFORE the
                     // player/seenVt early-returns below, or observers would fire at most once per vtable.
                     if(obsCount){ const omh='0x'+fn.add(0x10).readU64().toString(16); const olist=obsByMethod[omh];
@@ -1413,7 +1417,7 @@ rpc.exports = {
                     if(meta.isNull()) return; const fv=meta.sub(base).add(FV0).toString(16); instReg[fv]=ctx;
                     if(nameOf(meta)===PLAYER){ playerVt=vt; player=ctx; addCand(ctx); }
                 }catch(e){} },
-            onLeave:function(r){ const tid=this.threadId, d=(depthByTid[tid]||1)-1; if(d>0) depthByTid[tid]=d; else delete depthByTid[tid]; if(busy) return; if(pendingQ.length&&d===0){ const cmd=pendingQ.shift(); busy=true; try{ execute(cmd); }catch(e){ log('exec err '+e); } busy=false; } }
+            onLeave:function(r){ const tid=this.threadId, d=(depthByTid[tid]||1)-1; if(d>0) depthByTid[tid]=d; else delete depthByTid[tid]; if(busy) return; if(pendingQ.length&&d===0){ const cmd=pendingQ.shift(); busy=true; try{ execute(cmd,this.commandContext); }catch(e){ log('exec err '+e); } busy=false; } this.commandContext=null; }
         });
 
         // ---- AUTO-LOAD: apply installed mods on launch, no console needed (NightCity Console increment 4).
