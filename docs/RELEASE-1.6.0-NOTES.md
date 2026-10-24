@@ -8,8 +8,9 @@ testing. No publication is part of this work.
 
 The user reported that the second candidate created a weapon and that the weapon
 works in game 2.5.0. This establishes that manual creation/use succeeded in that
-session; it does not establish every effect combination or restart persistence.
-The user is testing persistence in a new manual save slot.
+session; it does not establish every effect combination. The user subsequently
+confirmed that the weapon's custom name, Iconic identity/effects and equip/fire
+behavior persisted after a new manual save and relaunch.
 
 The same creation attempt produced a false failure indication: the inventory
 acknowledgement timed out after GiveItem. The quantity check generated fresh unique
@@ -33,8 +34,8 @@ acceptance steps, [RELEASE-BUILD.md](RELEASE-BUILD.md) for assembly/signing, and
 
 - Resolve and retest the acknowledgement discrepancy: one request gives one
   weapon, and the status agrees with the resulting inventory.
-- Finish the user's new-slot/restart test, including custom name, descriptions,
-  Iconic identity, equipped behavior and chosen effects.
+- Preserve the passed new-slot/restart result when validating the final candidate;
+  the tested weapon kept its custom name, Iconic identity/effects and equip/fire behavior.
 - Close the native custom-stat hook reliability gate under the complete injected
   stack; one successful creation is not a substitute for that check.
 - Complete the public-feature smoke tests and the 2.3.1 regression check before
