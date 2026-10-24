@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 import CryptoKit
 
 enum Const {
-    static let appVersion = "1.6.0"
+    static let appVersion = "1.6.1"
     static let supportedGameVersions = ["2.3.1", "2.5.0"]
     // Payload files that only work on game 2.3.1: the RED4ext AddressLib is a 2.3.1 address list, and on any
     // other version RED4ext would resolve its hashes to the wrong code.
