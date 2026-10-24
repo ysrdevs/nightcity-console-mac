@@ -24,6 +24,7 @@ if (dumpFlag >= 0) {
 const resolve = source.slice(source.indexOf('function resolveFunc(className'), source.indexOf('// ===== Observe('));
 const resolveAny = source.slice(source.indexOf('function resolveAny('), source.indexOf('\n', source.indexOf('function resolveAny(')));
 const contextCode = source.split('// BEGIN CREATOR CONTEXT')[1].split('// END CREATOR CONTEXT')[0];
+const dispatch = source.slice(source.indexOf('function canDispatchCommand('), source.indexOf('function execute('));
 const fnv = text => {
   let h = 0xcbf29ce484222325n;
   for (const c of text) h = BigInt.asUintN(64, (h ^ BigInt(c.charCodeAt(0))) * 0x100000001b3n);
@@ -91,7 +92,7 @@ function harness(options = {}) {
       const result = alloc(); result.writeU32(1); return result;
     },
   });
-  vm.runInContext(resolve + resolveAny + contextCode + ';globalThis.test={resolveFunc,creatorContext,creatorProbe};', context);
+  vm.runInContext(resolve + resolveAny + contextCode + dispatch + ';globalThis.test={resolveFunc,creatorContext,creatorProbe,canDispatchCommand};', context);
   return { ...context.test, events, logs, outerContext };
 }
 
@@ -132,5 +133,13 @@ for (const [conditions, expected] of [
   const h = harness({ menu: true });
   assert.throws(() => h.creatorProbe(null), /current script context/);
   assert.deepEqual(h.events, []); // Refuse before reaching the native executor's null-context fallback.
+}
+{
+  const h = harness({ menu: true });
+  assert.equal(h.canDispatchCommand('creatorprobe', 0, null), false); // Keep queued across global calls.
+  assert.equal(h.canDispatchCommand('creatorprobe', 2, h.outerContext), true); // Use the current nested menu call.
+  assert.equal(h.canDispatchCommand('give Items.money', 2, h.outerContext), false);
+  assert.equal(h.canDispatchCommand({ creator: {} }, 2, h.outerContext), false);
+  assert.equal(h.canDispatchCommand({ creator: {} }, 0, null), true); // Creator resolves its own owner.
 }
 console.log('Real 2.5 RTTI table resolution, Creator preflight and read-only menu probe passed.');

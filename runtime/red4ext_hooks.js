@@ -1295,6 +1295,11 @@ rpc.exports = {
             }
             f.close(); log('itemdump: wrote '+ok+' records ('+miss+' not item records) to '+OUTF);
         }
+        function canDispatchCommand(command, depth, context) {
+            if (typeof command==='string' && command.trim()==='creatorprobe')
+                return !!context && !context.isNull(); // read-only probe can use this immediate nested call
+            return depth===0; // mutating commands retain the existing outermost-call boundary
+        }
         function execute(line, outerContext){
             if (line && typeof line==='object' && line.creator) { creatorRun(line.creator,line.state); return; }
             let raw=line.trim();
@@ -1417,7 +1422,7 @@ rpc.exports = {
                     if(meta.isNull()) return; const fv=meta.sub(base).add(FV0).toString(16); instReg[fv]=ctx;
                     if(nameOf(meta)===PLAYER){ playerVt=vt; player=ctx; addCand(ctx); }
                 }catch(e){} },
-            onLeave:function(r){ const tid=this.threadId, d=(depthByTid[tid]||1)-1; if(d>0) depthByTid[tid]=d; else delete depthByTid[tid]; if(busy) return; if(pendingQ.length&&d===0){ const cmd=pendingQ.shift(); busy=true; try{ execute(cmd,this.commandContext); }catch(e){ log('exec err '+e); } busy=false; } this.commandContext=null; }
+            onLeave:function(r){ const tid=this.threadId, d=(depthByTid[tid]||1)-1; if(d>0) depthByTid[tid]=d; else delete depthByTid[tid]; if(busy) return; if(pendingQ.length&&canDispatchCommand(pendingQ[0],d,this.commandContext)){ const cmd=pendingQ.shift(); busy=true; try{ execute(cmd,this.commandContext); }catch(e){ log('exec err '+e); } busy=false; } this.commandContext=null; }
         });
 
         // ---- AUTO-LOAD: apply installed mods on launch, no console needed (NightCity Console increment 4).
