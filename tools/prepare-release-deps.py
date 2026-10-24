@@ -125,6 +125,9 @@ def prepare(args):
         # Deliberately exclude private development plugins (Codeware, CET-Lua).
         for plugin in PLUGINS:
             copy_tree(args.native25 / "plugins" / plugin, stage / "native25/plugins" / plugin)
+        for name in ("BUILD_INFO.json", "sources.lock.json"):
+            if (args.native25 / name).is_file():
+                shutil.copy2(args.native25 / name, stage / "native25" / name)
         shutil.copy2(args.config, stage / "native25/config.ini")
         with checked_zip(args.redscript, REDSCRIPT_SHA256) as archive:
             extract_prefix(archive, "engine/tools/", stage / "scc")

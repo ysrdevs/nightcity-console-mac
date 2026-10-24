@@ -685,9 +685,12 @@ final class Model: ObservableObject {
                 }
                 DispatchQueue.main.async {
                     self.busy = false; self.busyDetail = ""; self.progress = 0
-                    self.launchGame()
-                    // scc keeps the previous good cache on failure, so the game still launches fine -
-                    // but tell the user their script mod didn't take.
+                    if let error = ScriptLaunchGate.launch(gameVersion: self.gameVersion ?? self.readGameVersion(),
+                        compilationError: compileWarn, action: { self.launchGame() }) {
+                        self.status = error
+                        return
+                    }
+                    // Preserve the established 2.3.1 fallback and explain that its previous cache was used.
                     if let w = compileWarn {
                         self.status = "Launched, but a script mod failed to compile (previous scripts kept): \(w)"
                     } else if !refused.isEmpty {
