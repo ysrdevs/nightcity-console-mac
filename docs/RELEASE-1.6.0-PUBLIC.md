@@ -37,7 +37,8 @@ Tested on **Cyberpunk 2077 2.5.0, native macOS Steam, Apple Silicon**.
 GOG and Intel Mac builds are not supported. Codeware, Virtual Atelier and
 CET-Lua/Windows CET mods are not supported by this release.
 
-The app is Developer ID signed but has **not been notarized by Apple**.
+The app is **Developer ID signed and notarized by Apple**. Notarization tickets
+are stapled to both the app and the DMG; the ZIP includes the stapled app.
 
 ## Known issue
 

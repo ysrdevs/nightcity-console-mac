@@ -2,8 +2,9 @@
 
 All requested local release checks are complete. This document records the evidence
 and its limits; player-facing notes are in [RELEASE-1.6.0-PUBLIC.md](RELEASE-1.6.0-PUBLIC.md).
-The user handles source pushes and GitHub/Nexus publication. No push or upload is
-part of this work.
+The user handles source pushes and GitHub/Nexus publication. Apple notarization
+submissions were completed at the user's request; no source push or GitHub/Nexus
+upload is part of this work.
 
 ## Release scope and public baseline
 
@@ -66,15 +67,25 @@ acceptance steps, [RELEASE-BUILD.md](RELEASE-BUILD.md) for assembly/signing, and
 
 ## Accepted artifacts and publication
 
-ZIP extraction and read-only DMG mounting matched all 303 frozen app file hashes
-and permissions. Both packaged apps passed strict deep signature verification;
-DMG integrity and the Applications shortcut also passed. The accepted test4 app
-and packages are promoted unchanged to the final local `releases/1.6.0` directory,
-without rebuilding or re-signing. Hashes and detailed evidence are recorded in
+The original test4 ZIP extraction and read-only DMG mounting matched all 303 frozen
+app file hashes and permissions. Both packaged apps passed strict deep signature verification;
+DMG integrity and the Applications shortcut also passed. The accepted signed app
+was subsequently notarized without rebuilding or re-signing. All 303 original
+files remained byte-identical; stapling added the ticket at `Contents/CodeResources`.
+The final ZIP contains that stapled app, and the DMG was separately notarized and
+stapled. The final release directory is the local `releases/1.6.0` directory.
+Hashes and detailed evidence are recorded in
 [RELEASE-1.6.0-TESTING.md](RELEASE-1.6.0-TESTING.md).
 
-No requested local release check remains open. The app is Developer ID signed but
-not notarized; no Apple submission, source push or release upload has occurred.
+Apple accepted both submissions with no reported issues: app
+`72f6bec2-7419-4231-a25d-22c3709db73e` and DMG
+`d18dc0f0-34b5-481b-aaaf-cce43fe517a4`. The app's strict signature and stapled ticket
+validated, and Gatekeeper accepted it as `Notarized Developer ID`.
+Independent validation of the final ZIP and DMG matched all 304 app files and
+permissions, including the unchanged 303 original files. Both packaged apps and
+the DMG passed signature, ticket and Gatekeeper checks; DMG integrity and its
+Applications shortcut also passed. No requested release check remains open.
+No source push or GitHub/Nexus release upload has occurred.
 The user can use [RELEASE-1.6.0-PUBLIC.md](RELEASE-1.6.0-PUBLIC.md) for publication.
 Any later runtime, native, overlay or launcher change requires validation of the
 changed artifact. The retained 2.3.1 compatibility payload has not received a new

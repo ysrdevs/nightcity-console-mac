@@ -2,9 +2,10 @@
 
 Status: All requested local release checks passed on macOS game 2.5.0, including
 Creator acceptance, the native allocation gate, the user's fourth-candidate gameplay
-checks, and ZIP/DMG validation. The accepted packages are promoted unchanged; no
-rebuild or re-signing is needed. This validates the tested features below, not every
-cheat or third-party mod workflow. The app is Developer ID signed but not notarized.
+checks, and ZIP/DMG validation. Apple subsequently accepted the app and DMG for
+notarization, and both were stapled. The accepted app's original files were preserved
+without rebuilding or re-signing. This validates the tested features below, not every
+cheat or third-party mod workflow.
 
 ## Second local candidate
 
@@ -58,7 +59,7 @@ The signed fourth candidate copies the accepted third candidate. Only the
 2.5 loader and its source/input provenance change, followed by signing the replacement
 dylib and resealing the outer app. The runtime JavaScript, overlay, launcher code,
 other native dependencies and retained 2.3.1 payload are preserved. Signature bytes
-changed when the outer app was resealed. All 303 final files are recorded in the
+changed when the outer app was resealed. All 303 candidate files are recorded in the
 candidate's `signed-app-sha256.json`; `changes-from-test3.json` records exactly six
 changed/added paths: the loader, source lock, new build metadata, input provenance,
 and the two outer signature-bearing files. No other payload bytes changed.
@@ -129,11 +130,17 @@ unpinning, all third-party mod installation workflows or a new live 2.3.1 pass.
 - Explicit-input release assembly, native dependency inspection and local Developer
   ID signing passed. Installed test files matched the signed candidate byte-for-byte.
 - The user accepted the fourth candidate's requested gameplay checks listed above.
-- ZIP extraction and read-only DMG mounting reproduced all 303 signed file hashes
-  and permissions. Strict deep signature verification passed for both packaged apps;
+- Original test4 ZIP extraction and read-only DMG mounting reproduced all 303 signed
+  file hashes and permissions. Strict deep signature verification passed for both packaged apps;
   DMG integrity and its Applications shortcut passed. Packaging left the app unchanged.
-- All changes are local commits under ysrdevs. No push, release upload or notarization
-  submission has been performed.
+- Apple accepted the app and DMG notarization submissions; both tickets were stapled.
+  The accepted app's original 303 files remained byte-identical, with its ticket
+  added at `Contents/CodeResources`. No source rebuild or re-signing was performed.
+- Independent verification of the notarized packages matched all 304 final app files
+  and permissions. Both packaged apps and the DMG passed signature, stapler and
+  Gatekeeper checks; DMG integrity and the Applications shortcut passed.
+- All changes are local commits under ysrdevs. No source push or GitHub/Nexus
+  release upload has been performed.
 
 ## Completed acceptance procedure
 
@@ -157,8 +164,9 @@ the live development installation during this first test.
 Creator creation, acknowledgement, uniqueness and persistence have passed. The
 observed custom-stat allocation failure is fixed and its absolute fallback was
 exercised in the real full stack. The fourth-candidate gameplay checks and package
-verification complete the requested local release checks. Final release artifacts
-are the already verified packages, promoted without rebuilding or re-signing.
+verification complete the requested local release checks. Notarization then added
+the app's ticket and produced new distributable ZIP/DMG files from the accepted
+signed app, without rebuilding or re-signing its executable or resources.
 Only the specific user-selected cheat and workflows listed above were accepted;
 do not claim every cheat or third-party mod installation workflow was tested.
 
@@ -166,17 +174,53 @@ Preserved 2.3.1 binaries and static checks are not evidence of a new live 2.3.1 
 An unavailable old-game replay does not block a release explicitly validated for 2.5;
 do not advertise a new 2.3.1 validation. The native source recipe's patch replay and
 generated SDK hashes were verified; a fresh end-to-end orchestration build has not
-yet been run. The current app is signed locally but not notarized.
+yet been run. The final app is Developer ID signed, notarized and stapled.
 
-## Accepted local packages
+## Original accepted packages — before notarization
 
-The accepted ZIP and DMG originate from test4's `packages/`, with `SHA256SUMS`,
-`packaging-validation.json` and a validation log. They are promoted byte-for-byte
-to the final local `releases/1.6.0` directory. The app is Developer ID signed;
-neither artifact has been submitted for notarization or uploaded for publication.
-The user handles source pushes and GitHub/Nexus publication.
+The original accepted ZIP and DMG came from test4's `packages/`, with `SHA256SUMS`,
+`packaging-validation.json` and a validation log. These historical hashes identify
+the locally signed packages before Apple notarization. They are superseded for
+distribution by the notarized packages below.
 
 ```text
 08d0d75241c15a7e029eb0bc62395441a126646dbb9bbd1bd0bac91bb7ae71d4  NightCity-Console-for-Mac.zip
 0dcd12db702ccc69523ac3c73058caa7a4aa7a5f5f7be21196071c59d8d778af  NightCity-Console-for-Mac.dmg
 ```
+
+## Apple notarization — October 24, 2026
+
+The app submission `72f6bec2-7419-4231-a25d-22c3709db73e` and DMG submission
+`d18dc0f0-34b5-481b-aaaf-cce43fe517a4` both returned `Accepted`, status code 0,
+with no reported issues. The Apple logs are retained as `app-apple-log.json` and
+`dmg-apple-log.json` under `releases/1.6.0-notarization/`.
+
+The app and DMG were both stapled. Strict deep code-signature verification and
+stapler validation passed for the app; Gatekeeper accepted it as
+`Notarized Developer ID`. All 303 original app files remained byte-identical;
+stapling added only `Contents/CodeResources`, producing 304 files. The final ZIP
+contains the stapled app, and the DMG carries its own stapled ticket.
+
+Independent ZIP extraction and read-only DMG mounting each reproduced all 304
+final app hashes and permissions, with the original 303 files unchanged. Both
+packaged apps passed strict deep signature verification, stapler validation and
+Gatekeeper assessment as `Notarized Developer ID`. The DMG itself passed its
+signature, stapler, Gatekeeper and `hdiutil verify` checks, and its Applications
+shortcut points to `/Applications`. Validation left the app and package bytes
+unchanged and removed its temporary staging and mount.
+
+Evidence is retained in `releases/1.6.0-notarization/packages/` as
+`notarization-package-validation.json`, `notarization-package-validation.log` and
+`SHA256SUMS`. The final distributable files are promoted unchanged to
+`releases/1.6.0/`:
+
+```text
+69e5bdfe69743bee817696875930178b4c9542b17354e718d981ba2f1589695e  NightCity-Console-for-Mac.zip
+8657eb8364e5dfdb8de09b49259aa6ccd982db5bd6b63b7edcb3af9566c4c1ce  NightCity-Console-for-Mac.dmg
+```
+
+The ZIP is 92,378,522 bytes; the DMG is 101,978,585 bytes. These replace the
+pre-notarization distributables above. No requested release check remains open.
+
+The user handles source pushes and GitHub/Nexus publication. Apple submissions
+are complete; no source push or GitHub/Nexus release upload has been performed.
