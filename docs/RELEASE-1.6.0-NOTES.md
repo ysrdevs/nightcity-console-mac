@@ -30,7 +30,7 @@ installed all 94 hooks, including three absolute hooks: `GetStatRange` recorded 
 hits, another recorded 145, and the third was installed but not hit. That boot was
 ended by the harness; it does not establish normal quit or every ArchiveXL path.
 
-The forthcoming fourth candidate preserves the accepted third candidate's Creator
+The fourth candidate preserves the accepted third candidate's Creator
 runtime, overlay, launcher code and other dependencies, replacing only the 2.5
 loader and provenance before selective signing. Manual overlay checks passed for
 F1 open/close, help, keyboard tab switching, Lexington item search (49 results),

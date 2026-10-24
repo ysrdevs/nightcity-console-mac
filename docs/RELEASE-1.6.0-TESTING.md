@@ -3,8 +3,9 @@
 Status: Creator acceptance and the native allocation gate passed on macOS game
 2.5.0. The user confirmed creation, use, persistence after a new manual save/relaunch,
 the corrected success message, and exactly one added weapon. The fourth candidate
-will preserve that accepted Creator build and replace its 2.5 native loader with
-the validated allocation fix. Basic player-feature checks and final packaging remain.
+preserves that accepted Creator build and replaces its 2.5 native loader with
+the validated allocation fix. It is signed and installed for the user's basic
+player-feature check; final package validation is in progress.
 
 ## Second local candidate
 
@@ -54,11 +55,22 @@ See RELEASE-BUILD.md and ../native25/README.md for inputs and source provenance.
 
 ## Fourth candidate and native allocation validation
 
-The forthcoming fourth candidate copies the accepted third candidate. Only the
+The signed fourth candidate copies the accepted third candidate. Only the
 2.5 loader and its source/input provenance change, followed by signing the replacement
 dylib and resealing the outer app. The runtime JavaScript, overlay, launcher code,
 other native dependencies and retained 2.3.1 payload are preserved. Signature bytes
-may change when the outer app is resealed; final signed-file hashes must be recorded.
+changed when the outer app was resealed. All 303 final files are recorded in the
+candidate's `signed-app-sha256.json`; `changes-from-test3.json` records exactly six
+changed/added paths: the loader, source lock, new build metadata, input provenance,
+and the two outer signature-bearing files. No other payload bytes changed.
+
+The installed core files match the signed candidate. Both previously created
+weapon YAML files and the custom-name map were verified unchanged after Install.
+The signed loader SHA-256 is
+`4e08ad904005008e9843070c218cc9ec46e60cbc7701e761955657cc6103784f`.
+The app passed strict deep signature verification and native dependency inspection.
+Its build metadata explicitly records manual assembly from separately built native
+components, rather than claiming a fresh end-to-end recipe build.
 
 Local evidence is recorded in `release-evidence/native-allocation/live-validation.json`:
 
