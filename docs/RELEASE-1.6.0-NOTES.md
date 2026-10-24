@@ -15,9 +15,10 @@ behavior persisted after a new manual save and relaunch.
 The same creation attempt produced a false failure indication: the inventory
 acknowledgement timed out after GiveItem. The quantity check generated fresh unique
 ItemIDs instead of a record query. Commit `9437697` changes it to native
-`ItemID.CreateQuery`; the separately signed third candidate needs a live retest.
-Do not label this candidate release-ready or suggest repeating Create solely
-because of the earlier message.
+`ItemID.CreateQuery`. The user tested the separately signed third candidate and
+confirmed a correct success message, exactly one added weapon, and persistence of
+the prior weapon. The runtime independently recorded quantity increasing from 0
+to 1. Creator acceptance is complete; the broader release checks remain below.
 
 The public scope is the existing console/item-browser/cheat workflow plus the
 Iconic weapon Creator on native macOS Steam game 2.5.0. TweakXL and ArchiveXL are
@@ -32,8 +33,8 @@ acceptance steps, [RELEASE-BUILD.md](RELEASE-BUILD.md) for assembly/signing, and
 
 ## Remaining publication checks
 
-- Resolve and retest the acknowledgement discrepancy: one request gives one
-  weapon, and the status agrees with the resulting inventory.
+- Preserve the passed acknowledgement result: one request gives one weapon,
+  and the status agrees with the resulting inventory.
 - Preserve the passed new-slot/restart result when validating the final candidate;
   the tested weapon kept its custom name, Iconic identity/effects and equip/fire behavior.
 - Close the native custom-stat hook reliability gate under the complete injected

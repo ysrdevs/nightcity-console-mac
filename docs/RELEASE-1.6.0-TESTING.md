@@ -1,8 +1,8 @@
 # 1.6.0 local test candidate
 
-Status: the user confirmed weapon creation, use and persistence after a new manual
-save/relaunch on macOS game 2.5.0 with the second local candidate. The corrected
-status acknowledgement still needs verification. Not a validated public release yet.
+Status: Creator acceptance passed on macOS game 2.5.0. The user confirmed creation,
+use, persistence after a new manual save/relaunch, the corrected success message,
+and exactly one added weapon. Remaining work concerns the broader player release.
 
 ## Second local candidate
 
@@ -33,8 +33,10 @@ wildcard identity, while retaining one unique ItemID for GiveItem. Constructor a
 inventory-matching semantics were verified in the 2.5 binary; focused tests cover
 the previously failing unique-weapon case. The separately signed third candidate
 changes only runtime JavaScript resources, preserving all other test2 resources
-byte-for-byte. It is open for the user's next Install/Play cycle; the existing game
-session was left running. Its live success acknowledgement remains unverified.
+byte-for-byte. The user installed it and confirmed the success message without a
+timeout, exactly one added weapon, and the previous weapon still present. The
+runtime response corroborates `ok: true`, `before: 0`, `after: 1`, with the query
+using wildcard seed 1 and GiveItem using a distinct unique instance seed.
 
 The broader custom-stat scenario also reproduced a separate native near-allocation
 failure with the full injected stack. That remains a release gate; a previous passing
