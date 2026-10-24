@@ -18,7 +18,7 @@ on Apple Silicon Macs running the native Steam edition.
 
 The console, item browser and quick actions remain available. Release testing on
 2.5.0 covered Creator creation and persistence, normal item addition, Quick Money,
-a cheat toggled on/off, and SaveSpot/GoToSpot.
+a cheat toggled on/off, and Save spot / Go to spot.
 
 ## Install or update
 
