@@ -782,7 +782,8 @@ rpc.exports = {
             const reload=tweakReloadMethod(), owner=authPlayer(), tx=instOf('gameTransactionSystem');
             if (!owner || owner.isNull() || !tx || tx.isNull() || !fromtd)
                 throw new Error('Load a save and open your inventory before creating a weapon.');
-            const record=resolveFunc('TweakDBInterface','GetWeaponItemRecord') || resolveFunc('TweakDBInterface','GetItemRecord');
+            const record=resolveAny(['gamedataTweakDBInterface','TweakDBInterface'],'GetWeaponItemRecord') ||
+                         resolveAny(['gamedataTweakDBInterface','TweakDBInterface'],'GetItemRecord');
             const quantity=resolveFunc('gameTransactionSystem','GetItemQuantity'), give=resolveFunc('gameTransactionSystem','GiveItem');
             if (!record || !record.isStatic || !quantity || !give)
                 throw new Error('The game inventory interfaces are not ready. Open your inventory and try again.');

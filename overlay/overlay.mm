@@ -1187,13 +1187,6 @@ static std::string crGameRoot() {
     }
     return "";
 }
-static std::string crJsonEsc(const std::string& s) {
-    std::string o; for (unsigned char c : s) { switch (c) {
-        case '"': o += "\\\""; break; case '\\': o += "\\\\"; break;
-        case '\n': o += "\\n"; break; case '\r': o += "\\r"; break; case '\t': o += "\\t"; break;
-        default: if (c < 0x20) { char b[8]; snprintf(b, sizeof(b), "\\u%04x", c); o += b; } else o += (char)c; }
-    } return o;
-}
 // Mirror Python str.title() + strip non-alnum, then prefix CyberModMan.
 static std::string crRecordStem(const std::string& name) {
     std::string out; bool wordStart = true;
@@ -1209,20 +1202,18 @@ static std::string crStatYaml(const char* st, const char* mt, const char* v) {
     return std::string("    - $type: ConstantStatModifier\n      statType: BaseStats.") + st +
            "\n      modifierType: " + mt + "\n      value: " + v + "\n";
 }
-static std::string crReadFile(const std::string& path) {
-    std::string c; FILE* f = fopen(path.c_str(), "r"); if (!f) return c;
-    char b[4096]; size_t n; while ((n = fread(b,1,sizeof(b),f)) > 0) c.append(b,n); fclose(f); return c;
-}
 static std::set<long> crUsedLockeys(const std::string& path) {
-    std::set<long> used; std::string c = crReadFile(path);
-    for (size_t i = 0; i < c.size(); ) {
-        if (c[i] == '"') { size_t j = i+1; std::string num; bool digits = true;
-            while (j < c.size() && c[j] != '"') { if (!isdigit((unsigned char)c[j])) digits = false; num += c[j]; j++; }
-            if (digits && !num.empty() && j < c.size()) { size_t k = j+1;
-                while (k < c.size() && isspace((unsigned char)c[k])) k++;
-                if (k < c.size() && c[k] == ':') used.insert(strtol(num.c_str(), nullptr, 10)); }
-            i = j + 1;
-        } else i++;
+    std::set<long> used;
+    @autoreleasepool {
+        NSData* data = [NSData dataWithContentsOfFile:[NSString stringWithUTF8String:path.c_str()]];
+        id parsed = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        if ([parsed isKindOfClass:[NSDictionary class]]) {
+            for (NSString* key in parsed) {
+                const char* text = [key UTF8String]; char* end = nullptr;
+                long value = strtol(text, &end, 10);
+                if (end != text && *end == '\0' && value > 0) used.insert(value);
+            }
+        }
     }
     return used;
 }

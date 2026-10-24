@@ -89,6 +89,7 @@ Offline verification:
 ```bash
 node tests/creator-transaction.mjs
 node tests/creator-transaction.mjs --fixtures /path/to/retained/game-builds
+node tests/creator-names.mjs
 node --check runtime/red4ext_hooks.js
 ```
 
@@ -96,3 +97,5 @@ The transaction tests cover rejected/failed imports, an existing record, delayed
 confirmation, duplicate request IDs, timeout before dispatch, timeout after GiveItem, missing
 localization, and a request from an older game process. The optional fixture check reads only
 the retained binaries and compares the hook/allocator fingerprints.
+The macOS names test compiles the actual Foundation-backed file helpers and verifies existing
+keys, quoted flavor text, Unicode text, and preservation of malformed user files.
