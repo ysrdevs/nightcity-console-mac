@@ -44,11 +44,19 @@ def verify(app, check_inputs=False):
             continue
         if "arm64" not in kind:
             raise ValueError(f"native binary has no arm64 slice: {path}")
+        identities = {
+            line.strip() for line in subprocess.check_output(["otool", "-D", str(path)], text=True).splitlines()
+            if line.strip() and not line.rstrip().endswith(":")
+        }
         links = subprocess.check_output(["otool", "-L", str(path)], text=True)
         for line in links.splitlines():
             if not line.startswith("\t"):
                 continue
             link = line.strip().split(" (", 1)[0]
+            # otool -L includes the dylib's LC_ID_DYLIB, which may retain an upstream build path.
+            # Its identity is not a load dependency; inspect LC_LOAD_DYLIB references instead.
+            if link in identities:
+                continue
             if link.startswith("/") and not link.startswith(("/usr/lib/", "/System/Library/")):
                 raise ValueError(f"nonportable dependency in {path.name}: {link}")
             if link.startswith("@loader_path/") and not (path.parent / link[len("@loader_path/"):]).is_file():

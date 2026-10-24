@@ -59,6 +59,7 @@ SRC="overlay.mm \
   $IMGUI/backends/imgui_impl_metal.mm"
 
 clang++ -ObjC++ -fobjc-arc -std=c++17 -O2 -arch arm64 -dynamiclib \
+  -install_name @rpath/libcyberconsole_overlay.dylib \
   -I "$IMGUI" -I "$IMGUI/backends" -I "$LUA_DIR/src" \
   -isysroot "$SDK" \
   -framework Foundation -framework Metal -framework QuartzCore -framework AppKit \
