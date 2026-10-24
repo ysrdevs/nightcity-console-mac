@@ -62,9 +62,10 @@ acceptance steps, [RELEASE-BUILD.md](RELEASE-BUILD.md) for assembly/signing, and
   validation; an unavailable 2.3.1 replay does not block the targeted 2.5 release.
 - Freeze the accepted source revision and candidate file hashes. Recheck the
   final signed payload after any JS, native, overlay or launcher change.
-- Prepare final ZIP/DMG files from the accepted candidate. Local Developer ID
-  signing does not mean notarization has occurred; any Apple submission remains
-  a separate authorized step. The user handles GitHub and Nexus publication.
+- ZIP/DMG candidate files are prepared and verified against all 303 frozen app
+  file hashes. Promote those exact artifacts only after the user check passes.
+  The app is Developer ID signed but not notarized. The user handles GitHub and
+  Nexus publication; no upload or Apple submission has been performed.
 
 ## Publication draft — use only after acceptance
 

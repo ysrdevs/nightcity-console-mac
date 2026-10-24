@@ -5,7 +5,7 @@ Status: Creator acceptance and the native allocation gate passed on macOS game
 the corrected success message, and exactly one added weapon. The fourth candidate
 preserves that accepted Creator build and replaces its 2.5 native loader with
 the validated allocation fix. It is signed and installed for the user's basic
-player-feature check; final package validation is in progress.
+player-feature check. Local ZIP and DMG validation has passed.
 
 ## Second local candidate
 
@@ -139,12 +139,26 @@ the live development installation during this first test.
 Creator creation, acknowledgement, uniqueness and persistence have passed. The
 observed custom-stat allocation failure is fixed and its absolute fallback was
 exercised in the real full stack. Remaining work is the user's basic public-feature
-smoke test with the fourth candidate, followed by final packaging and extraction/
-signature verification of the accepted app. Do not infer cheat or mod-install
-workflow acceptance from the menu and overlay checks.
+smoke test with the fourth candidate. Local ZIP extraction and read-only DMG
+mounting each reproduced all 303 signed file hashes and permissions; strict deep
+signature verification passed for both packaged apps. DMG integrity and its
+Applications shortcut also passed. The app was unchanged after packaging.
+Do not infer cheat or mod-install workflow acceptance from the menu and overlay checks.
 
 Preserved 2.3.1 binaries and static checks are not evidence of a new live 2.3.1 pass.
 An unavailable old-game replay does not block a release explicitly validated for 2.5;
 do not advertise a new 2.3.1 validation. The native source recipe's patch replay and
 generated SDK hashes were verified; a fresh end-to-end orchestration build has not
 yet been run. The current app is signed locally but not notarized.
+
+## Local candidate packages
+
+The ZIP and DMG are prepared beside test4 under `packages/`, with `SHA256SUMS`,
+`packaging-validation.json` and a validation log. They remain candidate artifacts
+until the pending user check is complete. The app is Developer ID signed; neither
+artifact has been submitted for notarization or uploaded for publication.
+
+```text
+08d0d75241c15a7e029eb0bc62395441a126646dbb9bbd1bd0bac91bb7ae71d4  NightCity-Console-for-Mac.zip
+0dcd12db702ccc69523ac3c73058caa7a4aa7a5f5f7be21196071c59d8d778af  NightCity-Console-for-Mac.dmg
+```
