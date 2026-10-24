@@ -63,6 +63,36 @@ On 2.3.1, reload continues through `cybermodman_tweakReload`. On 2.5, it resolve
 static native `TweakXL.Reload()` through the existing script executor. The latter returns void
 and catches/logs import errors internally, so returning from it is not a success signal.
 
+### Native record lookup registration
+
+The first manual 2.5 Creator test reached the player and transaction system, then failed its
+inventory-interface check. The cause was an incorrect assumption that TweakDB record accessors
+must occupy `CClass.staticFuncs`. The 2.5 RTTI dump (UUID `7D7382D0-EADD-36F0-BA1C-CEBEC1D5BEBC`)
+places `gamedataTweakDBInterface.GetWeaponItemRecord` and `GetItemRecord` in `CClass.funcs` at
+`+0x48`; its `staticFuncs` at `+0x58` is empty. The script alias `TweakDBInterface` is absent from
+that native class map. `gameTransactionSystem.GiveItem` and `GetItemQuantity` are also present.
+
+The game's registration initializer at RVA `0x32b05e4` supplies the weapon-record wrapper at
+`0x32afc80` to `CClassFunction_ctor` (`0x109b8a4`) with input flags `w6=0`, then registers it through
+`0x10c3e9c` in `funcs`. The wrapper ignores incoming `x0`, keeps the script frame from `x1` and result
+address from `x2`, reads one eight-byte TweakDBID, calls the global getter at `0x2310df0`, and writes
+a sixteen-byte reference handle. It does not require a TweakDBInterface instance. The Creator
+therefore checks the actual one-TweakDBID signature, and calls this accessor with a null context
+through the existing executor, without treating array placement as a static-call requirement.
+The universal resolver's classification is unchanged.
+
+`creatorprobe` is available at the main menu. It prints the real array placement, function flags,
+parameter and result type hashes, and relevant capture state. It then reads
+`Items.Preset_Lexington_Default` through the same accessor used by Creator. It does not reload
+tweaks or give an item. This live probe must succeed before repeating the complete Creator test.
+Missing runtime dependencies now identify the particular class/method or captured instance;
+opening inventory is suggested only for missing transaction/ItemID capture.
+
+`tests/data/creator-rtti-2.5.json` is a small projection of the pinned SDK's real dump, with its
+source SHA-256. `tests/creator-rtti.mjs` runs the actual runtime resolver and Creator preflight
+against those array placements. Native calls remain test boundaries, so this catches the false
+static-table rejection without pretending to establish live engine execution.
+
 The overlay sends a dedicated JSON request to `/tmp/cp2077_creator_request.json`. It includes a
 unique ID, current game PID, operation (`check` or `apply`), and a 20-second deadline. Apply also
 includes the generated record and three localization keys. The runtime processes requests on
@@ -90,6 +120,7 @@ Offline verification:
 node tests/creator-transaction.mjs
 node tests/creator-transaction.mjs --fixtures /path/to/retained/game-builds
 node tests/creator-names.mjs
+node tests/creator-rtti.mjs --rtti /path/to/RED4ext.SDK/data/rtti_layout_macos_25.json
 node --check runtime/red4ext_hooks.js
 ```
 

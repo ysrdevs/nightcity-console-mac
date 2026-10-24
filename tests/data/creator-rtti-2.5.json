@@ -1,0 +1,26 @@
+{
+  "source": "https://github.com/fentz26/RED4ext.SDK-macos/blob/64c1cd0095084ebbed65e725d1f9bc589d7a6e73/data/rtti_layout_macos_25.json",
+  "source_sha256": "3e6dcd71cb291f81283dcf7f7ba5d7f7e49e4f6e8ec92a9258c66afb6a41af11",
+  "uuid": "7D7382D0-EADD-36F0-BA1C-CEBEC1D5BEBC",
+  "absent_aliases": [
+    "TweakDBInterface"
+  ],
+  "classes": {
+    "gamedataTweakDBInterface": {
+      "parent": "IScriptable",
+      "funcs": [
+        "GetWeaponItemRecord",
+        "GetItemRecord"
+      ],
+      "staticFuncs": []
+    },
+    "gameTransactionSystem": {
+      "parent": "gameITransactionSystem",
+      "funcs": [
+        "GiveItem",
+        "GetItemQuantity"
+      ],
+      "staticFuncs": []
+    }
+  }
+}

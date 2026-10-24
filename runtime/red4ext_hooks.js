@@ -777,26 +777,60 @@ rpc.exports = {
                 throw new Error('TweakXL.Reload is not registered. Install the matching TweakXL runtime and restart.');
             return function(){ callFunc(e.fn,ptr(0),e.retType,[]); };
         }
+        // BEGIN CREATOR CONTEXT
+        function creatorMethodInfo(e) {
+            if (!e) return 'not registered';
+            return (e.isStatic?'staticFuncs':'funcs')+' flags=0x'+e.fn.add(0xa8).readU32().toString(16)+
+                ' '+sigStr(e.fn)+' ret='+(e.retType.isNull()?'void':nameOf(e.retType));
+        }
+        function creatorRecordMethod() {
+            const classes=['gamedataTweakDBInterface','TweakDBInterface'];
+            const e=resolveAny(classes,'GetWeaponItemRecord') || resolveAny(classes,'GetItemRecord');
+            if (!e) throw new Error('Creator cannot find TweakDBInterface.GetWeaponItemRecord or GetItemRecord in RTTI.');
+            // Native 2.5 registers these context-free accessors in CClass.funcs, not staticFuncs.
+            // Array placement is not a valid availability check; validate the actual call signature.
+            const params=e.fn.add(0x28).readPointer(), count=e.fn.add(0x30).readU32();
+            if (count!==1 || params.isNull() || nameOf(params.readPointer().readPointer())!==T_TDB || e.retType.isNull())
+                throw new Error('Creator record lookup has an unsupported signature: '+creatorMethodInfo(e));
+            return e;
+        }
+        function creatorHasRecord(record, name) {
+            return !callFunc(record.fn,ptr(0),record.retType,[name]).readPointer().isNull();
+        }
+        function creatorProbe() {
+            // Read-only, usable at the main menu: no reload, file generation or inventory mutation.
+            for (const pair of [['gamedataTweakDBInterface','GetWeaponItemRecord'],['gamedataTweakDBInterface','GetItemRecord'],
+                ['TweakDBInterface','GetWeaponItemRecord'],['gameTransactionSystem','GetItemQuantity'],
+                ['gameTransactionSystem','GiveItem'],['TweakXL','Reload']]) {
+                const e=resolveFunc(pair[0],pair[1]);
+                log('creatorprobe '+pair.join('.')+': '+creatorMethodInfo(e));
+            }
+            log('creatorprobe state: player='+!!player+' transaction='+!!instOf('gameTransactionSystem')+
+                ' ItemID.FromTDBID='+!!fromtd+' localization='+!!cmnAttached);
+            const record=creatorRecordMethod(), name='Items.Preset_Lexington_Default';
+            log('creatorprobe '+name+': '+(creatorHasRecord(record,name)?'FOUND':'NOT FOUND'));
+        }
         function creatorContext() {
             if (!cmnAttached || !cmnReserve) throw new Error('Custom weapon names are unavailable on this game build.');
             const reload=tweakReloadMethod(), owner=authPlayer(), tx=instOf('gameTransactionSystem');
-            if (!owner || owner.isNull() || !tx || tx.isNull() || !fromtd)
-                throw new Error('Load a save and open your inventory before creating a weapon.');
-            const record=resolveAny(['gamedataTweakDBInterface','TweakDBInterface'],'GetWeaponItemRecord') ||
-                         resolveAny(['gamedataTweakDBInterface','TweakDBInterface'],'GetItemRecord');
+            if (!owner || owner.isNull()) throw new Error('Creator cannot find the local player. Load a save first.');
+            if (!tx || tx.isNull()) throw new Error('Creator has not captured gameTransactionSystem. Open your inventory and try again.');
+            if (!fromtd) throw new Error('Creator has not captured ItemID.FromTDBID. Open your inventory and try again.');
+            const record=creatorRecordMethod();
             const quantity=resolveFunc('gameTransactionSystem','GetItemQuantity'), give=resolveFunc('gameTransactionSystem','GiveItem');
-            if (!record || !record.isStatic || !quantity || !give)
-                throw new Error('The game inventory interfaces are not ready. Open your inventory and try again.');
+            if (!quantity) throw new Error('Creator cannot find gameTransactionSystem.GetItemQuantity in RTTI.');
+            if (!give) throw new Error('Creator cannot find gameTransactionSystem.GiveItem in RTTI.');
             function itemID(name){ const id=Memory.alloc(16); id.writeU64(0); id.add(8).writeU64(0); fromTDBID(tdbidBytes(name),id); return id; }
             return {
                 reload: reload,
-                hasRecord: function(name){ return !callFunc(record.fn,ptr(0),record.retType,[name]).readPointer().isNull(); },
+                hasRecord: function(name){ return creatorHasRecord(record,name); },
                 quantity: function(name){ return callFuncRaw(quantity.fn,tx,quantity.retType,
                     [{kind:'handle',inst:owner},{kind:'item16',ptr:itemID(name)}]).readS32(); },
                 give: function(name){ return callFuncRaw(give.fn,tx,give.retType,
                     [{kind:'handle',inst:owner},{kind:'item16',ptr:itemID(name)},{kind:'i32',v:1}]).readU8() !== 0; }
             };
         }
+        // END CREATOR CONTEXT
         // BEGIN CREATOR TRANSACTION
         // Dedicated request/response channel: ordinary console commands cannot overwrite a Creator
         // operation. All engine calls run from the executor queue; timers only enqueue verification.
@@ -1303,6 +1337,7 @@ rpc.exports = {
                 }catch(e){ log('modsbutton cb err '+e); } });
                 log('modsbutton: armed (read-only sig capture). Open a menu so AddMenuItem fires; "modsbutton off" clears.'); return; }   // capture PushData contract before we call it
             if(t[0]==='itemdump'){ doItemDump(t[1]); return; }   // TweakDB is readable from the main menu
+            if(t[0]==='creatorprobe'){ try{ creatorProbe(); }catch(e){ log('creatorprobe FAILED: '+e); } return; }
             if(!player){ log('NOT IN GAME yet: '+line); return; }
             if(t[0]==='give'&&t[1]){ doGive(t[1], Math.max(1,parseInt(t[2]||'1')||1)); return; }
             if(t[0]==='money'&&t[1]){ doGive('Items.money', Math.max(1,parseInt(t[1])||1), true); return; }   // currency: always one bulk add
