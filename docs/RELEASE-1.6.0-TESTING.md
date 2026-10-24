@@ -1,8 +1,10 @@
 # 1.6.0 local test candidate
 
-Status: Creator acceptance passed on macOS game 2.5.0. The user confirmed creation,
-use, persistence after a new manual save/relaunch, the corrected success message,
-and exactly one added weapon. Remaining work concerns the broader player release.
+Status: Creator acceptance and the native allocation gate passed on macOS game
+2.5.0. The user confirmed creation, use, persistence after a new manual save/relaunch,
+the corrected success message, and exactly one added weapon. The fourth candidate
+will preserve that accepted Creator build and replace its 2.5 native loader with
+the validated allocation fix. Basic player-feature checks and final packaging remain.
 
 ## Second local candidate
 
@@ -22,7 +24,7 @@ lookup by itself, not inventory creation or hot reload.
 The subsequent user test confirmed "Weapon created and works." The generated
 Crit Machine YAML and runtime localization hits corroborate the new weapon and its
 custom text. However, the runtime response reported inventory-confirmation timeout
-after GiveItem. This is an outstanding false-negative status problem: the user's
+after GiveItem. This was a false-negative status problem: the user's
 visible result is successful creation, while the automatic quantity check did not
 confirm it. No second item should be given to work around this timeout. A new-slot
 save/relaunch persistence check subsequently passed: the user reported "Everything
@@ -38,15 +40,49 @@ timeout, exactly one added weapon, and the previous weapon still present. The
 runtime response corroborates `ok: true`, `before: 0`, `after: 1`, with the query
 using wildcard seed 1 and GiveItem using a distinct unique instance seed.
 
-The broader custom-stat scenario also reproduced a separate native near-allocation
-failure with the full injected stack. That remains a release gate; a previous passing
-run did not establish reliable custom-stat hook installation. The second Creator
-candidate retains the existing native payload while this is investigated separately.
+The broader custom-stat scenario also reproduced a separate native allocation
+failure with the full injected stack. The near and ADRP branch windows could both
+be occupied by the time a late hook was installed. Native commit `27566e1` adds a
+guarded 16-byte absolute branch fallback; source-recipe commit `d8a798c` preserves
+the exact patches and source tree. The checks below close this observed allocation
+gate without claiming that every plugin path has been exercised.
 
 The candidate preserves the public 1.5.0 ZIP's game-2.3.1 native dependencies and
 adds a separate 2.5 loader, address database, TweakXL and ArchiveXL. Codeware,
 CET-Lua and Virtual Atelier development are outside this candidate's release scope.
 See RELEASE-BUILD.md and ../native25/README.md for inputs and source provenance.
+
+## Fourth candidate and native allocation validation
+
+The forthcoming fourth candidate copies the accepted third candidate. Only the
+2.5 loader and its source/input provenance change, followed by signing the replacement
+dylib and resealing the outer app. The runtime JavaScript, overlay, launcher code,
+other native dependencies and retained 2.3.1 payload are preserved. Signature bytes
+may change when the outer app is resealed; final signed-file hashes must be recorded.
+
+Local evidence is recorded in `release-evidence/native-allocation/live-validation.json`:
+
+- Fresh full-stack TweakXL runs `20261024-053107-tweakxl` and
+  `20261024-053149-tweakxl` each passed all six functional checks: player attached,
+  new flat, new record, record override, custom stat and scriptable tweak. Both
+  exited naturally with code 0. Their harness verdicts remain **FAIL** because
+  the initial core-hook snapshot still showed zero hits for `Main` and
+  `CGameApplication_AddState` before the approximately four-second scripted quit.
+  These are functional passes and normal exits, not overall harness passes.
+- The 120-second full-stack boot `20261024-053215-boot` received an overall
+  harness **PASS**, with all 94 hooks installed successfully. Three TweakXL hooks
+  used the new absolute fallback. `GetStatRange` at RVA `0x23b3cb0` recorded 3,067
+  hits; the absolute hook at `0x23b3438` recorded 145; the one at `0x23b34b4` was
+  installed but recorded zero. This proves execution of the fallback on the
+  original failing target. The harness ended the timed boot (exit 143), so this
+  is not a normal-quit or gameplay pass. Many ArchiveXL paths remain unexercised.
+- Manual overlay checks observed F1 open/close, `help`, keyboard tab switching,
+  item search for `Lexington` returning 49 results, and a pinned item appearing in
+  Quick. Gameplay cheats and unpinning have not been verified by these checks.
+
+An existing nonblocking display issue was observed when pinning before Quick was
+first opened: lazy loading can show the pin twice even though the saved pin file
+contains one entry. This observation does not establish that unpinning works.
 
 ## Completed checks
 
@@ -56,12 +92,12 @@ See RELEASE-BUILD.md and ../native25/README.md for inputs and source provenance.
   localization fingerprints match the retained 2.3.1 and installed 2.5 binaries.
 - Loader CTest passed 5/5. Hook thread-exit and near-allocation regressions were
   reproduced before their fixes and passed repeated checks after them.
-- Native TweakXL in-game scenario passed: new flat/record, record override,
-  custom stat and scriptable tweak. This does not prove Creator gameplay.
-- Full 2.5 boot with Frida, the new overlay, TweakXL, ArchiveXL and the launcher's
-  flat-namespace environment reached Running/menu without a crash. The custom-name
-  hook attached. This was a timed boot check terminated by the harness, not a
-  gameplay or normal-quit test; many ArchiveXL hooks were not exercised.
+- Final native-loader CTest passed 5/5, including forced absolute relocation,
+  conditional branches, SIMD/struct returns, full restore and unsafe-entry refusal.
+- Full-stack TweakXL functional checks and the timed 2.5 boot with Frida, overlay,
+  TweakXL, ArchiveXL and the launcher's flat-namespace environment passed within
+  the evidence boundaries detailed above. Creator gameplay evidence comes from
+  the separate user acceptance sessions.
 - Launcher script-staging and compilation-gate checks passed; source typechecked.
   A 2.5 compiler error stops launch. Play detects stale core payload bytes.
 - Explicit-input release assembly, native dependency inspection and local Developer
@@ -88,9 +124,12 @@ the live development installation during this first test.
 
 ## Remaining release gates
 
-Creator creation, acknowledgement, uniqueness and persistence have passed. Remaining
-2.5 checks are the public-feature smoke test and the observed custom-stat hook crash,
-followed by packaging and extraction/signature verification of the accepted app.
+Creator creation, acknowledgement, uniqueness and persistence have passed. The
+observed custom-stat allocation failure is fixed and its absolute fallback was
+exercised in the real full stack. Remaining work is the user's basic public-feature
+smoke test with the fourth candidate, followed by final packaging and extraction/
+signature verification of the accepted app. Do not infer cheat or mod-install
+workflow acceptance from the menu and overlay checks.
 
 Preserved 2.3.1 binaries and static checks are not evidence of a new live 2.3.1 pass.
 An unavailable old-game replay does not block a release explicitly validated for 2.5;

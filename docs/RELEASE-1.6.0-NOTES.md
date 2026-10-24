@@ -20,6 +20,24 @@ confirmed a correct success message, exactly one added weapon, and persistence o
 the prior weapon. The runtime independently recorded quantity increasing from 0
 to 1. Creator acceptance is complete; the broader release checks remain below.
 
+The native allocation gate has also passed. Native commit `27566e1` adds an
+absolute hook fallback when the nearby branch windows are full, with its source
+recipe preserved in `d8a798c`. Two fresh full-stack TweakXL sessions passed all six
+functional checks and exited normally. Their overall harness verdicts remained
+FAIL because the initial snapshot had stale zero core-hook counters before the
+short scripted quit. A separate 120-second boot received an overall PASS and
+installed all 94 hooks, including three absolute hooks: `GetStatRange` recorded 3,067
+hits, another recorded 145, and the third was installed but not hit. That boot was
+ended by the harness; it does not establish normal quit or every ArchiveXL path.
+
+The forthcoming fourth candidate preserves the accepted third candidate's Creator
+runtime, overlay, launcher code and other dependencies, replacing only the 2.5
+loader and provenance before selective signing. Manual overlay checks passed for
+F1 open/close, help, keyboard tab switching, Lexington item search (49 results),
+and a pin appearing in Quick. Gameplay cheats and unpinning remain unverified.
+An existing nonblocking first-pin display issue can show two Quick rows after lazy
+loading while the saved file contains one pin; no fix is included in this candidate.
+
 The public scope is the existing console/item-browser/cheat workflow plus the
 Iconic weapon Creator on native macOS Steam game 2.5.0. TweakXL and ArchiveXL are
 the bundled native dependencies. Codeware, Virtual Atelier, the CET-Lua host,
@@ -37,9 +55,9 @@ acceptance steps, [RELEASE-BUILD.md](RELEASE-BUILD.md) for assembly/signing, and
   and the status agrees with the resulting inventory.
 - Preserve the passed new-slot/restart result when validating the final candidate;
   the tested weapon kept its custom name, Iconic identity/effects and equip/fire behavior.
-- Close the native custom-stat hook reliability gate under the complete injected
-  stack; one successful creation is not a substitute for that check.
-- Complete the public-feature smoke tests on 2.5 before claiming full parity.
+- Preserve the passed native allocation result in the fourth candidate; the
+  accepted loader and source provenance must match the tested native revision.
+- Complete the user's basic public-feature smoke tests on 2.5 before claiming full parity.
   Retain the public 2.3.1 compatibility payload without claiming a new old-game
   validation; an unavailable 2.3.1 replay does not block the targeted 2.5 release.
 - Freeze the accepted source revision and candidate file hashes. Recheck the
@@ -60,7 +78,8 @@ The console, item browser and quick actions remain available. The launcher updat
 outdated runtime files and stops a 2.5 launch when script compilation fails, so a
 failed compile is shown before starting the game.
 
-This release includes the macOS TweakXL and ArchiveXL dependencies. Codeware,
+This release includes the macOS TweakXL and ArchiveXL dependencies and fixes a
+native hook allocation failure that could prevent late plugin hooks from loading. Codeware,
 Virtual Atelier and CET-Lua mods are not supported by this release. GOG and Intel
 Mac builds are not supported.
 
