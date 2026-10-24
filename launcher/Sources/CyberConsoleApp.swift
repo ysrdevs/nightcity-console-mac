@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 import CryptoKit
 
 enum Const {
-    static let appVersion = "1.5.0"
+    static let appVersion = "1.6.0"
     static let supportedGameVersions = ["2.3.1", "2.5.0"]
     // Payload files that only work on game 2.3.1: the RED4ext AddressLib is a 2.3.1 address list, and on any
     // other version RED4ext would resolve its hashes to the wrong code.
@@ -154,6 +154,10 @@ final class Model: ObservableObject {
     var moddedScriptCache: String { "\(gamePath)/r6/cache/modded/final.redscripts" }
 
     private func compileScripts() -> String? {
+        if native25Active {
+            do { _ = try stageNativePluginScripts() }
+            catch { return error.localizedDescription }
+        }
         let scriptsDir = "\(gamePath)/r6/scripts"
         stripAppleDoubles(scriptsDir)   // scc reads "._x.reds" sidecars as sources and stops ("Could not load script sources")
         // Removing the last script mod may leave the dir empty/missing; compiling an empty dir is how
@@ -314,16 +318,32 @@ final class Model: ObservableObject {
 
     // MARK: - native 2.5 loader + plugins
 
-    // Copy the native25 tree into red4ext/, file by file. Each plugin's Scripts folder is replaced as a whole so a
-    // script dropped by a newer plugin build cannot linger (its natives would no longer be registered).
+    // Copy the native25 tree file by file. Script updates use the previous manifest to distinguish
+    // NightCity's copies from user edits; never delete a plugin's entire Scripts directory.
     func installNative25(_ root: URL) throws {
         let fm = FileManager.default
-        for name in (try? fm.contentsOfDirectory(atPath: root.appendingPathComponent("plugins").path)) ?? [] where !name.hasPrefix(".") {
-            let scripts = "\(red4Dir)/plugins/\(name)/Scripts"
-            if fm.fileExists(atPath: scripts) { try fm.removeItem(atPath: scripts) }
+        let files = native25Files(root), previous = native25Installed()
+        let scripts = Set(files.filter { $0.contains("/Scripts/") })
+        for rel in scripts where fm.fileExists(atPath: "\(red4Dir)/\(rel)") {
+            guard fm.contentsEqual(atPath: "\(red4Dir)/\(rel)", andPath: root.appendingPathComponent(rel).path)
+                    || (previous[rel].map { $0 == sha256("\(red4Dir)/\(rel)") } ?? false) else {
+                throw NSError(domain: "NightCity", code: 1, userInfo: [NSLocalizedDescriptionKey:
+                    "Kept older or edited plugin script: \(rel). Back up and move it out of the plugin folder before installing."])
+            }
+        }
+        for (rel, digest) in previous where rel.contains("/Scripts/") && !scripts.contains(rel)
+            && fm.fileExists(atPath: "\(red4Dir)/\(rel)") {
+            guard sha256("\(red4Dir)/\(rel)") == digest else {
+                throw NSError(domain: "NightCity", code: 1, userInfo: [NSLocalizedDescriptionKey:
+                    "Kept edited plugin script removed by this update: \(rel). Back up and move it out of the plugin folder before installing."])
+            }
+        }
+        for (rel, digest) in previous where rel.contains("/Scripts/") && !scripts.contains(rel)
+            && sha256("\(red4Dir)/\(rel)") == digest {
+            try fm.removeItem(atPath: "\(red4Dir)/\(rel)")
         }
         var manifest = ""
-        for rel in native25Files(root) {
+        for rel in files {
             let dst = "\(red4Dir)/\(rel)"
             try fm.createDirectory(atPath: (dst as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
             if fm.fileExists(atPath: dst) { try fm.removeItem(atPath: dst) }
@@ -360,7 +380,7 @@ final class Model: ObservableObject {
     // staged plugin scripts, whose natives no other loader registers. Files the player changed stay.
     func removeNative25Files() throws {
         let fm = FileManager.default
-        if fm.fileExists(atPath: pluginScriptsStage) { try fm.removeItem(atPath: pluginScriptsStage) }
+        try clearNativePluginScripts()
         let rels = Set((native25Root().map { native25Files($0) } ?? []) + Array(native25Installed().keys))
         for rel in rels where isOurNative25(rel) {
             try fm.removeItem(atPath: "\(red4Dir)/\(rel)")
@@ -384,10 +404,25 @@ final class Model: ObservableObject {
     // will load are staged: it refuses a plugin that needs an address its database has not verified, and a script
     // declaring natives nobody registered stops the game at script init. Returns the names of refused plugins.
     var pluginScriptsStage: String { "\(gamePath)/r6/scripts/zz_nightcity_plugins" }
-    func stageNativePluginScripts() -> [String] {
+    var pluginScriptsManifest: URL { URL(fileURLWithPath: "\(red4Dir)/nightcity-plugin-scripts.json") }
+    func nativePluginScriptSources() -> [String: URL] {
         let fm = FileManager.default
-        try? fm.removeItem(atPath: pluginScriptsStage)
+        var sources: [String: URL] = [:]
+        for name in (try? fm.contentsOfDirectory(atPath: "\(red4Dir)/plugins")) ?? [] where !name.hasPrefix(".") {
+            let root = URL(fileURLWithPath: "\(red4Dir)/plugins/\(name)/Scripts")
+            if fm.fileExists(atPath: root.path) { sources[name] = root }
+        }
+        return sources
+    }
+    func clearNativePluginScripts() throws {
+        try PluginScriptStager.reconcile(accepted: [:], knownSources: nativePluginScriptSources(),
+            scriptsRoot: URL(fileURLWithPath: "\(gamePath)/r6/scripts"), manifestURL: pluginScriptsManifest)
+    }
+    func stageNativePluginScripts() throws -> [String] {
+        let fm = FileManager.default
         let check = "\(red4Dir)/bin/red4ext_plugin_check", db = "\(red4Dir)/bin/x64/cyberpunk2077_addresses.json"
+        let sources = nativePluginScriptSources()
+        var accepted: [String: URL] = [:]
         var refused: [String] = []
         for name in ((try? fm.contentsOfDirectory(atPath: "\(red4Dir)/plugins")) ?? []).sorted() where !name.hasPrefix(".") {
             let dir = "\(red4Dir)/plugins/\(name)"
@@ -396,15 +431,15 @@ final class Model: ObservableObject {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: check)
             p.arguments = [db] + dylibs.map { "\(dir)/\($0)" }
-            p.standardOutput = Pipe(); p.standardError = Pipe()
+            // This is a status-only probe; unconsumed pipes can deadlock a verbose checker.
+            p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
             guard (try? p.run()) != nil else { refused.append(name); continue }
             p.waitUntilExit()
             guard p.terminationStatus == 0 else { refused.append(name); continue }
-            if fm.fileExists(atPath: "\(dir)/Scripts") {
-                try? fm.createDirectory(atPath: pluginScriptsStage, withIntermediateDirectories: true)
-                try? fm.copyItem(atPath: "\(dir)/Scripts", toPath: "\(pluginScriptsStage)/\(name)")
-            }
+            if let root = sources[name] { accepted[name] = root }
         }
+        try PluginScriptStager.reconcile(accepted: accepted, knownSources: sources,
+            scriptsRoot: URL(fileURLWithPath: "\(gamePath)/r6/scripts"), manifestURL: pluginScriptsManifest)
         return refused
     }
 
@@ -576,6 +611,7 @@ final class Model: ObservableObject {
         guard !busy else { status = "Please wait for the current operation to finish."; return }
         gameVersion = readGameVersion()      // a game update while the app was open changes which files belong
         if !fullyInstalled() { install() }   // self-heal stale/partial installs
+        guard fullyInstalled() else { return }   // keep the installation error; don't launch a partial payload
         // pre-flight: every injected dylib must exist, or the game aborts on launch
         let fm = FileManager.default
         let missing = injectDylibs.filter { !fm.fileExists(atPath: "\(red4Dir)/\($0)") }
@@ -594,7 +630,7 @@ final class Model: ObservableObject {
         // missing, independent of the manifests. Regen is idempotent and cheap.
         let handoffs = ["/tmp/cp2077_xl_items.txt", "/tmp/cp2077_xl_loc.json", "/tmp/cp2077_xl_paths.txt",
                         "/tmp/cp2077_xl_names.txt", "/tmp/cp2077_xl_meshalias.txt"]
-        let needRegen = nctoolPath() != nil && handoffs.contains { !fm.fileExists(atPath: $0) }
+        let needRegen = pluginsSupported && nctoolPath() != nil && handoffs.contains { !fm.fileExists(atPath: $0) }
         // Script mods (.reds) must be recompiled into the game's script cache before launch; the cache is
         // only read at game startup. A full scc compile is ~0.3s, so run it on every Play when scripts exist.
         let needCompile = hasScripts() && fm.isExecutableFile(atPath: sccGamePath)
@@ -607,7 +643,10 @@ final class Model: ObservableObject {
         let canStagePlugins = nctoolPath() != nil && pluginsSupported
         // 2.5: the native loader's plugins; their scripts are staged by the launcher itself (no nctool needed).
         let stageNative = native25Active
-        if !stageNative { try? fm.removeItem(atPath: pluginScriptsStage) }   // 2.5 plugin natives exist only on 2.5
+        if !stageNative {
+            do { try clearNativePluginScripts() }
+            catch { status = error.localizedDescription; return }
+        }
         let sccReady = fm.isExecutableFile(atPath: sccGamePath)
         if needRegen || needCompile || canStagePlugins || stageNative {
             busy = true; progress = 0
@@ -628,7 +667,16 @@ final class Model: ObservableObject {
                     self.runNctoolStreaming(["stageplugins", self.gamePath]) { _ in }
                 }
                 var refused: [String] = []
-                if stageNative { refused = self.stageNativePluginScripts() }
+                if stageNative {
+                    do { refused = try self.stageNativePluginScripts() }
+                    catch {
+                        DispatchQueue.main.async {
+                            self.busy = false; self.busyDetail = ""; self.progress = 0
+                            self.status = "Can't prepare plugin scripts: \(error.localizedDescription)"
+                        }
+                        return
+                    }
+                }
                 var compileWarn: String? = nil
                 // Re-check after staging: the freshly staged plugin reds may be the only scripts present.
                 if needCompile || (sccReady && self.hasScripts()) {
@@ -849,11 +897,14 @@ final class Model: ObservableObject {
                 return
             }
             // Phase 2: regenerate game data (nctool regen) drives the bar 0.6 -> 1.0.
-            let g = self.runNctoolStreaming(["regen", self.gamePath]) { line in
-                if let p = self.parseProgress(line) {
-                    DispatchQueue.main.async {
-                        self.progress = 0.6 + p.frac * 0.4
-                        if !p.label.isEmpty { self.busyDetail = p.label + "…" }
+            var g = (ok: true, out: "")
+            if self.pluginsSupported {
+                g = self.runNctoolStreaming(["regen", self.gamePath]) { line in
+                    if let p = self.parseProgress(line) {
+                        DispatchQueue.main.async {
+                            self.progress = 0.6 + p.frac * 0.4
+                            if !p.label.isEmpty { self.busyDetail = p.label + "…" }
+                        }
                     }
                 }
             }
@@ -891,9 +942,11 @@ final class Model: ObservableObject {
             }
             try? fm.removeItem(atPath: mod.manifestPath)
             DispatchQueue.main.async { self.busyDetail = "Updating game data…" }
-            self.runNctoolStreaming(["regen", self.gamePath]) { line in
-                if let p = self.parseProgress(line) {
-                    DispatchQueue.main.async { self.progress = p.frac; if !p.label.isEmpty { self.busyDetail = p.label + "…" } }
+            if self.pluginsSupported {
+                self.runNctoolStreaming(["regen", self.gamePath]) { line in
+                    if let p = self.parseProgress(line) {
+                        DispatchQueue.main.async { self.progress = p.frac; if !p.label.isEmpty { self.busyDetail = p.label + "…" } }
+                    }
                 }
             }
             // Recompile the script cache so a removed script mod actually leaves the game - the compiled
