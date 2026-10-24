@@ -5,8 +5,44 @@
 #
 # Primary path: copy from a known-good local Cyberpunk 2077 install (if present).
 # Otherwise, download from upstream (see URLs below) and place the files in deps/.
-set -e
+set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# Release inputs are explicit and isolated from the developer deps/ directory and live game.
+if [ "${NIGHTCITY_BUILD_MODE:-development}" = "release" ]; then
+  : "${NIGHTCITY_BASELINE_ZIP:?release requires the public v1.5.0 ZIP}"
+  : "${NATIVE25_DIR:?release requires a built native 2.5 red4ext tree}"
+  : "${NCTOOL_PUBLISH_DIR:?release requires a self-contained osx-arm64 nctool publish directory}"
+  CACHE="build/release-downloads"
+  mkdir -p "$CACHE"
+  download_checked() {
+    local target="$1" expected="$2" url="$3"
+    if [ -f "$target" ] && [ "$(shasum -a 256 "$target" | cut -d' ' -f1)" = "$expected" ]; then return; fi
+    local pending
+    pending="$(mktemp "$CACHE/download.XXXXXX")"
+    if ! curl -fSL --retry 2 -o "$pending" "$url" || [ "$(shasum -a 256 "$pending" | cut -d' ' -f1)" != "$expected" ]; then
+      rm -f "$pending"
+      echo "Release dependency download/checksum failed: $url" >&2
+      return 1
+    fi
+    mv "$pending" "$target"
+  }
+  download_checked "$CACHE/redscript-v0.5.32-macos.zip" \
+    b9df6cc0144d786dff9590eb6db913d20744055ab694e52fc8c4584eaee39a8a \
+    https://github.com/jac3km4/redscript/releases/download/v0.5.32/redscript-v0.5.32-macos.zip
+  download_checked "$CACHE/ArchiveXL-1.27.4.zip" \
+    6c638dc1108a565ff4806835a17f704cbb2ab2afeb8ccf700080797c3f70591c \
+    https://github.com/psiberx/cp2077-archive-xl/releases/download/v1.27.4/ArchiveXL-1.27.4.zip
+  python3 tools/prepare-release-deps.py \
+    --baseline "$NIGHTCITY_BASELINE_ZIP" --native25 "$NATIVE25_DIR" --nctool "$NCTOOL_PUBLISH_DIR" \
+    --redscript "$CACHE/redscript-v0.5.32-macos.zip" --archivexl "$CACHE/ArchiveXL-1.27.4.zip" \
+    --config runtime/native25/config.ini --output build/release-deps
+  exit 0
+fi
+if [ "${NIGHTCITY_BUILD_MODE:-development}" != "development" ]; then
+  echo "Unknown NIGHTCITY_BUILD_MODE; use development or release." >&2
+  exit 1
+fi
 mkdir -p deps
 GAME="${CP2077_DIR:-$HOME/Library/Application Support/Steam/steamapps/common/Cyberpunk 2077}/red4ext"
 

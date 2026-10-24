@@ -10,23 +10,42 @@
 #   SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
 #   NOTARY_PROFILE="cyberconsole-notary" \
 #   ./tools/sign-notarize.sh
-set -e
+set -euo pipefail
 cd "$(dirname "$0")/.."
 APP="build/NightCity Console.app"
+BUILD_APP=1
+SIGN_ONLY=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --existing-app)
+      [ "$#" -ge 2 ] || { echo "--existing-app requires a path" >&2; exit 1; }
+      APP="$2"; BUILD_APP=0; shift 2 ;;
+    --sign-only) SIGN_ONLY=1; shift ;;
+    *) echo "Usage: $0 [--existing-app path] [--sign-only]" >&2; exit 1 ;;
+  esac
+done
 DMG="dist/NightCity-Console-for-Mac.dmg"
 ZIP="dist/NightCity-Console-for-Mac.zip"          # distributable zip (made from the stapled app)
 SUBZIP="dist/_notarize.zip"     # temporary zip used only for the notarization upload
 
 : "${SIGN_IDENTITY:?set SIGN_IDENTITY to 'Developer ID Application: NAME (TEAMID)'}"
-: "${NOTARY_PROFILE:?set NOTARY_PROFILE to your notarytool keychain profile name}"
+if [ "$SIGN_ONLY" = 0 ]; then
+  : "${NOTARY_PROFILE:?set NOTARY_PROFILE to your notarytool keychain profile name}"
+fi
 
-echo "==> building app (ad-hoc), then re-signing with Developer ID"
-./launcher/build-app.sh
+if [ "$BUILD_APP" = 1 ]; then
+  echo "==> building release from explicit inputs, then signing with Developer ID"
+  NIGHTCITY_BUILD_MODE=release ./launcher/build-app.sh
+else
+  echo "==> signing the existing app without rebuilding or fetching dependencies"
+fi
+python3 tools/verify-release-bundle.py "$APP"
 
 # The bundled nctool is a self-contained .NET helper that JITs. Under hardened runtime CoreCLR SIGKILLs the
 # instant it writes executable memory unless these entitlements are present (validated locally: JIT + a full
 # Kraken rawrepack run clean with them). Entitlements apply to the apphost EXECUTABLE, not the dylibs.
 NCTOOL_ENTS="$(mktemp -t nctool-ents)"
+trap 'rm -f "$NCTOOL_ENTS"' EXIT
 cat > "$NCTOOL_ENTS" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -41,16 +60,19 @@ NCTOOL_EXE="$APP/Contents/Resources/nctool/nctool"
 # Sign every nested Mach-O inside-out with hardened runtime + secure timestamp (required for notarization).
 # This is ALL Mach-O, not just *.dylib: the nctool bundle also ships helper executables (createdump) and the
 # .NET runtime dylibs. The nctool apphost is skipped here and signed next, with the JIT entitlements.
-find "$APP/Contents/Resources" -type f | while IFS= read -r f; do
+find "$APP/Contents/Resources" -type f -print0 | while IFS= read -r -d '' f; do
   [ "$f" = "$NCTOOL_EXE" ] && continue
   if file "$f" | grep -q "Mach-O"; then
     codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$f"
   fi
 done
 codesign --force --options runtime --timestamp --entitlements "$NCTOOL_ENTS" --sign "$SIGN_IDENTITY" "$NCTOOL_EXE"
-rm -f "$NCTOOL_ENTS"
 codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
+if [ "$SIGN_ONLY" = 1 ]; then
+  echo "Signed locally: $APP (no notarization upload or packaging requested)."
+  exit 0
+fi
 
 echo "==> notarizing the app"
 mkdir -p dist
@@ -68,9 +90,7 @@ rm -f "$ZIP"
 #    the dmg itself so the downloaded image also passes Gatekeeper offline.
 rm -f "$DMG"
 VOL="NightCity Console"; STAGE="build/dmg"; APPNAME="$(basename "$APP")"
-# Pre-clean any stale mounts left by an interrupted prior run (they pile up as "NightCity Console 1/2/..."
-# and make the old hdiutil convert fail with "Resource temporarily unavailable").
-for v in /Volumes/"$VOL"*; do [ -d "$v" ] && hdiutil detach "$v" -force >/dev/null 2>&1 || true; done
+# This path creates directly from a staging folder and does not touch existing mounted volumes.
 rm -rf "$STAGE"; mkdir -p "$STAGE"
 ditto "$APP" "$STAGE/$APPNAME"
 ln -s /Applications "$STAGE/Applications"            # the drag-here shortcut
