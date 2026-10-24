@@ -1,6 +1,8 @@
 # 1.6.0 local test candidate
 
-Status: ready for manual Creator testing on macOS game 2.5.0. Not a validated public release yet.
+Status: the user confirmed weapon creation and use on macOS game 2.5.0 with the
+second local candidate. Persistence and the status acknowledgement still need
+verification. Not a validated public release yet.
 
 ## Second local candidate
 
@@ -15,7 +17,15 @@ in the actual 2.5 menu session. Early startup probes were inconclusive because t
 database was not loaded; the probe now waits for a menu/player context. The final
 menu scenario exited normally with its checks passing, although the harness still
 reported zero core-hook counters before the early exit. This proves the record
-lookup, not inventory creation or hot reload. Manual Create & Apply remains pending.
+lookup by itself, not inventory creation or hot reload.
+
+The subsequent user test confirmed "Weapon created and works." The generated
+Crit Machine YAML and runtime localization hits corroborate the new weapon and its
+custom text. However, the runtime response reported inventory-confirmation timeout
+after GiveItem. This is an outstanding false-negative status problem: the user's
+visible result is successful creation, while the automatic quantity check did not
+confirm it. No second item should be given to work around this timeout. A new-slot
+save/relaunch persistence check has been requested from the user.
 
 The broader custom-stat scenario also reproduced a separate native near-allocation
 failure with the full injected stack. That remains a release gate; a previous passing
