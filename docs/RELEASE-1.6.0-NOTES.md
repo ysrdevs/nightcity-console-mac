@@ -5,6 +5,15 @@ and its limits; player-facing notes are in [RELEASE-1.6.0-PUBLIC.md](RELEASE-1.6
 The user handles source pushes and GitHub/Nexus publication. No push or upload is
 part of this work.
 
+## Release scope and public baseline
+
+This is the first public Cyberpunk 2077 patch 2.5 compatibility release since the
+previous public 2.3.1 build with mod support. The intervening 2.5 work had not been
+pushed or released. Public notes therefore cover the cumulative console, overlay,
+item browser, quick-action, native mod-runtime and Creator updates for 2.5; the
+Creator repair is one part of that release, not its sole purpose. Existing local
+README descriptions of 2.5 support do not establish an earlier public 2.5 release.
+
 ## Accepted release — October 24, 2026
 
 The user reported that the second candidate created a weapon and that the weapon
