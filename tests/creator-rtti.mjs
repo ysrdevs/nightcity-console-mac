@@ -74,7 +74,9 @@ function harness(options = {}) {
     T_TDB: '0x' + fnv('TweakDBID').toString(16),
     cmnAttached: true, cmnReserve: {}, fromtd: options.noItemID ? null : {}, player: options.menu ? null : owner,
     nameOf: p => types.get(p.address), sigStr: () => 'signature', log: message => logs.push(message),
-    authPlayer: () => options.noPlayer ? null : owner, instOf: () => options.noTransaction ? null : tx,
+    authPlayer: () => options.noPlayer ? null : owner,
+    instOf: name => name === 'SingleplayerMenuGameController' ? (options.menuReady ? outerContext : null)
+      : (options.noTransaction ? null : tx),
     tweakReloadMethod: () => () => events.push('reload'),
     Memory: { alloc }, tdbidBytes: name => name,
     fromTDBID: (name, out) => cells.set(out.address, name),
@@ -135,11 +137,13 @@ for (const [conditions, expected] of [
   assert.deepEqual(h.events, []); // Refuse before reaching the native executor's null-context fallback.
 }
 {
-  const h = harness({ menu: true });
+  const h = harness({ menu: true, menuReady: true });
   assert.equal(h.canDispatchCommand('creatorprobe', 0, null), false); // Keep queued across global calls.
   assert.equal(h.canDispatchCommand('creatorprobe', 2, h.outerContext), true); // Use the current nested menu call.
   assert.equal(h.canDispatchCommand('give Items.money', 2, h.outerContext), false);
   assert.equal(h.canDispatchCommand({ creator: {} }, 2, h.outerContext), false);
   assert.equal(h.canDispatchCommand({ creator: {} }, 0, null), true); // Creator resolves its own owner.
+  const early = harness({ menu: true });
+  assert.equal(early.canDispatchCommand('creatorprobe', 0, early.outerContext), false); // Before main menu/TDB.
 }
 console.log('Real 2.5 RTTI table resolution, Creator preflight and read-only menu probe passed.');

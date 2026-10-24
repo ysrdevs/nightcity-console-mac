@@ -1297,7 +1297,9 @@ rpc.exports = {
         }
         function canDispatchCommand(command, depth, context) {
             if (typeof command==='string' && command.trim()==='creatorprobe')
-                return !!context && !context.isNull(); // read-only probe can use this immediate nested call
+                return !!context && !context.isNull() && (!!player || !!instOf('SingleplayerMenuGameController'));
+                // A script context alone can precede TweakDB readiness. Wait for the observed main menu
+                // (or loaded player), then use this immediate call; no timer or cached context is involved.
             return depth===0; // mutating commands retain the existing outermost-call boundary
         }
         function execute(line, outerContext){
