@@ -1,11 +1,10 @@
-# 1.6.0 local test candidate
+# 1.6.0 release validation
 
-Status: Creator acceptance and the native allocation gate passed on macOS game
-2.5.0. The user confirmed creation, use, persistence after a new manual save/relaunch,
-the corrected success message, and exactly one added weapon. The fourth candidate
-preserves that accepted Creator build and replaces its 2.5 native loader with
-the validated allocation fix. It is signed and installed for the user's basic
-player-feature check. Local ZIP and DMG validation has passed.
+Status: All requested local release checks passed on macOS game 2.5.0, including
+Creator acceptance, the native allocation gate, the user's fourth-candidate gameplay
+checks, and ZIP/DMG validation. The accepted packages are promoted unchanged; no
+rebuild or re-signing is needed. This validates the tested features below, not every
+cheat or third-party mod workflow. The app is Developer ID signed but not notarized.
 
 ## Second local candidate
 
@@ -50,7 +49,7 @@ gate without claiming that every plugin path has been exercised.
 
 The candidate preserves the public 1.5.0 ZIP's game-2.3.1 native dependencies and
 adds a separate 2.5 loader, address database, TweakXL and ArchiveXL. Codeware,
-CET-Lua and Virtual Atelier development are outside this candidate's release scope.
+CET-Lua, Virtual Atelier development and save-editor changes are outside this release.
 See RELEASE-BUILD.md and ../native25/README.md for inputs and source provenance.
 
 ## Fourth candidate and native allocation validation
@@ -90,11 +89,26 @@ Local evidence is recorded in `release-evidence/native-allocation/live-validatio
   is not a normal-quit or gameplay pass. Many ArchiveXL paths remain unexercised.
 - Manual overlay checks observed F1 open/close, `help`, keyboard tab switching,
   item search for `Lexington` returning 49 results, and a pinned item appearing in
-  Quick. Gameplay cheats and unpinning have not been verified by these checks.
+  Quick. These menu checks do not establish gameplay or unpinning behavior; the
+  subsequent user gameplay checks are recorded separately below.
 
 An existing nonblocking display issue was observed when pinning before Quick was
 first opened: lazy loading can show the pin twice even though the saved pin file
 contains one entry. This observation does not establish that unpinning works.
+
+## Fourth-candidate user acceptance — October 24, 2026
+
+The user confirmed that all five requested gameplay checks worked:
+
+- Previously created weapons still worked.
+- Items added a normal item.
+- Quick Money changed the balance.
+- One usual, user-selected cheat could be turned on and off.
+- SaveSpot, moving away, then GoToSpot returned to the saved location.
+
+Together with the earlier Creator checks, this completes the requested local
+acceptance. It does not establish every cheat, every Creator effect combination,
+unpinning, all third-party mod installation workflows or a new live 2.3.1 pass.
 
 ## Completed checks
 
@@ -114,10 +128,14 @@ contains one entry. This observation does not establish that unpinning works.
   A 2.5 compiler error stops launch. Play detects stale core payload bytes.
 - Explicit-input release assembly, native dependency inspection and local Developer
   ID signing passed. Installed test files matched the signed candidate byte-for-byte.
+- The user accepted the fourth candidate's requested gameplay checks listed above.
+- ZIP extraction and read-only DMG mounting reproduced all 303 signed file hashes
+  and permissions. Strict deep signature verification passed for both packaged apps;
+  DMG integrity and its Applications shortcut passed. Packaging left the app unchanged.
 - All changes are local commits under ysrdevs. No push, release upload or notarization
   submission has been performed.
 
-## Acceptance procedure (Creator passed)
+## Completed acceptance procedure
 
 1. Use the prepared test launcher and click Play. It targets an isolated game copy;
    the game profile and saves were backed up before testing.
@@ -127,23 +145,22 @@ contains one entry. This observation does not establish that unpinning works.
    name and Iconic identity, and can be equipped and fired with the selected effects.
 5. If this works, save to a new manual slot, quit and relaunch through this candidate.
    Verify the weapon/name/effects persist after loading that slot.
-6. Exercise the existing console, item browser, cheats and public mod-install workflow
-   before claiming parity with the previous public build.
+6. Check the existing weapons, normal item addition, Quick Money, one usual cheat
+   on/off, and SaveSpot/GoToSpot. The user confirmed all five checks worked.
 
 The isolated game path may display the launcher's Steam-only warning because it does
 not contain “steamapps”; it is a copy of the Steam game. Do not change the folder to
 the live development installation during this first test.
 
-## Remaining release gates
+## Release acceptance and evidence boundaries
 
 Creator creation, acknowledgement, uniqueness and persistence have passed. The
 observed custom-stat allocation failure is fixed and its absolute fallback was
-exercised in the real full stack. Remaining work is the user's basic public-feature
-smoke test with the fourth candidate. Local ZIP extraction and read-only DMG
-mounting each reproduced all 303 signed file hashes and permissions; strict deep
-signature verification passed for both packaged apps. DMG integrity and its
-Applications shortcut also passed. The app was unchanged after packaging.
-Do not infer cheat or mod-install workflow acceptance from the menu and overlay checks.
+exercised in the real full stack. The fourth-candidate gameplay checks and package
+verification complete the requested local release checks. Final release artifacts
+are the already verified packages, promoted without rebuilding or re-signing.
+Only the specific user-selected cheat and workflows listed above were accepted;
+do not claim every cheat or third-party mod installation workflow was tested.
 
 Preserved 2.3.1 binaries and static checks are not evidence of a new live 2.3.1 pass.
 An unavailable old-game replay does not block a release explicitly validated for 2.5;
@@ -151,12 +168,13 @@ do not advertise a new 2.3.1 validation. The native source recipe's patch replay
 generated SDK hashes were verified; a fresh end-to-end orchestration build has not
 yet been run. The current app is signed locally but not notarized.
 
-## Local candidate packages
+## Accepted local packages
 
-The ZIP and DMG are prepared beside test4 under `packages/`, with `SHA256SUMS`,
-`packaging-validation.json` and a validation log. They remain candidate artifacts
-until the pending user check is complete. The app is Developer ID signed; neither
-artifact has been submitted for notarization or uploaded for publication.
+The accepted ZIP and DMG originate from test4's `packages/`, with `SHA256SUMS`,
+`packaging-validation.json` and a validation log. They are promoted byte-for-byte
+to the final local `releases/1.6.0` directory. The app is Developer ID signed;
+neither artifact has been submitted for notarization or uploaded for publication.
+The user handles source pushes and GitHub/Nexus publication.
 
 ```text
 08d0d75241c15a7e029eb0bc62395441a126646dbb9bbd1bd0bac91bb7ae71d4  NightCity-Console-for-Mac.zip

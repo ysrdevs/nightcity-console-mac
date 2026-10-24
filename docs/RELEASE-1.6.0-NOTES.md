@@ -1,10 +1,11 @@
-# NightCity Console 1.6.0 — local candidate notes
+# NightCity Console 1.6.0 — release record
 
-This is a local release preparation document, not an announcement or approval to
-publish. The user will push source and upload releases to GitHub and Nexus after
-testing. No publication is part of this work.
+All requested local release checks are complete. This document records the evidence
+and its limits; player-facing notes are in [RELEASE-1.6.0-PUBLIC.md](RELEASE-1.6.0-PUBLIC.md).
+The user handles source pushes and GitHub/Nexus publication. No push or upload is
+part of this work.
 
-## Candidate status — October 24, 2026
+## Accepted release — October 24, 2026
 
 The user reported that the second candidate created a weapon and that the weapon
 works in game 2.5.0. This establishes that manual creation/use succeeded in that
@@ -18,7 +19,7 @@ ItemIDs instead of a record query. Commit `9437697` changes it to native
 `ItemID.CreateQuery`. The user tested the separately signed third candidate and
 confirmed a correct success message, exactly one added weapon, and persistence of
 the prior weapon. The runtime independently recorded quantity increasing from 0
-to 1. Creator acceptance is complete; the broader release checks remain below.
+to 1. Creator acceptance is complete.
 
 The native allocation gate has also passed. Native commit `27566e1` adds an
 absolute hook fallback when the nearby branch windows are full, with its source
@@ -34,7 +35,12 @@ The fourth candidate preserves the accepted third candidate's Creator
 runtime, overlay, launcher code and other dependencies, replacing only the 2.5
 loader and provenance before selective signing. Manual overlay checks passed for
 F1 open/close, help, keyboard tab switching, Lexington item search (49 results),
-and a pin appearing in Quick. Gameplay cheats and unpinning remain unverified.
+and a pin appearing in Quick. The user then confirmed all requested fourth-candidate
+gameplay checks: existing created weapons worked, Items added a normal item, Quick
+Money changed the balance, a usual cheat toggled on/off, and SaveSpot followed by
+moving away and GoToSpot returned to the saved location. This is acceptance of those
+specific checks, not every cheat, effect combination or third-party mod workflow.
+Unpinning remains unverified.
 An existing nonblocking first-pin display issue can show two Quick rows after lazy
 loading while the saved file contains one pin; no fix is included in this candidate.
 
@@ -49,45 +55,18 @@ See [RELEASE-1.6.0-TESTING.md](RELEASE-1.6.0-TESTING.md) for detailed evidence a
 acceptance steps, [RELEASE-BUILD.md](RELEASE-BUILD.md) for assembly/signing, and
 [native25/README.md](../native25/README.md) for the native source recipe.
 
-## Remaining publication checks
+## Accepted artifacts and publication
 
-- Preserve the passed acknowledgement result: one request gives one weapon,
-  and the status agrees with the resulting inventory.
-- Preserve the passed new-slot/restart result when validating the final candidate;
-  the tested weapon kept its custom name, Iconic identity/effects and equip/fire behavior.
-- Preserve the passed native allocation result in the fourth candidate; the
-  accepted loader and source provenance must match the tested native revision.
-- Complete the user's basic public-feature smoke tests on 2.5 before claiming full parity.
-  Retain the public 2.3.1 compatibility payload without claiming a new old-game
-  validation; an unavailable 2.3.1 replay does not block the targeted 2.5 release.
-- Freeze the accepted source revision and candidate file hashes. Recheck the
-  final signed payload after any JS, native, overlay or launcher change.
-- ZIP/DMG candidate files are prepared and verified against all 303 frozen app
-  file hashes. Promote those exact artifacts only after the user check passes.
-  The app is Developer ID signed but not notarized. The user handles GitHub and
-  Nexus publication; no upload or Apple submission has been performed.
+ZIP extraction and read-only DMG mounting matched all 303 frozen app file hashes
+and permissions. Both packaged apps passed strict deep signature verification;
+DMG integrity and the Applications shortcut also passed. The accepted test4 app
+and packages are promoted unchanged to the final local `releases/1.6.0` directory,
+without rebuilding or re-signing. Hashes and detailed evidence are recorded in
+[RELEASE-1.6.0-TESTING.md](RELEASE-1.6.0-TESTING.md).
 
-## Publication draft — use only after acceptance
-
-**NightCity Console 1.6.0 for Mac**
-
-This update brings the Iconic weapon Creator to Cyberpunk 2077 2.5 on Apple Silicon
-Macs running the native Steam edition. Create a custom weapon from a base weapon,
-give it a name and descriptions, and choose its effects from the Creator tab.
-
-The console, item browser and quick actions remain available. The launcher updates
-outdated runtime files and stops a 2.5 launch when script compilation fails, so a
-failed compile is shown before starting the game.
-
-This release includes the macOS TweakXL and ArchiveXL dependencies and fixes a
-native hook allocation failure that could prevent late plugin hooks from loading. Codeware,
-Virtual Atelier and CET-Lua mods are not supported by this release. GOG and Intel
-Mac builds are not supported.
-
-To update, replace the app, click **Install**, then **Play**. In game, press **F1**
-or the backtick key to open NightCity Console. Test new creations in a separate
-manual save slot.
-
-Before publishing this draft, resolve the candidate issues above and set the
-supported-game-version wording to match the completed tests. Do not copy the
-candidate status or unfinished checklist into the public announcement.
+No requested local release check remains open. The app is Developer ID signed but
+not notarized; no Apple submission, source push or release upload has occurred.
+The user can use [RELEASE-1.6.0-PUBLIC.md](RELEASE-1.6.0-PUBLIC.md) for publication.
+Any later runtime, native, overlay or launcher change requires validation of the
+changed artifact. The retained 2.3.1 compatibility payload has not received a new
+live regression pass, and many ArchiveXL paths remain unexercised.
