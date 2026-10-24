@@ -187,10 +187,11 @@ function getModuleBase() {
 // 2.5 so far - the mod-loading hooks further down still carry 2.3.1-only offsets and skip
 // themselves on any other version (see isGame231()). An unrecognized build gets no offsets at all.
 const GAME_OFFSETS = {
-    '2.3.1': { exec: 0x2173120, rttiGet: 0x2188e8c, main: 0x31e18 },
+    '2.3.1': { exec: 0x2173120, rttiGet: 0x2188e8c, main: 0x31e18, locLookup: 0x2f6ea14, poolCString: 0x2c904 },
     // frameDtor / poolScriptAllocator: 2.5 grew CScriptStackFrame to 0xA8 with a call map at +0x68
     // that child frames reach through +0x98, so hand-built root frames must initialize it.
-    '2.5':   { exec: 0x1099fbc, rttiGet: 0x10b3cac, main: 0x323a0, frameDtor: 0x11ab310, poolScriptAllocator: 0x7cddb78 },
+    '2.5':   { exec: 0x1099fbc, rttiGet: 0x10b3cac, main: 0x323a0, frameDtor: 0x11ab310, poolScriptAllocator: 0x7cddb78,
+               locLookup: 0x1c331f4, poolCString: 0x2c7e4 },
 };
 // A build is recognized only by the code bytes at its own CRTTISystem::Get offset (first 16 bytes).
 // Anything else is an unsupported build: gameOffsets() returns null and nothing is hooked or called.
@@ -631,6 +632,7 @@ rpc.exports = {
 (function () {
     const OUT='/tmp/cp2077_out.txt', CMD='/tmp/cp2077_cmd.txt';
     const LREQ='/tmp/cp2077_lreq.txt', LRES='/tmp/cp2077_lres.txt';   // Q7 Lua Game.* call bridge (request/response)
+    const CREQ='/tmp/cp2077_creator_request.json', CRES='/tmp/cp2077_creator_response.json';
     function log(s){ try{const f=new File(OUT,'a');f.write(s+'\n');f.flush();f.close();}catch(e){} try{console.log('[MINICET] '+s);}catch(e2){} }
     function readFile(p){ try{return File.readAllText(p);}catch(e){return null;} }
     function clearFile(p){ try{const f=new File(p,'w');f.write('');f.close();}catch(e){} }
@@ -762,6 +764,112 @@ rpc.exports = {
             const fr=newScriptFrame(bc, locals, ctx);
             const rs=resSize||16; const res=Memory.alloc(rs); for(let ro=0;ro<rs;ro+=8) res.add(ro).writeU64(0); Exec(fn, ctx, fr, res, retType); freeScriptFrame(fr); return res; }
         function instOf(className){ const m=clsByName(className); if(!m) return null; const fv=m.sub(base).add(FV0).toString(16); return instReg[fv]||null; }
+        function tweakReloadMethod() {
+            // Preserve the original macOS integration on 2.3.1. Native 2.5 TweakXL exposes its
+            // supported redscript facade instead of the old cybermodman C exports.
+            if (isGame231()) {
+                const ex=resolveExport('cybermodman_tweakReload');
+                if (!ex || ex.isNull()) throw new Error('TweakXL is not loaded. Relaunch with NightCity Console.');
+                return function(){ new NativeFunction(ex,'void',[])(); };
+            }
+            const e=resolveFunc('TweakXL','Reload');
+            if (!e || !e.isStatic || e.fn.add(0x30).readU32() !== 0)
+                throw new Error('TweakXL.Reload is not registered. Install the matching TweakXL runtime and restart.');
+            return function(){ callFunc(e.fn,ptr(0),e.retType,[]); };
+        }
+        function creatorContext() {
+            if (!cmnAttached || !cmnReserve) throw new Error('Custom weapon names are unavailable on this game build.');
+            const reload=tweakReloadMethod(), owner=authPlayer(), tx=instOf('gameTransactionSystem');
+            if (!owner || owner.isNull() || !tx || tx.isNull() || !fromtd)
+                throw new Error('Load a save and open your inventory before creating a weapon.');
+            const record=resolveFunc('TweakDBInterface','GetWeaponItemRecord') || resolveFunc('TweakDBInterface','GetItemRecord');
+            const quantity=resolveFunc('gameTransactionSystem','GetItemQuantity'), give=resolveFunc('gameTransactionSystem','GiveItem');
+            if (!record || !record.isStatic || !quantity || !give)
+                throw new Error('The game inventory interfaces are not ready. Open your inventory and try again.');
+            function itemID(name){ const id=Memory.alloc(16); id.writeU64(0); id.add(8).writeU64(0); fromTDBID(tdbidBytes(name),id); return id; }
+            return {
+                reload: reload,
+                hasRecord: function(name){ return !callFunc(record.fn,ptr(0),record.retType,[name]).readPointer().isNull(); },
+                quantity: function(name){ return callFuncRaw(quantity.fn,tx,quantity.retType,
+                    [{kind:'handle',inst:owner},{kind:'item16',ptr:itemID(name)}]).readS32(); },
+                give: function(name){ return callFuncRaw(give.fn,tx,give.retType,
+                    [{kind:'handle',inst:owner},{kind:'item16',ptr:itemID(name)},{kind:'i32',v:1}]).readU8() !== 0; }
+            };
+        }
+        // BEGIN CREATOR TRANSACTION
+        // Dedicated request/response channel: ordinary console commands cannot overwrite a Creator
+        // operation. All engine calls run from the executor queue; timers only enqueue verification.
+        let creatorActive=null;
+        const creatorCompleted=new Map();
+        function creatorRespond(req,ok,message,extra) {
+            const response=Object.assign({id:req.id,ok:ok,message:message},extra||{});
+            creatorCompleted.set(req.id,response);
+            if (creatorCompleted.size>128) creatorCompleted.delete(creatorCompleted.keys().next().value);
+            if (creatorActive && creatorActive.req.id===req.id) creatorActive=null;
+            try { const f=new File(CRES,'w'); f.write(JSON.stringify(response)); f.flush(); f.close(); }
+            catch(e){ log('Creator response could not be written: '+e); }
+            log('Creator: '+(ok?'OK: ':'FAILED: ')+message);
+        }
+        function creatorRun(req,state) {
+            try {
+                if (!req || !/^[A-Za-z0-9-]{1,80}$/.test(req.id||'')) return;
+                if (creatorCompleted.has(req.id)) return;
+                if (req.pid!==Process.id) throw new Error('Creator request belongs to an earlier game session. Try again.');
+                if (!Number.isFinite(req.deadline) || req.deadline-Date.now()>30000 || Date.now()>req.deadline)
+                    throw new Error(state ? 'The item request was sent, but inventory confirmation timed out. Check inventory before trying again.' : 'Creator request expired before it ran. Try again after the game resumes.');
+                if (req.op!=='check' && req.op!=='apply') throw new Error('Unknown Creator operation.');
+                if (state) {
+                    const count=state.ctx.quantity(req.record);
+                    if (count>state.before) {
+                        creatorRespond(req,true,'Created and added '+req.record+' to inventory.',{record:req.record,before:state.before,after:count});
+                    } else {
+                        setTimeout(function(){ pendingQ.push({creator:req,state:state}); },100);
+                    }
+                    return;
+                }
+                const ctx=creatorContext();
+                if (req.op==='check') { creatorRespond(req,true,'Creator is ready.'); return; }
+                if (!/^Items\.CyberModMan[A-Za-z0-9_]+$/.test(req.record||'')) throw new Error('Invalid custom weapon record.');
+                if (!Array.isArray(req.keys) || req.keys.length!==3 || req.keys.some(function(k){ return !Number.isSafeInteger(k)||k<1||k>0xffffffff; }))
+                    throw new Error('Invalid custom weapon localization keys.');
+                cmnLoad();
+                if (req.keys.some(function(k){ return !Object.prototype.hasOwnProperty.call(cmnMap,k); }))
+                    throw new Error('The weapon text could not be loaded. Your generated files are saved; no item was given.');
+                if (ctx.hasRecord(req.record))
+                    throw new Error('This weapon record already exists in the game. Choose a different name; no item was given.');
+                ctx.reload();
+                // Reload() returns void even when YAML import fails. Verify the actual record before giving it.
+                if (!ctx.hasRecord(req.record))
+                    throw new Error('TweakXL did not create '+req.record+'. Files are saved; check TweakXL.log. No item was given.');
+                const before=ctx.quantity(req.record);
+                if (before<0) throw new Error('Could not read the current inventory quantity. No item was given.');
+                if (!ctx.give(req.record)) throw new Error('The game refused to add the weapon. Files are saved.');
+                if (creatorActive && creatorActive.req.id===req.id) creatorActive.given=true;
+                // Give exactly once. Confirmation can take another game tick; a retry only reads quantity.
+                creatorRun(req,{ctx:ctx,before:before});
+            } catch(e) { creatorRespond(req,false,String(e.message||e)); }
+        }
+        function creatorPoll() {
+            if (creatorActive && Date.now()>creatorActive.req.deadline) {
+                const pending=creatorActive;
+                creatorRespond(pending.req,false,pending.given ?
+                    'The item request was sent, but inventory confirmation timed out. Check inventory before trying again.' :
+                    'Creator request expired while waiting for the game. Resume gameplay and try again.');
+            }
+            const raw=readFile(CREQ); if (!raw || !raw.trim()) return;
+            let req; try { req=JSON.parse(raw); } catch(e) { return; } // writer may still be finishing
+            if (!req || !/^[A-Za-z0-9-]{1,80}$/.test(req.id||'')) { clearFile(CREQ); return; }
+            clearFile(CREQ);
+            if (creatorCompleted.has(req.id)) {
+                const f=new File(CRES,'w'); f.write(JSON.stringify(creatorCompleted.get(req.id))); f.close();
+                return; // never replay an inventory mutation
+            }
+            if (creatorActive && creatorActive.req.id===req.id) return;
+            if (creatorActive) { creatorRespond(req,false,'Another Creator operation is still running.'); return; }
+            creatorActive={req:req,given:false};
+            pendingQ.push({creator:req});
+        }
+        // END CREATOR TRANSACTION
         function doGive(name,qty,forceBulk){ const e=resolveFunc('gameTransactionSystem','GiveItem'); if(!e){ log('GiveItem not found'); return; }
             const tx=instOf('gameTransactionSystem'); if(!tx){ log('no transaction system instance yet'); return; }
             const owner=authPlayer();   // authoritative local player (deterministic; avoids flaky transient puppets)
@@ -1149,12 +1257,14 @@ rpc.exports = {
             }
             f.close(); log('itemdump: wrote '+ok+' records ('+miss+' not item records) to '+OUTF);
         }
-        function execute(line){ let raw=line.trim();
+        function execute(line){
+            if (line && typeof line==='object' && line.creator) { creatorRun(line.creator,line.state); return; }
+            let raw=line.trim();
             if(raw.indexOf('lua-call\t')===0){ handleLuaCall(raw); return; }   // Q7 bridge: handle before the generic whitespace split
             const ct=cetTranslate(raw); if(ct){ log('(cet) '+raw+'  ->  '+ct); raw=ct; }
             const t=raw.split(/\s+/);
             if(t[0]==='metalrecon'){ metalRecon(); return; }   // Phase-2 recon: works at menu too
-            if(t[0]==='tweakload'){ try{ var ex=resolveExport('cybermodman_tweakReload'); if(!ex||ex.isNull()){ log('tweakload: cybermodman_tweakReload export NOT FOUND'); return; } new NativeFunction(ex,'void',[])(); log('tweakload: cybermodman_tweakReload() called - check TweakXL.log'); }catch(e){ log('tweakload err '+e); } return; }   // exempt from in-game guard (drives TweakXL apply)
+            if(t[0]==='tweakload'){ try{ tweakReloadMethod()(); log('tweakload: reload requested; check TweakXL.log for import results.'); }catch(e){ log('tweakload: '+(e.message||e)); } return; }
             if(t[0]==='tweakdumpflat'&&t[1]&&t[2]){ try{ var ex=resolveExport('cybermodman_tweakDumpFlat'); if(!ex||ex.isNull()){ log('tweakdumpflat: export NOT FOUND'); return; } var sr=Memory.allocUtf8String(t[1]); var spp=Memory.allocUtf8String(t[2]); new NativeFunction(ex,'void',['pointer','pointer'])(sr,spp); log('tweakdumpflat: '+t[1]+'.'+t[2]+' -> /tmp/tweakxl_dump.txt'); }catch(e){ log('tweakdumpflat err '+e); } return; }   // dump ONE flat by exact <Record> <prop>
             if(t[0]==='cmnreload'){ try{ var n=cmnLoad(); log('cmnreload: loaded '+n+' custom name(s); see /tmp/cybermodman_names.log'); }catch(e){ log('cmnreload err '+e); } return; }   // hot-reload cybermodman_names.json
             if(t[0]==='archiveload'){ try{ var ex=resolveExport('cybermodman_archiveReload'); if(!ex||ex.isNull()){ log('archiveload: cybermodman_archiveReload export NOT FOUND'); return; } new NativeFunction(ex,'void',[])(); log('archiveload: cybermodman_archiveReload() called - check ArchiveXL.log'); }catch(e){ log('archiveload err '+e); } return; }   // drives ArchiveXL extension bring-up
@@ -1224,7 +1334,7 @@ rpc.exports = {
             if(t[0]==='findinst'&&t[1]){ const m=clsByName(t[1]); if(!m){ log('findinst: class '+t[1]+' UNKNOWN'); return; }
                 const inst=instReg[m.sub(base).add(FV0).toString(16)]; log('findinst '+t[1]+' -> '+(inst?inst:'NONE captured')); return; }
             log('unknown: '+line); }
-        setInterval(function(){ try{ const c=readFile(CMD); const s=(c||'').trim();
+        setInterval(function(){ try{ creatorPoll(); const c=readFile(CMD); const s=(c||'').trim();
             if(!s){ lastCmd=''; }                          // file empty -> re-arm so an identical next command fires again
             else if(s!==lastCmd){ lastCmd=s; const cmd=s.replace(/^\d+\t/,''); pendingQ.push(cmd); clearFile(CMD); log('queued: '+cmd); }
             if(!pendingQ.length) qWaitSince=0; else if(!qWaitSince) qWaitSince=Date.now();
@@ -1298,7 +1408,15 @@ rpc.exports = {
 
 // ===== cybermodman cmn loc-hook (re-merged after CET update) =====
 var cmnB = getModuleBase();
-var CMN_CONFIG = '/Users/ysr/Library/Application Support/Steam/steamapps/common/Cyberpunk 2077/red4ext/cybermodman_names.json';
+function cmnConfigPath() {
+    // Use the running game's location, including Steam libraries on other drives/users.
+    const game=Process.enumerateModules().find(function(m){ return m.name==='Cyberpunk2077'; });
+    if (!game) throw new Error('Cannot locate the game executable for custom names.');
+    const suffix='/Cyberpunk2077.app/Contents/MacOS/Cyberpunk2077';
+    if (!game.path.endsWith(suffix)) throw new Error('Unexpected game executable path: '+game.path);
+    return game.path.slice(0,-suffix.length)+'/red4ext/cybermodman_names.json';
+}
+var CMN_CONFIG = null;
 var CMN_XL_LOC = '/tmp/cp2077_xl_loc.json';   // ArchiveXL macOS localization handoff (per-mod onscreens -> {fnv32/fnv64-low: text}). Auto-dumped by ArchiveXL on bring-up; served here since the engine LoadTexts merge cannot be caught post-load on macOS.
 var CMN_LOG = '/tmp/cybermodman_names.log';
 var cmnMap = {};
@@ -1330,21 +1448,26 @@ function cmnLoadFile(path, label, verbose){
 }
 function cmnLoad(){
     cmnMap = {};
+    if (!CMN_CONFIG) CMN_CONFIG=cmnConfigPath();
     var n = cmnLoadFile(CMN_CONFIG, 'cybermodman_names.json', true);
-    n += cmnLoadFile(CMN_XL_LOC, 'cp2077_xl_loc.json (ArchiveXL)', false);   // mod localization handoff (quiet; can be large)
+    if (isGame231()) n += cmnLoadFile(CMN_XL_LOC, 'cp2077_xl_loc.json (ArchiveXL)', false);
     cmnLog('total custom name(s): '+n);
     return n;
 }
-// Write a CString into the engine's output buffer at b. Short strings go inline (proven path).
-// Long strings use a persistent buffer + the 0x80000000 'not-owned' flag so the engine reads the
-// text but its destructor SKIPS free (verified: dtor frees only when (length>>30)!=2). No allocator
-// mismatch, any length safe. (CString: ptr/inline @0x00, capacity @0x10, length+flags @0x14.)
+function cmnUtf8Length(s) {
+    let n=0;
+    for (let i=0;i<s.length;i++) { const c=s.codePointAt(i); n+=c<0x80?1:c<0x800?2:c<0x10000?3:4; if(c>0xffff)i++; }
+    return n;
+}
+// CString's length/capacity are byte counts, not JavaScript UTF-16 lengths. Heap text uses
+// the game's PoolString allocator so the game's destructor can release it normally.
 function cmnPutStr(b, s){
-    if (s.length < 0x14) {                         // short -> inline (proven)
+    const length=cmnUtf8Length(s);
+    if (length < 0x14) {
         b.writeUtf8String(s);
-        b.add(0x14).writeU32(s.length);
+        b.add(0x14).writeU32(length);
         b.add(0x18).writePointer(ptr(0));
-        return;
+        return true;
     }
     // long -> game-allocated heap CString so the engine both READS (0x40000000) and FREES it safely
     // (FUN_10002c904 allocs from the PoolString pool when allocator@0x18==0; the dtor frees via the
@@ -1352,29 +1475,34 @@ function cmnPutStr(b, s){
     try {
         if (cmnReserve) {
             b.add(0x18).writePointer(ptr(0));       // default pool allocator
-            cmnReserve(b, s.length);                // alloc -> ptr@0x00, capacity@0x10, len|0x40000000
+            cmnReserve(b, length);                  // alloc -> ptr@0x00, capacity@0x10, len|0x40000000
             var p = b.readPointer();
             if (p && !p.isNull()) {
                 p.writeUtf8String(s);               // write text into game buffer
-                b.add(0x14).writeU32((s.length & 0x3FFFFFFF) | 0x40000000);
-                return;
+                b.add(0x14).writeU32((length & 0x3FFFFFFF) | 0x40000000);
+                return true;
             }
         }
     } catch (e) { try { cmnLog('reserve err: '+e); } catch (_) {} }
-    var t = s.substr(0, 19);                        // fallback: inline-truncate (never blank/crash)
-    b.writeUtf8String(t);
-    b.add(0x14).writeU32(t.length);
-    b.add(0x18).writePointer(ptr(0));
+    cmnLog('could not allocate custom text ('+length+' UTF-8 bytes)');
+    return false;
 }
 function cmnInstall(){
     if (cmnAttached) return;
-    if (!isGame231()) { cmnLog('loc-hook skipped: offsets not ported to game '+getGameVersion()); return; }
+    const off=gameOffsets();
+    if (!off || !off.locLookup || !off.poolCString) { cmnLog('loc-hook skipped: unsupported build'); return; }
     var cmnB = getModuleBase();
     if (!cmnB) { cmnLog('module cmnB not found; cannot install'); return; }
     cmnBase = cmnB;
-    try { cmnReserve = new NativeFunction(cmnB.add(0x2c904), 'void', ['pointer','uint']); } catch (e) { cmnLog('reserve fn err: '+e); }
-    var addr = cmnB.add(0x2f6ea14); // FUN_102f6ea14 loc-map lookup: out=x8, key=x1, &found=x3
+    var addr = cmnB.add(off.locLookup); // 2.3.1 + 2.5: out=x8, key=x1, &found=x3
     try {
+        // These 44-byte prologues match both saved Steam binaries. The lookup mapping was
+        // independently checked against the key-hash body and its caller/callee ABI; see docs.
+        function matches(at,hex) { const b=new Uint8Array(at.readByteArray(hex.length/2)); return Array.from(b).map(function(v){return ('0'+v.toString(16)).slice(-2);}).join('')===hex; }
+        if (!matches(addr,'ffc301d1f85f03a9f65704a9f44f05a9fd7b06a9fd830191f40303aaf50302aaf70301aaf60300aaf30308aa') ||
+            !matches(cmnB.add(off.poolCString),'ff0301d1f65701a9f44f02a9fd7b03a9fdc30091f40301aaf30300aa3f50007183010054e00313aa088c41f8'))
+            throw new Error('Custom localization code fingerprint mismatch; no hook installed.');
+        cmnReserve = new NativeFunction(cmnB.add(off.poolCString), 'void', ['pointer','uint']);
         Interceptor.attach(addr, {
             onEnter: function (a) { this.out = this.context.x8; this.k1 = this.context.x1; this.fp = this.context.x3; },
             onLeave: function (r) {
@@ -1386,13 +1514,12 @@ function cmnInstall(){
                     if (cmnHit[__k] === undefined) cmnHit[__k] = 0;
                     if (cmnHit[__k]++ < 4) cmnLog('HIT key='+__k+' (0x'+__k.toString(16)+') fill="'+String(name).substring(0,48)+'"');
                     var b = this.out; if (!b || b.isNull()) return;
-                    cmnPutStr(b, name); // inline (short) or not-owned persistent buffer (long)
-                    if (this.fp && !this.fp.isNull()) { try { this.fp.writeU8(1); } catch (e) {} } // force found=1
+                    if (cmnPutStr(b, name) && this.fp && !this.fp.isNull()) { try { this.fp.writeU8(1); } catch (e) {} }
                 } catch (e) {}
             }
         });
         cmnAttached = true;
-        cmnLog('interceptor attached at '+addr+' (FUN_102f6ea14)');
+        cmnLog('interceptor attached at '+addr+' (game '+getGameVersion()+', RVA 0x'+off.locLookup.toString(16)+')');
     } catch (e) { cmnLog('attach error: '+e); }
 }
 try { cmnLog('=== cybermodman custom-names init ==='); cmnLoad(); cmnInstall(); } catch (e) { try { console.log('[CMN] init err '+e); } catch (_) {} }

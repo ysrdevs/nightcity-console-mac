@@ -20,6 +20,7 @@
 #include <mutex>
 #include <atomic>
 #include <thread>
+#include <chrono>
 #include <unistd.h>
 #include <set>
 #include <vector>
@@ -71,6 +72,8 @@ static std::vector<std::string> g_history;   // submitted commands (oldest first
 static int g_historyPos = -1;                // -1 = current edit line; else index into g_history
 static const char* OUT_PATH = "/tmp/cp2077_out.txt";
 static const char* CMD_PATH = "/tmp/cp2077_cmd.txt";
+static const char* CREATOR_REQ_PATH = "/tmp/cp2077_creator_request.json";
+static const char* CREATOR_RES_PATH = "/tmp/cp2077_creator_response.json";
 #include <ctime>
 // set by the `reload` verb + the once/sec mtime poll; consumed by the tab engine below.
 static std::atomic<bool> g_tabsDirty{true};   // true forces a rebuild on next frame
@@ -1225,25 +1228,25 @@ static std::set<long> crUsedLockeys(const std::string& path) {
 }
 static bool crAppendNames(const std::string& path, long k1, const std::string& v1,
                           long k2, const std::string& v2, long k3, const std::string& v3) {
-    std::string c = crReadFile(path);
-    while (!c.empty() && isspace((unsigned char)c.back())) c.pop_back();
-    std::string entries =
-        "  \"" + std::to_string(k1) + "\": \"" + crJsonEsc(v1) + "\",\n"
-        "  \"" + std::to_string(k2) + "\": \"" + crJsonEsc(v2) + "\",\n"
-        "  \"" + std::to_string(k3) + "\": \"" + crJsonEsc(v3) + "\"\n";
-    std::string out;
-    if (c.empty() || c == "{}" || c == "{") out = "{\n" + entries + "}\n";
-    else if (c.back() == '}') {
-        c.pop_back(); while (!c.empty() && isspace((unsigned char)c.back())) c.pop_back();
-        std::string sep = (!c.empty() && c.back() == '{') ? "\n" : ",\n";
-        out = c + sep + entries + "}\n";
-    } else out = "{\n" + entries + "}\n";
-    FILE* w = fopen(path.c_str(), "w"); if (!w) return false;
-    fwrite(out.data(), 1, out.size(), w); fclose(w); return true;
+    @autoreleasepool {
+        NSString* p = [NSString stringWithUTF8String:path.c_str()];
+        NSData* existing = [NSData dataWithContentsOfFile:p];
+        NSMutableDictionary* names = [NSMutableDictionary dictionary];
+        if (existing.length) {
+            id parsed = [NSJSONSerialization JSONObjectWithData:existing options:0 error:nil];
+            if (![parsed isKindOfClass:[NSDictionary class]]) return false; // preserve malformed user data
+            [names addEntriesFromDictionary:parsed];
+        }
+        names[[NSString stringWithFormat:@"%ld", k1]] = [NSString stringWithUTF8String:v1.c_str()];
+        names[[NSString stringWithFormat:@"%ld", k2]] = [NSString stringWithUTF8String:v2.c_str()];
+        names[[NSString stringWithFormat:@"%ld", k3]] = [NSString stringWithUTF8String:v3.c_str()];
+        NSData* data = [NSJSONSerialization dataWithJSONObject:names options:NSJSONWritingPrettyPrinted error:nil];
+        return data && [data writeToFile:p options:NSDataWritingAtomic error:nil];
+    }
 }
 // Generate + deploy. Returns the record id, or "" with err set.
 static std::string crGenWeapon(int baseIdx, const std::string& name, const std::string& white,
-                               const std::string& gold, const bool* effSel, std::string& err) {
+                               const std::string& gold, const bool* effSel, long* outKeys, std::string& err) {
     std::string game = crGameRoot();
     if (game.empty()) { err = "could not locate game dir"; return ""; }
     std::string tweaks = game + "/r6/tweaks";
@@ -1251,6 +1254,15 @@ static std::string crGenWeapon(int baseIdx, const std::string& name, const std::
     const CrBase& bse = kCrBases[baseIdx];
     std::string stem = crRecordStem(name);
     std::string recordId = "Items." + stem;
+    std::string yamlPath = tweaks + "/cybermodman_" + stem + ".yaml";
+    if (access(yamlPath.c_str(), F_OK) == 0) { err = "A weapon with this name already exists. Choose another name."; return ""; }
+    @autoreleasepool {
+        NSError* e = nil;
+        if (![[NSFileManager defaultManager] createDirectoryAtPath:[NSString stringWithUTF8String:tweaks.c_str()]
+                                      withIntermediateDirectories:YES attributes:nil error:&e]) {
+            err = "cannot create the tweaks folder"; return "";
+        }
+    }
 
     std::string body; bool hasDamage = false;
     for (int i = 0; i < kCrNumEffects; ++i) {
@@ -1266,6 +1278,7 @@ static std::string crGenWeapon(int baseIdx, const std::string& name, const std::
 
     std::set<long> used = crUsedLockeys(namesPath);
     long keys[3]; int got = 0; for (long k = CR_LOCKEY_START; got < 3; ++k) if (!used.count(k)) keys[got++] = k;
+    for (int i = 0; i < 3; ++i) outKeys[i] = keys[i];
     std::string kn = std::to_string(keys[0]), kw = std::to_string(keys[1]), kg = std::to_string(keys[2]);
 
     std::string yaml =
@@ -1280,29 +1293,65 @@ static std::string crGenWeapon(int baseIdx, const std::string& name, const std::
         "  statModifierGroups:\n    - !remove Items.QualityRandomization\n    - !append Items.IconicQualityRandomization\n" +
         "  slotPartListPreset:\n    - !append-once\n      $type: SlotItemPartPreset\n      itemPartPreset: Items." + stem + "_Mod\n      slot: " + bse.slot + "\n";
 
-    std::string yamlPath = tweaks + "/cybermodman_" + stem + ".yaml";
-    FILE* yf = fopen(yamlPath.c_str(), "w");
-    if (!yf) { err = "cannot write " + yamlPath; return ""; }
-    fwrite(yaml.data(), 1, yaml.size(), yf); fclose(yf);
     if (!crAppendNames(namesPath, keys[0], name, keys[1], white, keys[2], gold)) { err = "cannot write names json"; return ""; }
+    @autoreleasepool {
+        NSData* data = [NSData dataWithBytes:yaml.data() length:yaml.size()];
+        if (![data writeToFile:[NSString stringWithUTF8String:yamlPath.c_str()] options:NSDataWritingAtomic error:nil]) {
+            err = "cannot write " + yamlPath; return "";
+        }
+    }
     return recordId;
 }
 
 static void crSetStatus(const std::string& s) { std::lock_guard<std::mutex> lk(g_crMtx); g_crStatus = s; }
 
+// Wait on the worker thread for a response carrying this exact request ID. The render thread stays
+// responsive, and an old response or a delayed regular console command cannot report false success.
+static bool crRequest(const char* op, const std::string& record, const long* keys, std::string& message) {
+    @autoreleasepool {
+        NSString* requestID = [[NSUUID UUID] UUIDString];
+        NSMutableDictionary* req = [@{@"id":requestID, @"pid":@(getpid()), @"op":[NSString stringWithUTF8String:op],
+            @"deadline":@([[NSDate date] timeIntervalSince1970] * 1000.0 + 20000.0)} mutableCopy];
+        if (!record.empty()) req[@"record"] = [NSString stringWithUTF8String:record.c_str()];
+        if (keys) req[@"keys"] = @[@(keys[0]), @(keys[1]), @(keys[2])];
+        NSData* data = [NSJSONSerialization dataWithJSONObject:req options:0 error:nil];
+        if (!data || ![data writeToFile:[NSString stringWithUTF8String:CREATOR_REQ_PATH] options:NSDataWritingAtomic error:nil]) {
+            message = "Could not contact the console runtime."; return false;
+        }
+        const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(21);
+        while (std::chrono::steady_clock::now() < end) {
+            @autoreleasepool {
+                NSData* answer = [NSData dataWithContentsOfFile:[NSString stringWithUTF8String:CREATOR_RES_PATH]];
+                id obj = answer ? [NSJSONSerialization JSONObjectWithData:answer options:0 error:nil] : nil;
+                if ([obj isKindOfClass:[NSDictionary class]] && [obj[@"id"] isEqual:requestID]
+                    && [obj[@"ok"] isKindOfClass:[NSNumber class]] && [obj[@"message"] isKindOfClass:[NSString class]]) {
+                    message = [obj[@"message"] UTF8String];
+                    return [obj[@"ok"] boolValue];
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        message = "No confirmation from the game. Resume gameplay and check inventory before trying again.";
+        return false;
+    }
+}
+
 static void crCreateThread(int baseIdx, std::string name, std::string white, std::string gold, std::vector<char> sel) {
-    g_crBusy = true;
+    crSetStatus("Checking the game and TweakXL…");
+    std::string result;
+    if (!crRequest("check", "", nullptr, result)) { crSetStatus("FAILED: " + result); g_crBusy = false; return; }
     crSetStatus("Generating \"" + name + "\" ...");
     bool eff[64] = { false }; for (size_t i = 0; i < sel.size() && i < 64; ++i) eff[i] = sel[i] != 0;
     std::string err;
-    std::string recordId = crGenWeapon(baseIdx, name, white, gold, eff, err);
+    long keys[3];
+    std::string recordId = crGenWeapon(baseIdx, name, white, gold, eff, keys, err);
     if (recordId.empty()) { crSetStatus("FAILED: " + err); g_crBusy = false; return; }
     crSetStatus("Created " + recordId + " - applying in-game ...");
-    runCommand("cmnreload");               usleep(350000);   // load the new name/flavor/gold LocKeys
-    runCommand("tweakload");               usleep(750000);   // apply the new weapon record to TweakDB
-    runCommand("give " + recordId + " 1"); usleep(150000);   // hand it to the player
-    crSetStatus("DONE: \"" + name + "\" (" + recordId + ") created + applied + added to inventory.\n"
-                "Note: the GOLD ability text fully links after one game restart (name, white text + the weapon work now).");
+    if (crRequest("apply", recordId, keys, result)) {
+        crSetStatus("DONE: \"" + name + "\" added to inventory.\n" + result);
+    } else {
+        crSetStatus("Saved " + recordId + ", but applying was not confirmed:\n" + result);
+    }
     g_crBusy = false;
 }
 
@@ -1329,7 +1378,7 @@ static void drawCreatorTab() {
     ImGui::Separator();
     bool busy = g_crBusy.load();
     if (busy) ImGui::BeginDisabled();
-    if (ImGui::Button("Create & Apply", ImVec2(190, 34))) {
+    if (ImGui::Button("Create & Apply", ImVec2(190, 34)) && !g_crBusy.exchange(true)) {
         std::vector<char> sel(kCrNumEffects); for (int i = 0; i < kCrNumEffects; ++i) sel[i] = g_crEff[i] ? 1 : 0;
         std::thread(crCreateThread, g_crBase, std::string(g_crName),
                     std::string(g_crWhite), std::string(g_crGold), sel).detach();
