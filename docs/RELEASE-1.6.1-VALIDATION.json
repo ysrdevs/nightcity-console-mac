@@ -1,0 +1,23 @@
+{
+  "version": "1.6.1",
+  "resources_unchanged_from": "notarized 1.6.0",
+  "resources_file_count": 300,
+  "zip_matches_stapled_app": true,
+  "codeware_included": false,
+  "app_notarization": "3afece05-4ca4-41fd-ac00-7574b8a68eb9",
+  "dmg_notarization": "c950d7dc-a9e3-41d8-ad7d-713fd21f675a",
+  "app_and_dmg_accepted_signed_stapled": true,
+  "packages": {
+    "NightCity-Console-for-Mac.dmg": {
+      "sha256": "dd4d1f44816c660994dbf0c7f186b0a48b7135e6672261c44adade60599f32d4",
+      "bytes": 101986528
+    },
+    "NightCity-Console-for-Mac.zip": {
+      "sha256": "258f044a543c2925770875378798832b115310675700b2aaba81d6b54d0adfb3",
+      "bytes": 92364417
+    }
+  },
+  "dmg_matches_stapled_app": true,
+  "applications_shortcut_verified": true,
+  "apple_issues": []
+}

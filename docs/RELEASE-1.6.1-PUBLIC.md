@@ -1,7 +1,6 @@
-# NightCity Console 1.6.1 — Launcher support link update
+# NightCity Console 1.6.1
 
-The launcher’s **♥ Support** button now opens the NightCity Console developer’s
-Ko-fi directly. Removed the additional donation link and README promotion.
+Maintenance update for the launcher and project documentation.
 
 This update keeps the tested Cyberpunk 2077 **2.5.0** runtime, Iconic Weapon
 Creator, TweakXL and ArchiveXL payload from 1.6.0 unchanged. Replace the older
