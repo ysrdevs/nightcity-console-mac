@@ -1,0 +1,27 @@
+From e6c0696e3fbedd739369d61090a680d732d1918c Mon Sep 17 00:00:00 2001
+From: ysrdevs <singh.yuvraj31@icloud.com>
+Date: Sat, 24 Oct 2026 04:06:54 -0500
+Subject: [PATCH] macOS: preserve staged TweakXL scripts across launches
+
+---
+ src/App/Application.cpp | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/App/Application.cpp b/src/App/Application.cpp
+index 7cf6a26..ef3a35c 100644
+--- a/src/App/Application.cpp
++++ b/src/App/Application.cpp
+@@ -103,8 +103,13 @@ void App::Application::OnStarting()
+ {
+     try {
+         LogInfo("TweakXL is starting...");
++#if defined(_WIN32) || defined(_WIN64)
+         BootTrace("OnStarting: Migration::CleanUp");
+         Migration::CleanUp(Env::LegacyScriptsDir());
++#else
++        // macOS launchers may compile their staged r6/scripts sources with scc before
++        // starting the game. Keep that source tree intact across subsequent launches.
++#endif
+     }
+     catch (const std::exception& e) {
+         std::cerr << "[TweakXL::App::OnStarting] Exception: " << e.what() << std::endl;

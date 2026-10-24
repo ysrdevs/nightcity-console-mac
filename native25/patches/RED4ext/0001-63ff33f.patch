@@ -1,0 +1,30 @@
+From 63ff33f204de5ac22f4cf83e31d35c28c717812b Mon Sep 17 00:00:00 2001
+From: ysrdevs <singh.yuvraj31@icloud.com>
+Date: Sat, 24 Oct 2026 04:09:04 -0500
+Subject: [PATCH] Allow background tests with host application libraries
+
+---
+ tools/cp-run | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/tools/cp-run b/tools/cp-run
+index 5491888..890ad1b 100755
+--- a/tools/cp-run
++++ b/tools/cp-run
+@@ -19,6 +19,7 @@
+ # The user's UserSettings.json and red4ext/config.ini are backed up and restored on any exit. CP_SETTINGS changes
+ # options in UserSettings.json for the run (see below; every run is muted); CP_TAG is passed to the scenario as CpAutotestTag().
+ # CP_SCC_ARGS / CP_GAME_ARGS: extra arguments for scc and for the game (e.g. -outputCacheFile <file> / -scriptsBlobPath=<file>; the game only takes the = form).
++# CP_EXTRA_DYLIBS: additional colon-separated libraries for testing a host application's integration with RED4ext.
+ # Artifacts go to RED4ext/runs/<timestamp>-<scenario>/. Exit: 0 pass, 1 fail, 2 precondition error.
+ set -euo pipefail
+ 
+@@ -249,7 +250,7 @@ pgrep -q steam_osx && STEAM_APP_ID=1091500
+     [[ -z "$STEAM_APP_ID" ]] || export SteamAppId=$STEAM_APP_ID SteamGameId=$STEAM_APP_ID
+     # rttidump: RED4ext writes logs/rtti_layout_macos.json when Running is entered (main menu checks then exit).
+     [[ "$SCENARIO" != rttidump ]] || export RED4EXT_DUMP_RTTI=1
+-    CP_AUTOTEST="$SCENARIO" RED4EXT_BACKGROUND=1 DYLD_INSERT_LIBRARIES="$R4E_DIR/RED4ext.dylib" \
++    CP_AUTOTEST="$SCENARIO" RED4EXT_BACKGROUND=1 DYLD_INSERT_LIBRARIES="$R4E_DIR/RED4ext.dylib${CP_EXTRA_DYLIBS:+:$CP_EXTRA_DYLIBS}" \
+     exec "$GAME_BIN" $START_ARGS ${CP_GAME_ARGS:-} >"$RUN_DIR/stdout.log" 2>&1) &
+ GAME_PID=$!
+ 

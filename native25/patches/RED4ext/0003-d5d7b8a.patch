@@ -1,0 +1,93 @@
+From d5d7b8ae2b86c4185d47521f43e81af4dea91b79 Mon Sep 17 00:00:00 2001
+From: ysrdevs <singh.yuvraj31@icloud.com>
+Date: Sat, 24 Oct 2026 04:18:09 -0500
+Subject: [PATCH] macOS: keep hook island searches inside the branch window
+
+---
+ src/dll/Platform/NativeHook.cpp |  7 +++++-
+ tests/native_hook/main.cpp      | 40 +++++++++++++++++++++++++++++++++
+ 2 files changed, 46 insertions(+), 1 deletion(-)
+
+diff --git a/src/dll/Platform/NativeHook.cpp b/src/dll/Platform/NativeHook.cpp
+index 965c629..3538814 100644
+--- a/src/dll/Platform/NativeHook.cpp
++++ b/src/dll/Platform/NativeHook.cpp
+@@ -359,7 +359,10 @@ kern_return_t ProtectExecutable(uintptr_t page)
+ bool AllocateWindow(uintptr_t target, uint8_t** out, uintptr_t limit, int maxSteps, bool adrp)
+ {
+     const uintptr_t page = PageSize();
+-    uintptr_t cursor = target > limit ? (target - limit) & ~(page - 1) : page;
++    // Rounding down can put the first candidate outside the branch window.
++    // Start at the first full page inside it, so a valid gap is not skipped.
++    const uintptr_t lo = target > limit ? target - limit : page;
++    uintptr_t cursor = (lo + page - 1) & ~(page - 1);
+     const uintptr_t hi = target + limit;
+ 
+     for (int n = 0; n < maxSteps && cursor < hi; ++n)
+@@ -531,6 +534,8 @@ Ident* TakeIdent(uintptr_t target)
+ 
+ int32_t FailAttach(uintptr_t target, int32_t kr, const char* patch)
+ {
++    std::fprintf(stderr, "[NativeHook] Attach failed: target=0x%llx patch=%s error=%d\n",
++                 static_cast<unsigned long long>(target), patch, kr);
+     Ident* ident = TakeIdent(target);
+     RememberFailure(target, kr, ident != nullptr ? ident->name : "hook", ident != nullptr ? ident->owner : "RED4ext",
+                     patch);
+diff --git a/tests/native_hook/main.cpp b/tests/native_hook/main.cpp
+index f356656..83ef631 100644
+--- a/tests/native_hook/main.cpp
++++ b/tests/native_hook/main.cpp
+@@ -249,6 +249,45 @@ static void TestOutOfRange()
+     std::printf("PASS out of range\n");
+ }
+ 
++static void TestNearWindowGap()
++{
++    const mach_vm_size_t pageSize = static_cast<mach_vm_size_t>(vm_page_size);
++    const mach_vm_size_t span = (256ull << 20) + pageSize;
++    mach_vm_address_t block = 0;
++    const auto allocated = mach_vm_allocate(mach_task_self(), &block, span, VM_FLAGS_ANYWHERE);
++    CHECK(allocated == KERN_SUCCESS);
++    if (allocated != KERN_SUCCESS)
++    {
++        return;
++    }
++    // The first page in this gap falls just outside B's negative range. The
++    // second page is reachable; the allocator must not skip the whole gap.
++    CHECK(mach_vm_deallocate(mach_task_self(), block, pageSize * 2) == KERN_SUCCESS);
++    auto* target = reinterpret_cast<uint32_t*>(block + (128ull << 20) + 12);
++    target[0] = 0x91000400u; // ADD X0, X0, #1
++    target[1] = 0xD65F03C0u; // RET
++    const uintptr_t targetPage = reinterpret_cast<uintptr_t>(target) & ~(pageSize - 1);
++    sys_icache_invalidate(target, 8);
++    CHECK(mprotect(reinterpret_cast<void*>(targetPage), pageSize, PROT_READ | PROT_EXEC) == 0);
++
++    void* slot = target;
++    const bool hooked = Hook(&slot, reinterpret_cast<void*>(TextDetour));
++    CHECK(hooked);
++    if (hooked)
++    {
++        CHECK(reinterpret_cast<int (*)(int)>(target)(1) == 42);
++        CHECK(reinterpret_cast<int (*)(int)>(slot)(1) == 2);
++        Tx detach;
++        CHECK(NativeHook::Detach(&slot, reinterpret_cast<void*>(TextDetour)) == 0);
++        CHECK(detach.Commit());
++    }
++    CHECK(slot == target);
++    CHECK(target[0] == 0x91000400u);
++    CHECK(reinterpret_cast<int (*)(int)>(target)(1) == 2);
++    CHECK(mach_vm_deallocate(mach_task_self(), block, span) == KERN_SUCCESS);
++    std::printf("PASS near window gap\n");
++}
++
+ struct ParkArgs
+ {
+     std::atomic<int>* ready;
+@@ -948,6 +987,7 @@ int main()
+     TestProtectionAndIsland();
+     TestChain();
+     TestOutOfRange();
++    TestNearWindowGap();
+     TestParked(false);
+     TestParked(true);
+     TestExitingThreads();

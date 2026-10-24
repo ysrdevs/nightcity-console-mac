@@ -1,0 +1,2 @@
+# git-format-patch context lines contain a required single space. Preserve them.
+patches/**/*.patch -whitespace
