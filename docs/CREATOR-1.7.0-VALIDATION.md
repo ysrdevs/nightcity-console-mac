@@ -1,4 +1,4 @@
-# Creator expansion validation — 1.7.0
+# Creator expansion validation: 1.7.0
 
 The expanded Creator contains 37 base-game weapon presets in nine categories,
 with search by name, category and weapon type. The original seven profiles keep

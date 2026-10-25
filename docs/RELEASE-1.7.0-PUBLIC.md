@@ -1,4 +1,4 @@
-# NightCity Console 1.7.0 — Performance, Codeware and Expanded Mod Support
+# NightCity Console 1.7.0: Performance, Codeware and Expanded Mod Support
 
 This release brings **lower console overhead, broader Codeware-based mod support,
 Virtual Atelier, Cyberware-EX and Equipment-EX** to Cyberpunk 2077 **2.5.0, native
