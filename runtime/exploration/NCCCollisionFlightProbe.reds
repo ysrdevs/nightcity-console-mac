@@ -11,6 +11,8 @@ class NCCCollisionFlightProbeState extends IScriptable {
   public let transitionFacing: EulerAngles;
   public let elapsed: Float;
   public let ticks: Int32;
+  public let lastInputPacket: Uint32;
+  public let inputChecks: Int32;
   public let filterWrites: Int32;
   public let velocityWrites: Int32;
   public let baselineFilter: Variant;
@@ -77,6 +79,8 @@ public final func NCCFlightProbeStatus() -> String {
     + "; transitionPending=" + ToString(probe.transitionPending)
     + "; requested=" + ToString(probe.requested)
     + "; ticks=" + ToString(probe.ticks)
+    + "; lastInputPacket=" + ToString(probe.lastInputPacket)
+    + "; inputChecks=" + ToString(probe.inputChecks)
     + "; filterWrites=" + ToString(probe.filterWrites)
     + "; velocityWrites=" + ToString(probe.velocityWrites)
     + "; filterType=" + NameToString(probe.filterType)
@@ -234,6 +238,8 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
   probe.stateName = stateName;
   probe.machineName = machineName;
   packet = this.NCCFlightInput();
+  probe.lastInputPacket = packet;
+  probe.inputChecks += 1;
   if (packet & 512u) == 0u {
     this.NCCFlightProbeRestore(scriptInterface, "Input bridge is not ready", true);
     return;

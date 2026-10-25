@@ -2,7 +2,9 @@
 
 This is an experimental, local test checkpoint based on released 1.7.1. It is not a completed noclip feature or a release build. The launcher does not install this script automatically; it is staged explicitly into `r6/scripts/NightCityExploration/` in an isolated game copy. The existing native framework payload is unchanged.
 
-The **Exploration** tab sends `flight toggle`, `flight return` and `flight status`. Activation requires game 2.5, an authoritative player lookup, matching script signatures and a successful native input round trip. The default script input result refuses activation when the bridge is unavailable.
+The **Exploration** tab sends `flight toggle`, `flight return` and `flight status`. Requests require game 2.5, an authoritative player lookup, matching script signatures and an available native input snapshot. Activation separately requires the script to receive the native READY bit on its next engine movement update, before it changes collision or position. The default script input result refuses activation when the bridge is unavailable.
+
+The command runs inside the executor hook's return callback. Frida suppresses recursive invocation of that same listener, so calling the input script method there returns its blocked default rather than proving the bridge. The native fixture reproduces this case. Commands now read only the overlay's atomic snapshot; the engine update performs the actual script input check. Status reports the last script input packet and check count for that live validation.
 
 While active, the script uses the locomotion update context, camera-relative movement, the current state's collision filter and zero velocity. Held keys come from one atomic native snapshot. Movement does not cross into JavaScript, read command files or write logs every frame. Opening F1 or losing application focus clears held input. Unsupported player states stop the probe. Normal stops restore the captured filter and return to the activation point; a 30-second simulation-time limit does the same. Flight state is transient and is discarded on player detach.
 
@@ -11,7 +13,7 @@ Controls: WASD to move, Space to rise, Control to descend, Shift to boost and Op
 ## Validation at this checkpoint
 
 - Native executor fixtures cover exact function matching, four-byte result writes, nested and concurrent calls, observer coexistence and a missing overlay export.
-- Command fixtures cover version and signature checks, current-player context, failed round-trip cleanup and the command return buffer.
+- Command fixtures cover version and signature checks, current-player context, native snapshot failure cleanup and the command return buffer. They forbid trying the scripted input round trip inside a command callback.
 - Input fixtures cover coherent snapshots, blocked input and clearing held keys.
 - The combined script set compiles with VA, Equipment-EX, Cyberware-EX and the existing plugin scripts.
 - The overlay output reader now runs on a worker with a bounded 128 KiB tail and 400 lines. The render path only consumes completed snapshots; clear operations invalidate older pending output. Sanitizer fixtures cover partial lines, replacement, truncation, special files and concurrent reads.

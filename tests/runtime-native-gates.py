@@ -24,6 +24,7 @@ HOST = r'''
 #include <time.h>
 #include <stdlib.h>
 #define FLIGHT_FN ((uintptr_t)0xf100)
+#define FLIGHT_DRIVER_FN ((uintptr_t)0xf300)
 #define FLIGHT_STUB ((uint32_t)256)
 #define ORDINARY_RESULT ((uint32_t)0x13579bdf)
 static uint32_t flight_packet=FLIGHT_STUB, flight_failures=0, flight_reads=0;
@@ -48,6 +49,11 @@ __attribute__((visibility("default"))) uint32_t ncc_test_flight_reads(void) {
     return __atomic_load_n(&flight_reads,__ATOMIC_RELAXED);
 }
 __attribute__((noinline,optnone,visibility("default"))) uintptr_t ncc_test_target(void* fn,void* ctx,void* depth,void* result,void* result_type) {
+    // Model an engine/VM update naturally calling the script input method from
+    // the original body, outside an Interceptor callback. This is a route model,
+    // not proof of how the real game's bytecode dispatches the script method.
+    if((uintptr_t)fn==FLIGHT_DRIVER_FN)
+        return ncc_test_target((void*)FLIGHT_FN,ctx,NULL,result,result_type);
     uintptr_t n=(uintptr_t)depth;
     uintptr_t returned=1;
     if(n) {
@@ -118,8 +124,8 @@ int main(int argc,char**argv) {
 
 UNIT_TEST = r'''
 try {
- const assert=(v,m)=>{if(!v)throw Error(m);}; let captures=0,drains=[];
- const gate=createExecutorGate((fn,ctx,frame)=>{captures++; if(ctx.equals(ptr(0x3000))||ctx.equals(ptr(0x4000))){gate.player(ctx);return 2;}return 1;},(ctx,depth)=>{drains.push(depth); if(depth===0)gate.pending(false);});
+ const assert=(v,m)=>{if(!v)throw Error(m);}; let captures=0,drains=[],commandCheck=null;
+ const gate=createExecutorGate((fn,ctx,frame)=>{captures++; if(ctx.equals(ptr(0x3000))||ctx.equals(ptr(0x4000))){gate.player(ctx);return 2;}return 1;},(ctx,depth)=>{drains.push(depth); if(depth===0){gate.pending(false);if(commandCheck){const run=commandCheck;commandCheck=null;run();}}});
  globalThis.keep=gate;
  Interceptor.attach(Module.getGlobalExportByName('ncc_test_target'),gate.callbacks);
  Interceptor.flush();
@@ -141,6 +147,8 @@ try {
  const setPacket=new NativeFunction(Module.getGlobalExportByName('ncc_test_set_flight_packet'),'void',['uint']);
  const readCount=new NativeFunction(Module.getGlobalExportByName('ncc_test_flight_reads'),'uint',[]);
  const flightWorkers=new NativeFunction(Module.getGlobalExportByName('ncc_test_flight_workers'),'uint',['int']);
+ const directExec=new NativeFunction(Module.getGlobalExportByName('ncc_test_target'),'uint64',['pointer','pointer','pointer','pointer','pointer']);
+ const directExecAll=new NativeFunction(Module.getGlobalExportByName('ncc_test_target'),'uint64',['pointer','pointer','pointer','pointer','pointer'],{traps:'all'});
  const resultBuffer=()=>{const p=Memory.alloc(20);[0x11223344,0x55667788,0xdeadbeef,0x99aabbcc,0xddeeff00].forEach((v,i)=>p.add(i*4).writeU32(v));return p;};
  const checkResult=(p,value,label)=>{const expected=[0x11223344,0x55667788,value,0x99aabbcc,0xddeeff00];expected.forEach((v,i)=>assert(p.add(i*4).readU32()===v,label+' word '+i));};
  let guarded=resultBuffer(), reads=readCount();
@@ -165,6 +173,34 @@ try {
  assert(flightWorkers(250)===0,'four-thread nested and interleaved result buffers stay isolated');
  gate.pending(true);drains=[];guarded=resultBuffer();flightCall(0xf100,0x2000,0,guarded.add(8));
  assert(drains.join(',')==='0','flight return preserves outermost depth accounting');gate.pending(false);
+
+ // Reproduce the command-dispatch origin, not merely a busy flag or a native
+ // recursive call. Frida suppresses this listener while it is invoking leave_js,
+ // so asking Exec to call the stub here cannot prove the engine input route.
+ // Even traps:'all' does not re-enable this same listener during its callback.
+ setPacket(512|1|16);let commandRan=false;
+ commandCheck=()=>{
+   commandRan=true;gate.busy(true);
+   try {
+     for(const exec of [directExec,directExecAll]) {
+       const output=resultBuffer(),before=readCount();
+       exec(ptr(0xf100),ptr(0x2000),ptr(0),output.add(8),ptr(0xf200));
+       checkResult(output,256,'callback-origin script round trip remains blocked');
+       assert(readCount()===before,'same listener is suppressed inside leave_js');
+     }
+     const before=readCount();
+     assert(gate.flightInputPacket()===(512|1|16),'command reads native availability directly');
+     assert(readCount()===before+1,'native availability getter runs inside leave_js');
+   } finally {gate.busy(false);}
+ };
+ gate.pending(true);flightCall(0x1000,0x2000,0,ptr(0));
+ assert(commandRan,'the regression must actually execute inside leave_js');
+ guarded=resultBuffer();reads=readCount();
+ flightCall(0xf300,0x2000,0,guarded.add(8));
+ checkResult(guarded,512|1|16,'natural native update body reaches the input listener');
+ assert(readCount()===reads+1,'normal update route performs one native input read');
+ console.log('PASS flight command reentry: callback Exec stub stays blocked including traps all, direct native snapshot works, natural native update route reaches the listener');
+
  gate.flightInput(ptr(0));guarded=resultBuffer();reads=readCount();flightCall(0xf100,0x2000,0,guarded.add(8));
  checkResult(guarded,256,'removed binding fails closed');assert(readCount()===reads,'removed binding does no getter work');
  console.log('PASS native flight input gate: exact method, Uint32 guard bytes, unconfigured and removed binding, blocked/ready bits, null output, busy commands, nested and four-thread result isolation, depth accounting');
@@ -189,6 +225,7 @@ try {
  assert(Module.findGlobalExportByName('nightcity_flight_input')===null,'fixture omits the native input export');
  const gate=createExecutorGate(()=>{captures++;return 1;},()=>{});globalThis.keep=gate;
  assert(gate.flightInputAvailable===false,'missing export is explicitly unavailable');
+ assert(gate.flightInputPacket()===256,'missing export native snapshot fails closed');
  gate.flightInput(ptr(0xf100));gate.fromTdbid();
  Interceptor.attach(Module.getGlobalExportByName('ncc_test_target'),gate.callbacks);Interceptor.flush();
  const call=new NativeFunction(Module.getGlobalExportByName('ncc_test_exec_call'),'uint64',['uint64','uint64','uint64','pointer']);
@@ -241,7 +278,7 @@ def main():
             output = completed.stdout + completed.stderr
             (directory / f'{mode}-{attempt + 1}.txt').write_text(output)
             if 'FAIL' in output or (mode == 'native' and any(marker not in output for marker in
-                    ['PASS native executor gate:', 'PASS native localization gate:', 'PASS native flight input gate:'])):
+                    ['PASS native executor gate:', 'PASS native localization gate:', 'PASS native flight input gate:', 'PASS flight command reentry:'])):
                 raise AssertionError(output)
             match = re.search(r'benchmark_calls=(\d+) elapsed_ms=([0-9.]+)', output)
             if not match:
@@ -270,7 +307,10 @@ def main():
                          'flight blocked and ready packets', 'flight unconfigured and removed binding',
                          'flight null output', 'flight busy reentry', 'flight nested and four-thread result isolation',
                          'flight outermost depth accounting', 'flight internal method with observers',
-                         'flight missing-export native blocked fallback'],
+                         'flight missing-export native blocked fallback',
+                         'command callback Exec suppression including traps all',
+                         'direct native input snapshot from command callback',
+                         'natural native update body invokes the input listener'],
               'results': results}
     (directory / 'results.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report, indent=2))

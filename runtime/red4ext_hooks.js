@@ -698,6 +698,9 @@ function nativeAtomicHelpers() {
 function createExecutorGate(enter, leave) {
     const atomic=nativeAtomicHelpers();
     const flightInput=Module.findGlobalExportByName('nightcity_flight_input');
+    // Read only the overlay's atomic snapshot from a command callback. Calling
+    // Exec here would re-enter this listener and Frida suppresses that hook.
+    const flightPacket=flightInput ? new NativeFunction(flightInput,'uint',[],{scheduling:'exclusive',traps:'none'}) : null;
     const state=Memory.alloc(40);
     state.writeByteArray(new Uint8Array(40));
     const enterCallback=new NativeCallback(enter,'uint',['pointer','pointer','pointer']);
@@ -779,6 +782,7 @@ function createExecutorGate(enter, leave) {
         player(value){atomic.writePointer(state.add(16),value);},
         flightInput(value){atomic.writePointer(state.add(32),value);},
         flightInputAvailable:!!flightInput,
+        flightInputPacket(){return flightPacket ? flightPacket() : 256;},
         refresh(){atomic.write32(state.add(24),(atomic.read32(state.add(24))+1)>>>0);},
     };
 }
@@ -1580,9 +1584,12 @@ function createLocalizationGate(names,fill) {
                 throw new Error('Flight command has an unsupported signature.');
             executorGate.flightInput(input.fn);
             try {
-                const packet=callFunc(input.fn,current,input.retType,[]).readU32();
-                if ((packet&512)===0) throw new Error('Flight input did not pass its native round trip.');
+                const packet=executorGate.flightInputPacket();
+                if ((packet&512)===0) throw new Error('Flight native input is not ready.');
             } catch (e) { executorGate.flightInput(ptr(0)); throw e; }
+            // This checks native availability only. The script must obtain READY
+            // through NCCFlightInput on its next engine update before it changes
+            // collision or position. Never manufacture READY or bypass that gate.
             log('[Flight] '+readRedString(callFunc(target.fn,current,target.retType,[],0x20)));
         }
         function resolveGlobal(names){ ensureReg(); const rv=reg.readPointer();

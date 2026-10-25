@@ -33,12 +33,19 @@ function harness(options = {}) {
   const methods = new Map(['NCCFlightInput', 'NCCFlightProbeToggle',
     'NCCFlightProbeReturn', 'NCCFlightProbeStatus'].map(name => [name, method(name)]));
   const state = { version: '2.5', packet: 512 | 256, player: pointer(0xabc0),
-    calls: [], lookups: [], bindings: [], reads: [], logs: [], fault: null, ...options };
+    calls: [], lookups: [], bindings: [], reads: [], logs: [], snapshotReads: 0, fault: null, ...options };
   const game = pointer(0xdef0);
   const gate = {
     flightInputAvailable: options.exportAvailable !== false,
     binding: options.initialBinding ?? pointer(0),
     flightInput(fn) { state.bindings.push(fn); this.binding = fn; },
+    flightInputPacket() {
+      ++state.snapshotReads;
+      assert.equal(this.binding, methods.get('NCCFlightInput').fn,
+        'the exact validated method must be bound before checking native availability');
+      if (state.fault === 'input-snapshot') throw Error('INPUT_SNAPSHOT_FAILED');
+      return state.packet;
+    },
   };
   const context = vm.createContext({
     getGameVersion: () => state.version,
@@ -59,14 +66,8 @@ function harness(options = {}) {
       state.calls.push({ name: fn.name, owner, type, args: Array.from(args), resultSize });
       assert.equal(owner, state.player, 'calls must use the authoritative current player');
       assert.equal(args.length, 0, 'all prototype commands are zero-argument methods');
-      if (fn.name === 'NCCFlightInput') {
-        if (state.fault === 'input-call') throw Error('INPUT_CALL_FAILED');
-        assert.equal(gate.binding, fn, 'native method must be bound before its round trip');
-        return { readU32() {
-          if (state.fault === 'input-read') throw Error('INPUT_READ_FAILED');
-          return state.packet;
-        } };
-      }
+      assert.notEqual(fn.name, 'NCCFlightInput',
+        'command callbacks must not attempt a scripted input round trip: Frida suppresses the same listener');
       if (state.fault === 'target-call') throw Error('TARGET_CALL_FAILED');
       assert.equal(resultSize, 0x20, 'String results need the complete 32-byte return buffer');
       return { string: `result:${fn.name}` };
@@ -83,12 +84,14 @@ for (const version of ['2.3.1', '2.5.0', 'unknown']) {
   assert.throws(() => h.run('toggle'), /requires game 2\.5\.0/);
   assert.equal(h.state.calls.length, 0);
   assert.equal(h.state.bindings.length, 0);
+  assert.equal(h.state.snapshotReads, 0);
 }
 for (const options of [{ missingGate: true }, { exportAvailable: false }]) {
   const h = harness(options);
   assert.throws(() => h.run('toggle'), /input bridge is unavailable/);
   assert.equal(h.state.calls.length, 0);
   assert.equal(h.state.bindings.length, 0);
+  assert.equal(h.state.snapshotReads, 0);
 }
 
 for (const invalid of [null, { params: 1 }, { hash: STRING }, { isStatic: true }, { nullReturn: true }]) {
@@ -122,20 +125,23 @@ for (const invalid of [null, { params: 1 }, { hash: UINT32 }, { isStatic: true }
 }
 for (const packet of [0, 1, 256, 256 | 1]) {
   const h = harness({ packet });
-  assert.throws(() => h.run('toggle'), /native round trip/);
-  assert.deepEqual(h.state.calls.map(call => call.name), ['NCCFlightInput']);
-  assert(h.gate.binding.isNull(), 'a failed round trip must disable native input binding');
+  assert.throws(() => h.run('toggle'), /native input is not ready/);
+  assert.equal(h.state.calls.length, 0, 'a non-ready native snapshot must not execute a script command');
+  assert.equal(h.state.snapshotReads, 1);
+  assert(h.gate.binding.isNull(), 'a failed native availability check must disable input binding');
 }
-for (const fault of ['input-call', 'input-read']) {
+for (const fault of ['input-snapshot']) {
   const h = harness({ fault });
-  assert.throws(() => h.run('toggle'), /INPUT_(CALL|READ)_FAILED/);
-  assert(h.gate.binding.isNull(), 'a throwing input round trip must disable native input binding');
+  assert.throws(() => h.run('toggle'), /INPUT_SNAPSHOT_FAILED/);
+  assert.equal(h.state.calls.length, 0);
+  assert(h.gate.binding.isNull(), 'a throwing native snapshot must disable input binding');
 }
 for (const [action, expected] of [[undefined, 'NCCFlightProbeStatus'], ['status', 'NCCFlightProbeStatus'],
   ['toggle', 'NCCFlightProbeToggle'], ['return', 'NCCFlightProbeReturn'], ['off', 'NCCFlightProbeReturn']]) {
   const h = harness();
   h.run(action);
-  assert.deepEqual(h.state.calls.map(call => call.name), ['NCCFlightInput', expected]);
+  assert.deepEqual(h.state.calls.map(call => call.name), [expected]);
+  assert.equal(h.state.snapshotReads, 1);
   assert.equal(h.state.logs.at(-1), `[Flight] result:${expected}`);
   assert.equal(h.gate.binding, h.methods.get('NCCFlightInput').fn);
 }
@@ -149,4 +155,4 @@ for (const [action, expected] of [[undefined, 'NCCFlightProbeStatus'], ['status'
     'status must never transiently unbind active input between method calls');
 }
 
-console.log('PASS production flight commands: game version, bridge availability, exact RTTI signatures, invalid verbs, current player, fail-closed round trip, String buffers and stable status binding');
+console.log('PASS production flight commands: game version, bridge availability, exact RTTI signatures, invalid verbs, current player, fail-closed native snapshot, no callback-origin script input call, String buffers and stable status binding');
