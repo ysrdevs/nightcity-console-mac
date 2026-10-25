@@ -1,12 +1,23 @@
-# NightCity Console 1.7.0 — Virtual Atelier, Cyberware-EX and Equipment-EX on 2.5
+# NightCity Console 1.7.0 — Performance, Codeware and Expanded Mod Support
 
-This release adds support for **Virtual Atelier, Cyberware-EX and Equipment-EX**
-on Cyberpunk 2077 **2.5.0, native macOS Steam**, together with a diagnostics export
-for troubleshooting. It retains the console, quick actions, item browser and
-Iconic Weapon Creator introduced in the previous 2.5 release.
+This release brings **lower console overhead, broader Codeware-based mod support,
+Virtual Atelier, Cyberware-EX and Equipment-EX** to Cyberpunk 2077 **2.5.0, native
+macOS Steam**. It also expands the Iconic Weapon Creator to **37 base-game
+weapons** and adds optional mod installs, a mod guide and diagnostics export.
+The existing console commands, quick actions and item browser remain available.
 
 ## What's new
 
+- **Performance improvements:** reduced console overhead during gameplay by
+  avoiding unnecessary runtime callbacks while idle and during ordinary text
+  lookups. Long console histories render only visible rows, and continuous frame
+  logging is off by default. Local player testing reported noticeably smoother
+  gameplay; results depend on hardware, settings and installed mods.
+- **Broader Codeware-based mod support:** expanded native macOS UI, widget and
+  wardrobe support enables the tested Virtual Atelier, Equipment-EX and
+  Cyberware-EX setup. The required Codeware runtime is included alongside
+  RED4ext, TweakXL and ArchiveXL. The launcher prepares supported script
+  adaptations automatically and stops before launching if compilation fails.
 - **Expanded Iconic Weapon Creator:** choose from 37 base-game weapons across
   nine categories, with search by name or weapon type. No Phantom Liberty is
   required for these choices. The selected weapon, blueprint and shared Iconic
@@ -30,10 +41,6 @@ Iconic Weapon Creator introduced in the previous 2.5 release.
 - **Equipment-EX 1.2.9:** additional clothing slots, wardrobe search, named outfits,
   appearance changes and outfit switching. Outfits persist after saving and
   relaunching.
-- **Native dependencies:** includes the tested macOS Codeware UI and wardrobe
-  features alongside RED4ext, TweakXL and ArchiveXL. The launcher prepares the
-  supported script adaptations automatically and stops before launching when
-  it encounters incompatible edited targets or script compilation errors.
 - **Export Diagnostics:** save a local ZIP with recent logs and crash excerpts,
   versions, hardware, graphics settings, native file hashes and mod inventory.
   Save files, screenshots, mod source files and console command history are
@@ -42,11 +49,6 @@ Iconic Weapon Creator introduced in the previous 2.5 release.
 - **Optional performance recording:** enable “Record performance on next launch”,
   relaunch the game, reproduce a slowdown and export diagnostics. Recording is
   off by default.
-- **Reduced runtime overhead on 2.5:** idle script calls and ordinary localization
-  lookups bypass unnecessary JavaScript callbacks. Long console histories now
-  render only the visible rows, and continuous frame logging is disabled by
-  default. These changes address observed overhead; no specific gameplay FPS
-  gain is promised.
 
 ## Install or update
 
