@@ -22,6 +22,8 @@
 #include <array>
 #include <fcntl.h>
 #include "frame_cadence.h"
+#include "exploration_input.h"
+#include "output_snapshot.h"
 #include <thread>
 #include <chrono>
 #include <unistd.h>
@@ -87,6 +89,10 @@ static IMP g_origSendEvent = NULL;
 static bool g_imguiInit = false;
 static unsigned long g_frame = 0;
 static std::atomic<bool> g_show{false};
+static nightcity::ExplorationInput g_explorationInput;
+extern "C" __attribute__((visibility("default"))) uint32_t nightcity_flight_input() {
+    return g_explorationInput.snapshot();
+}
 static std::atomic<bool> g_focusInput{false};
 static std::atomic<int>  g_activeTab{0};        // 0 Console, 1 Items, 2 Quick
 static std::atomic<bool> g_tabReq{false};       // a keyboard tab-switch was requested
@@ -184,21 +190,41 @@ static bool  g_mouseInit = false;
 static std::atomic<bool> g_recenterMouse{false};   // center the cursor when the console opens
 
 // ---- command channel ----
-static void refreshOut() {
-    FILE* f = fopen(OUT_PATH, "r"); if (!f) return;
-    g_lines.clear();
-    constexpr long tailBytes = 128 * 1024;
-    if (fseek(f, 0, SEEK_END) == 0) {
-        long size = ftell(f);
-        const long offset = size > tailBytes ? size - tailBytes : 0;
-        if (fseek(f, offset, SEEK_SET) == 0 && offset > 0) {
-            int c; do { c = fgetc(f); } while (c != '\n' && c != EOF); // discard a partial first line
-        }
+static std::atomic<bool> g_outBusy{false}, g_outDirty{false};
+static std::atomic<uint64_t> g_outEpoch{0};
+static std::mutex g_outSnapshotMutex;
+static std::vector<std::string> g_pendingOut;
+static uint64_t g_pendingOutEpoch = 0;
+static bool g_pendingOutReady = false;
+static void scheduleOutRefresh();
+static void refreshOut() { g_outDirty = true; scheduleOutRefresh(); }
+static void scheduleOutRefresh() {
+    bool expected = false;
+    if (!g_outBusy.compare_exchange_strong(expected, true)) return;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        g_outDirty = false;
+        const auto epoch = g_outEpoch.load();
+        try {
+            auto snapshot = nightcity::readOutputSnapshot(OUT_PATH);
+            if (snapshot.status == nightcity::OutputSnapshotStatus::ready) {
+                std::lock_guard<std::mutex> guard(g_outSnapshotMutex);
+                if (epoch == g_outEpoch.load()) {
+                    g_pendingOut.swap(snapshot.lines);
+                    g_pendingOutEpoch = epoch;
+                    g_pendingOutReady = true;
+                }
+            }
+        } catch (...) { /* Keep the last complete snapshot on allocation/read failure. */ }
+        g_outBusy = false;
+        if (g_outDirty.load()) scheduleOutRefresh();
+    });
+}
+static void consumeOutSnapshot() {
+    std::unique_lock<std::mutex> guard(g_outSnapshotMutex, std::try_to_lock);
+    if (guard.owns_lock() && g_pendingOutReady) {
+        if (g_pendingOutEpoch == g_outEpoch.load()) g_lines.swap(g_pendingOut);
+        g_pendingOutReady = false;
     }
-    char line[2048];
-    while (fgets(line, sizeof(line), f)) { size_t n = strlen(line); if (n && line[n-1] == '\n') line[n-1] = 0; g_lines.push_back(line); }
-    fclose(f);
-    if (g_lines.size() > 400) g_lines.erase(g_lines.begin(), g_lines.end() - 400);
 }
 static unsigned g_cmdSeq = 0;
 static void submitCommand(const char* c) {
@@ -589,7 +615,7 @@ static std::string overlayDir();            // defined below; used by loadLuaMod
 
 // Handle a submitted line. `clear`/`help` are local to the overlay; everything else goes to Frida.
 static void handleSubmit(const char* cmd) {
-    if (strcmp(cmd, "clear") == 0) { FILE* f = fopen(OUT_PATH, "w"); if (f) fclose(f); g_lines.clear(); return; }
+    if (strcmp(cmd, "clear") == 0) { FILE* f = fopen(OUT_PATH, "w"); if (f) fclose(f); ++g_outEpoch; g_lines.clear(); refreshOut(); return; }
     if (strcmp(cmd, "reload") == 0) { g_tabsDirty = true; appendOut("> reload"); appendOut("reloading tabs/ ..."); refreshOut(); return; }
     appendOut((std::string("> ") + cmd).c_str());
     if (strncmp(cmd, "lua ", 4) == 0) { luaRunExpr(cmd + 4); refreshOut(); return; }   // Q7: run Lua in-process
@@ -1177,6 +1203,20 @@ static void drawQuickTab() {
     ImGui::SetNextItemWidth(160); ImGui::InputText("##tpname", tpname, sizeof(tpname));
     ImGui::SameLine(); if (ImGui::Button("Save spot")) runLabeled(std::string("teleport save ") + tpname, std::string("Saved spot: ") + tpname);
     ImGui::SameLine(); if (ImGui::Button("Go to spot")) runLabeled(std::string("teleport ") + tpname, std::string("Teleported: ") + tpname);
+}
+
+static void drawExplorationTab() {
+    ImGui::TextUnformatted("Flight prototype");
+    ImGui::TextWrapped("Start while standing on clear ground. Close F1 after starting. This first test returns you to the start after 30 seconds.");
+    if (ImGui::Button("Start / stop flight")) runLabeled("flight toggle", "Flight toggle requested. See Console for status.");
+    ImGui::SameLine();
+    if (ImGui::Button("Return to start")) runLabeled("flight return", "Return requested. See Console for status.");
+    ImGui::SameLine();
+    if (ImGui::Button("Check flight status")) runLabeled("flight status", "Flight status requested in Console.");
+    ImGui::Separator();
+    ImGui::TextUnformatted("WASD: move with camera    Space: up    Control: down");
+    ImGui::TextUnformatted("Shift: boost    Option: precision");
+    ImGui::TextWrapped("Opening F1 or switching away pauses flight input. Release movement keys before resuming. This is an isolated collision test; do not save while flight is active.");
 }
 
 // ---- Creator: build a custom iconic weapon IN-PROCESS (ported from makeweapon.py). No Python, no
@@ -1912,6 +1952,9 @@ static void rebuildTabs() {
     g_tabs.push_back(quick);
     g_tabs.push_back(creator);
     g_tabs.push_back(mods);
+    Tab exploration; exploration.id = "exploration"; exploration.title = "Exploration";
+    exploration.builtin = true; exploration.nativeKind = "exploration"; exploration.nativeDraw = drawExplorationTab;
+    g_tabs.push_back(exploration);
     for (auto& dt : dataTabs) g_tabs.push_back(dt);
     g_numTabs = (int)g_tabs.size();
     olog("tabs rebuilt: %d total (%zu data)", g_numTabs, dataTabs.size());
@@ -1986,6 +2029,7 @@ static void renderOverlay(id<MTLCommandBuffer> cb, id<CAMetalDrawable> drawable)
     if (!g_imguiInit) initImGui(dev);
     g_frame++;
     if ((g_frame % 60) == 0) refreshOut();
+    consumeOutSnapshot();
 
     // Hot-reload tabs: poll the newest tabs/ mtime ~once/sec; on change, mark dirty.
     // drawConsole() consumes g_tabsDirty and calls rebuildTabs() under g_tabsMtx.
@@ -2065,11 +2109,32 @@ static void my_presentAfter(id self, SEL _cmd, id drawable, CFTimeInterval d) {
 static void my_sendEvent(id self, SEL _cmd, NSEvent* ev) {
     @try {
         NSEventType t = ev.type;
+        if (t == NSEventTypeKeyUp || (t == NSEventTypeKeyDown && !ev.isARepeat)) {
+            uint32_t bit = 0;
+            switch (ev.keyCode) {
+                case 13: bit = nightcity::ExplorationInput::forward; break;
+                case 1: bit = nightcity::ExplorationInput::back; break;
+                case 0: bit = nightcity::ExplorationInput::left; break;
+                case 2: bit = nightcity::ExplorationInput::right; break;
+                case 49: bit = nightcity::ExplorationInput::up; break;
+            }
+            if (bit) g_explorationInput.key(bit, t == NSEventTypeKeyDown);
+        }
+        if (t == NSEventTypeFlagsChanged) {
+            if (ev.keyCode == 59 || ev.keyCode == 62)
+                g_explorationInput.key(nightcity::ExplorationInput::down, (ev.modifierFlags & NSEventModifierFlagControl) != 0);
+            if (ev.keyCode == 56 || ev.keyCode == 60)
+                g_explorationInput.key(nightcity::ExplorationInput::boost, (ev.modifierFlags & NSEventModifierFlagShift) != 0);
+            if (ev.keyCode == 58 || ev.keyCode == 61)
+                g_explorationInput.key(nightcity::ExplorationInput::precision, (ev.modifierFlags & NSEventModifierFlagOption) != 0);
+        }
         if (t == NSEventTypeKeyDown) {
             unsigned short kc = ev.keyCode;
             if (kc == 50 || kc == 122) {  // ` (grave/tilde) or F1
+                if (ev.isARepeat) return;
                 bool now = !g_show.load();
                 g_show = now;
+                g_explorationInput.setBlocked(now || !NSApp.isActive);
                 if (now) { g_focusInput = true; g_recenterMouse = true; NSWindow* w = ev.window; if (w) [w setAcceptsMouseMovedEvents:YES]; }
                 return;  // swallow the toggle key
             }
@@ -2170,6 +2235,13 @@ static void installInputHook() {
     if (!m) { olog("FATAL: no sendEvent: on %s", class_getName(appClass)); return; }
     g_origSendEvent = method_getImplementation(m);
     method_setImplementation(m, (IMP)my_sendEvent);
+    g_explorationInput.setBlocked(g_show.load() || !NSApp.isActive);
+    [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationDidResignActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification*) {
+        g_explorationInput.setBlocked(true);
+    }];
+    [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationDidBecomeActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification*) {
+        g_explorationInput.setBlocked(g_show.load());
+    }];
     olog("hooked sendEvent: on %s", class_getName(appClass));
 }
 

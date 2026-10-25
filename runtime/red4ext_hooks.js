@@ -697,8 +697,9 @@ function nativeAtomicHelpers() {
 }
 function createExecutorGate(enter, leave) {
     const atomic=nativeAtomicHelpers();
-    const state=Memory.alloc(32);
-    state.writeByteArray(new Uint8Array(32));
+    const flightInput=Module.findGlobalExportByName('nightcity_flight_input');
+    const state=Memory.alloc(40);
+    state.writeByteArray(new Uint8Array(40));
     const enterCallback=new NativeCallback(enter,'uint',['pointer','pointer','pointer']);
     const leaveCallback=new NativeCallback(leave,'void',['pointer','uint']);
     const module=new CModule(`
@@ -707,18 +708,20 @@ function createExecutorGate(enter, leave) {
             guint pending, observers, busy, from_tdbid;
             gpointer player;
             guint epoch;
+            gpointer flight_input_fn;
         } GateState;
         typedef struct {
             guint depth, epoch;
             guintptr contexts[88];
             gpointer functions[32];
         } ThreadState;
-        typedef struct { gpointer context; } CallState;
+        typedef struct { gpointer context; guint *flight_result; } CallState;
         extern GateState gate_state;
         extern guint atomic_load32(const guint *address);
         extern gpointer atomic_load_pointer(gpointer const *address);
         extern guint enter_js(gpointer fn, gpointer context, gpointer frame);
         extern void leave_js(gpointer context, guint depth);
+        ${flightInput ? 'extern guint flight_input(void);' : 'static guint flight_input(void) { return 256; }'}
         void on_enter(GumInvocationContext *ic) {
             ThreadState *thread=gum_invocation_context_get_listener_thread_data(ic,sizeof(ThreadState));
             CallState *call=gum_invocation_context_get_listener_invocation_data(ic,sizeof(CallState));
@@ -730,8 +733,13 @@ function createExecutorGate(enter, leave) {
                 thread->epoch=epoch;
             }
             call->context=NULL;
-            if (atomic_load32(&gate_state.busy)) return;
+            call->flight_result=NULL;
             gpointer fn=gum_invocation_context_get_nth_argument(ic,0);
+            if (fn && fn==atomic_load_pointer(&gate_state.flight_input_fn)) {
+                call->flight_result=gum_invocation_context_get_nth_argument(ic,3);
+                return;
+            }
+            if (atomic_load32(&gate_state.busy)) return;
             gpointer context=gum_invocation_context_get_nth_argument(ic,1);
             if (!fn || !context) return;
             guintptr key=(guintptr)context;
@@ -754,11 +762,12 @@ function createExecutorGate(enter, leave) {
         void on_leave(GumInvocationContext *ic) {
             ThreadState *thread=gum_invocation_context_get_listener_thread_data(ic,sizeof(ThreadState));
             CallState *call=gum_invocation_context_get_listener_invocation_data(ic,sizeof(CallState));
+            if (call->flight_result) *call->flight_result=flight_input();
             if (thread->depth) thread->depth--;
             if (!atomic_load32(&gate_state.busy) && atomic_load32(&gate_state.pending))
                 leave_js(call->context,thread->depth);
         }
-    `,{gate_state:state,enter_js:enterCallback,leave_js:leaveCallback,atomic_load32:atomic.load32,atomic_load_pointer:atomic.loadPointer},{toolchain:'internal'});
+    `,Object.assign({gate_state:state,enter_js:enterCallback,leave_js:leaveCallback,atomic_load32:atomic.load32,atomic_load_pointer:atomic.loadPointer}, flightInput ? {flight_input:flightInput} : {}),{toolchain:'internal'});
     return {
         // Keep code, memory and callbacks alive as long as the attached listener.
         module:module,state:state,atomic:atomic,enterCallback:enterCallback,leaveCallback:leaveCallback,
@@ -768,6 +777,8 @@ function createExecutorGate(enter, leave) {
         busy(value){atomic.write32(state.add(8),value?1:0);},
         fromTdbid(){atomic.write32(state.add(12),1);},
         player(value){atomic.writePointer(state.add(16),value);},
+        flightInput(value){atomic.writePointer(state.add(32),value);},
+        flightInputAvailable:!!flightInput,
         refresh(){atomic.write32(state.add(24),(atomic.read32(state.add(24))+1)>>>0);},
     };
 }
@@ -1542,6 +1553,38 @@ function createLocalizationGate(names,fill) {
         // Used to extend the Items-tab catalog for a new game version.
         function readRedString(p){ try{ const lf=p.add(0x14).readU32(); const n=lf&0x3FFFFFFF; if(!n) return '';
             return ((lf&0x40000000)?p.readPointer():p).readUtf8String(n); }catch(e){ return ''; } }
+        // Exploration prototype commands are the only place that configures the
+        // exact Uint32 input method. Movement itself stays in redscript/engine updates.
+        function doFlight(action) {
+            if (getGameVersion()!=='2.5') throw new Error('Flight prototype requires game 2.5.0.');
+            if (!executorGate || !executorGate.flightInputAvailable)
+                throw new Error('Flight input bridge is unavailable; flight stays disabled.');
+            const verbs={toggle:'NCCFlightProbeToggle',return:'NCCFlightProbeReturn',off:'NCCFlightProbeReturn',status:'NCCFlightProbeStatus'};
+            action=action||'status';
+            if (!Object.prototype.hasOwnProperty.call(verbs,action))
+                throw new Error('Use flight toggle, flight return, or flight status.');
+            const method=verbs[action];
+            const names=['gamePlayerPuppet','PlayerPuppet'];
+            const input=resolveAny(names,'NCCFlightInput');
+            if (!input || input.isStatic || input.fn.add(0x30).readU32()!==0 ||
+                    input.retType.isNull() || nameOf(input.retType)!==T_U32) {
+                executorGate.flightInput(ptr(0));
+                throw new Error('Flight prototype scripts are missing or their input signature differs.');
+            }
+            const game=getGI();
+            const current=game?getPlayerViaSystem(game):null;
+            if (!current || current.isNull()) throw new Error('Load a save before using flight.');
+            const target=resolveAny(names,method);
+            if (!target || target.isStatic || target.fn.add(0x30).readU32()!==0 || target.retType.isNull() ||
+                    nameOf(target.retType)!=='0x'+fnv('String').toString(16))
+                throw new Error('Flight command has an unsupported signature.');
+            executorGate.flightInput(input.fn);
+            try {
+                const packet=callFunc(input.fn,current,input.retType,[]).readU32();
+                if ((packet&512)===0) throw new Error('Flight input did not pass its native round trip.');
+            } catch (e) { executorGate.flightInput(ptr(0)); throw e; }
+            log('[Flight] '+readRedString(callFunc(target.fn,current,target.retType,[],0x20)));
+        }
         function resolveGlobal(names){ ensureReg(); const rv=reg.readPointer();
             const GetFunction=new NativeFunction(rv.add(0x30).readPointer(),'pointer',['pointer','uint64']);
             for(const n of names){ const f=GetFunction(reg,u64(fnv(n))); if(!f.isNull()){ const rp=f.add(0x18).readPointer(); return {fn:f, retType:rp.isNull()?ptr(0):rp.readPointer(), name:n}; } }
@@ -1635,6 +1678,7 @@ function createLocalizationGate(names,fill) {
             if(t[0]==='itemdump'){ doItemDump(t[1]); return; }   // TweakDB is readable from the main menu
             if(t[0]==='creatorprobe'){ try{ creatorProbe(outerContext); }catch(e){ log('creatorprobe FAILED: '+e); } return; }
             if(!player){ log('NOT IN GAME yet: '+line); return; }
+            if(t[0]==='flight'){ try{ doFlight(t[1]); }catch(e){ log('[Flight] '+(e.message||e)); } return; }
             if(t[0]==='give'&&t[1]){ doGive(t[1], Math.max(1,parseInt(t[2]||'1')||1)); return; }
             if(t[0]==='money'&&t[1]){ doGive('Items.money', Math.max(1,parseInt(t[1])||1), true); return; }   // currency: always one bulk add
             if(t[0]==='perks'&&t[1]){ addPoints(Math.max(1,parseInt(t[1])||1),'Primary'); return; }
