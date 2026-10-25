@@ -6,10 +6,18 @@ const source = fs.readFileSync(new URL('../runtime/red4ext_hooks.js', import.met
 const transaction = source.split('// BEGIN CREATOR TRANSACTION')[1].split('// END CREATOR TRANSACTION')[0];
 function harness(overrides = {}) {
   const files = new Map(), timers = [], queue = [];
-  const state = { now: 1000, reloaded: false, gives: 0, count: 0, calls: 0, ...overrides };
+  const state = { now: 1000, reloaded: false, gives: 0, count: 0, calls: 0, nameLoads: 0,
+    baseLookups: [], typedLookups: [], ...overrides };
   const engine = {
     reload() { state.calls++; state.reloaded = true; },
-    hasRecord() { return state.existing || (state.reloaded && !state.importFails); },
+    hasRecord(name) {
+      if (name.startsWith('Items.Preset_')) { state.baseLookups.push(name); return !state.missingBase; }
+      return state.existing || (state.reloaded && !state.importFails);
+    },
+    hasTypedRecord(method, name) {
+      state.typedLookups.push([method, name]);
+      return name !== state.missingRecord;
+    },
     quantity() { return state.count; },
     give() { state.gives++; if (state.refuses) return false; if (!state.deferred) state.count++; return true; },
     inventoryEvidence() { return { queryItemID: 'query-seed-1', giveItemID: 'instance-seed-3', lastQuantity: state.count }; },
@@ -17,13 +25,15 @@ function harness(overrides = {}) {
   const context = vm.createContext({
     CREQ: 'request', CRES: 'response', pendingQ: queue, cmnMap: { 1: 'name', 2: 'flavor', 3: 'ability' },
     creatorContext() { if (state.unavailable) throw Error('TweakXL unavailable'); return engine; },
-    cmnLoad() {}, log() {}, Date: { now: () => state.now }, Process: { id: 42 },
+    cmnLoad() { state.nameLoads++; }, log() {}, Date: { now: () => state.now }, Process: { id: 42 },
     readFile: path => files.get(path), clearFile: path => files.delete(path),
     setTimeout: callback => timers.push(callback),
     File: function(path) { this.write = data => files.set(path, data); this.flush = () => {}; this.close = () => {}; },
   });
   vm.runInContext(transaction + ';globalThis.bridge={creatorPoll,creatorRun};', context);
-  const req = (id = 'request-1', op = 'apply') => ({ id, pid: 42, op, deadline: 21000, record: 'Items.CyberModManProbe', keys: [1, 2, 3] });
+  const req = (id = 'request-1', op = 'apply') => ({ id, pid: 42, op, deadline: 21000,
+    ...(op === 'check' ? { baseRecord: 'Items.Preset_Lexington_Default', blueprint: 'Items.Iconic_Ranged_Weapon_Blueprint' }
+      : { record: 'Items.CyberModManProbe', keys: [1, 2, 3] }) });
   const poll = request => { files.set('request', JSON.stringify(request)); context.bridge.creatorPoll(); };
   const drain = () => { while (queue.length) { const x = queue.shift(); context.bridge.creatorRun(x.creator, x.state); } };
   const response = () => files.has('response') ? JSON.parse(files.get('response')) : null;
@@ -39,6 +49,82 @@ for (const conditions of [{ importFails: true }, { existing: true }, { unavailab
 {
   const h = harness(); h.poll(h.req('preflight', 'check')); h.drain();
   assert.equal(h.response().ok, true); assert.equal(h.state.calls, 0); assert.equal(h.state.gives, 0);
+  assert.equal(h.state.nameLoads, 0);
+  assert.equal(h.response().baseRecord, 'Items.Preset_Lexington_Default');
+  assert.equal(h.response().blueprint, 'Items.Iconic_Ranged_Weapon_Blueprint');
+  assert.deepEqual(h.state.baseLookups, ['Items.Preset_Lexington_Default']);
+  assert.deepEqual(h.state.typedLookups, [
+    ['GetItemBlueprintRecord', 'Items.Iconic_Ranged_Weapon_Blueprint'],
+    ['GetAttachmentSlotRecord', 'AttachmentSlots.IconicWeaponModLegendary'],
+    ['GetGameplayLogicPackageRecord', 'Items.IconicWeaponModAbilityBase'],
+    ['GetItemRecord', 'Items.IconicWeaponModBase'],
+  ]);
+}
+// Missing prerequisites must fail the read-only check: no reload, name refresh, inventory
+// mutation or success acknowledgement. The UI waits for this before generating any files.
+for (const [conditions, expected] of [
+  [{ missingBase: true }, /selected base weapon is unavailable/],
+  [{ missingRecord: 'Items.Iconic_Ranged_Weapon_Blueprint' }, /weapon blueprint is unavailable/],
+  [{ missingRecord: 'AttachmentSlots.IconicWeaponModLegendary' }, /iconic attachment slot is unavailable/],
+  [{ missingRecord: 'Items.IconicWeaponModAbilityBase' }, /iconic ability template is unavailable/],
+  [{ missingRecord: 'Items.IconicWeaponModBase' }, /iconic mod template is unavailable/],
+]) {
+  const h = harness(conditions); h.poll(h.req('missing-prerequisite', 'check')); h.drain();
+  assert.equal(h.response().ok, false); assert.match(h.response().message, expected);
+  assert.equal(h.state.calls, 0); assert.equal(h.state.gives, 0); assert.equal(h.state.nameLoads, 0);
+  assert.equal(h.timers.length, 0);
+  if (conditions.missingBase) assert.deepEqual(h.state.typedLookups, []);
+}
+for (const [field, value] of [
+  ['baseRecord', undefined], ['baseRecord', null], ['baseRecord', {}],
+  ['baseRecord', ''], ['baseRecord', 'Items.Preset_Lexington_Default\n'],
+  ['baseRecord', 'Items.Preset_X/../../Other'], ['baseRecord', 'Items.IconicWeaponModBase'],
+  ['baseRecord', 'Items.Preset_' + 'A'.repeat(129)],
+  ['blueprint', undefined], ['blueprint', null], ['blueprint', {}],
+  ['blueprint', '__proto__'], ['blueprint', 'Items.Unrecognized_Blueprint'],
+]) {
+  const h = harness(), req = h.req('invalid-selection', 'check'); req[field] = value;
+  h.poll(req); h.drain();
+  assert.equal(h.response().ok, false); assert.match(h.response().message, /Invalid or missing Creator/);
+  assert.deepEqual(h.state.baseLookups, []); assert.deepEqual(h.state.typedLookups, []);
+  assert.equal(h.state.calls, 0); assert.equal(h.state.gives, 0); assert.equal(h.state.nameLoads, 0);
+}
+for (const [blueprint, slot] of [
+  ['Items.Iconic_Ranged_Weapon_NoMuzzle_Blueprint', 'AttachmentSlots.IconicWeaponModLegendary'],
+  ['Items.Iconic_Ranged_Weapon_NoScope_Blueprint', 'AttachmentSlots.IconicWeaponModLegendary'],
+  ['Items.Iconic_Ranged_Weapon_NoAttachments_Blueprint', 'AttachmentSlots.IconicWeaponModLegendary'],
+  ['Items.Iconic_Melee_Blueprint', 'AttachmentSlots.IconicMeleeWeaponMod1'],
+]) {
+  const h = harness(), req = h.req('blueprint-profile', 'check'); req.blueprint = blueprint;
+  req.baseRecord = blueprint.includes('_Melee_') ? 'Items.Preset_Katana_Default' : 'Items.Preset_Nekomata_Default';
+  h.poll(req); h.drain(); assert.equal(h.response().ok, true);
+  assert.deepEqual(h.state.typedLookups[0], ['GetItemBlueprintRecord', blueprint]);
+  assert.deepEqual(h.state.typedLookups[1], ['GetAttachmentSlotRecord', slot]);
+  assert.equal(h.state.calls, 0); assert.equal(h.state.gives, 0);
+}
+// Exercise the actual runtime check with every selection the shipped UI can send.
+// Read constants from the C++ table instead of maintaining a second test catalogue;
+// unknown row syntax/macros fail here rather than silently skipping a profile.
+{
+  const overlay = fs.readFileSync(new URL('../overlay/overlay.mm', import.meta.url), 'utf8');
+  const constants = new Map([...overlay.matchAll(/^#define\s+(CR_(?:BP|SLOT)_\w+)\s+"([^"]+)"/gm)]
+    .map(match => [match[1], match[2]]));
+  const table = overlay.split('static const CrBase kCrBases[] = {')[1]?.split('};')[0];
+  assert(table, 'Creator base table must be present');
+  const rows = [...table.matchAll(/^\s*\{"([^"]+)",\s*"([^"]+)",\s*(CR_BP_\w+),\s*(CR_SLOT_\w+),\s*(true|false)[^\n]*\},?\s*$/gm)];
+  assert.equal(rows.length, [...table.matchAll(/\{/g)].length, 'Every Creator profile must be checked');
+  assert(rows.length >= 7);
+  for (const [index, row] of rows.entries()) {
+    const blueprint = constants.get(row[3]), slot = constants.get(row[4]);
+    assert(blueprint && slot, `Unknown profile macro for ${row[1]}`);
+    const h = harness(), request = h.req(`catalogue-${index}`, 'check');
+    request.baseRecord = row[2]; request.blueprint = blueprint;
+    h.poll(request); h.drain();
+    assert.equal(h.response().ok, true, `${row[1]}: ${h.response().message}`);
+    assert.equal(h.response().baseRecord, row[2]); assert.equal(h.response().blueprint, blueprint);
+    assert.deepEqual(h.state.typedLookups[1], ['GetAttachmentSlotRecord', slot]);
+    assert.equal(h.state.calls, 0); assert.equal(h.state.gives, 0); assert.equal(h.state.nameLoads, 0);
+  }
 }
 {
   const h = harness({ deferred: true }); h.poll(h.req()); h.drain();
@@ -99,4 +185,4 @@ if (fixtureFlag >= 0) {
     fs.closeSync(fd);
   }
 }
-console.log('Creator transactions, timeouts, duplicate requests, import failures, and UTF-8 checks passed.');
+console.log('Creator selection preflight, transactions, timeouts, duplicate requests, import failures, and UTF-8 checks passed.');

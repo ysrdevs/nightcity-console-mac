@@ -1186,21 +1186,85 @@ static void drawQuickTab() {
 #define CR_SLOT_MELEE  "AttachmentSlots.IconicMeleeWeaponMod1"
 #define CR_BP_R   "Items.Iconic_Ranged_Weapon_Blueprint"
 #define CR_BP_RN  "Items.Iconic_Ranged_Weapon_NoMuzzle_Blueprint"
+#define CR_BP_RS  "Items.Iconic_Ranged_Weapon_NoScope_Blueprint"
 #define CR_BP_RA  "Items.Iconic_Ranged_Weapon_NoAttachments_Blueprint"
 #define CR_BP_M   "Items.Iconic_Melee_Blueprint"
 static const long CR_LOCKEY_START = 7777798;
 
-struct CrBase { const char* label; const char* preset; const char* bp; const char* slot; bool melee; };
+// The first seven profiles retain their original preset, blueprint and iconic slot.
+// Saved weapons contain these record IDs, never a catalogue index.
+struct CrBase {
+    const char* label; const char* preset; const char* bp; const char* slot; bool melee;
+    const char* category; const char* mechanism;
+};
 static const CrBase kCrBases[] = {
-    {"Pistol  -  Lexington", "Items.Preset_Lexington_Default",    CR_BP_R,  CR_SLOT_RANGED, false},
-    {"SMG  -  Saratoga",     "Items.Preset_Saratoga_Default",     CR_BP_R,  CR_SLOT_RANGED, false},
-    {"Shotgun  -  Carnage",  "Items.Preset_Carnage_Default",      CR_BP_RA, CR_SLOT_RANGED, false},
-    {"Sniper  -  Nekomata",  "Items.Preset_Nekomata_Default",     CR_BP_RN, CR_SLOT_RANGED, false},
-    {"Katana",               "Items.Preset_Katana_Default",       CR_BP_M,  CR_SLOT_MELEE,  true},
-    {"Knife",                "Items.Preset_Knife_Default",        CR_BP_M,  CR_SLOT_MELEE,  true},
-    {"Baseball Bat",         "Items.Preset_Baseball_Bat_Default", CR_BP_M,  CR_SLOT_MELEE,  true},
+    {"Lexington",    "Items.Preset_Lexington_Default",    CR_BP_R,  CR_SLOT_RANGED, false, "Pistols", "Power"},
+    {"Saratoga",     "Items.Preset_Saratoga_Default",     CR_BP_R,  CR_SLOT_RANGED, false, "SMGs", "Power"},
+    {"Carnage",      "Items.Preset_Carnage_Default",      CR_BP_RA, CR_SLOT_RANGED, false, "Shotguns", "Power"},
+    {"Nekomata",     "Items.Preset_Nekomata_Default",     CR_BP_RN, CR_SLOT_RANGED, false, "Sniper rifles", "Tech"},
+    {"Katana",       "Items.Preset_Katana_Default",       CR_BP_M,  CR_SLOT_MELEE,  true,  "Blades", "Blade"},
+    {"Knife",        "Items.Preset_Knife_Default",        CR_BP_M,  CR_SLOT_MELEE,  true,  "Blades", "Throwable"},
+    {"Baseball Bat", "Items.Preset_Baseball_Bat_Default", CR_BP_M,  CR_SLOT_MELEE,  true,  "Blunt weapons", "Blunt"},
+    {"Unity",        "Items.Preset_Unity_Default",        CR_BP_R,  CR_SLOT_RANGED, false, "Pistols", "Power"},
+    {"Liberty",      "Items.Preset_Liberty_Default",      CR_BP_R,  CR_SLOT_RANGED, false, "Pistols", "Power"},
+    {"Nue",          "Items.Preset_Nue_Default",          CR_BP_R,  CR_SLOT_RANGED, false, "Pistols", "Power"},
+    {"Omaha",        "Items.Preset_Omaha_Default",        CR_BP_RN, CR_SLOT_RANGED, false, "Pistols", "Tech"},
+    {"Kenshin",      "Items.Preset_Kenshin_Default",      CR_BP_RN, CR_SLOT_RANGED, false, "Pistols", "Tech"},
+    {"Overture",     "Items.Preset_Overture_Default",     CR_BP_RN, CR_SLOT_RANGED, false, "Revolvers", "Power"},
+    {"Nova",         "Items.Preset_Nova_Default",         CR_BP_RN, CR_SLOT_RANGED, false, "Revolvers", "Power"},
+    {"Burya",        "Items.Preset_Burya_Default",        CR_BP_RA, CR_SLOT_RANGED, false, "Revolvers", "Tech"},
+    {"Quasar",       "Items.Preset_Quasar_Default",       CR_BP_RN, CR_SLOT_RANGED, false, "Revolvers", "Tech"},
+    {"Ajax",         "Items.Preset_Ajax_Default",         CR_BP_R,  CR_SLOT_RANGED, false, "Assault rifles", "Power"},
+    {"Copperhead",   "Items.Preset_Copperhead_Default",   CR_BP_R,  CR_SLOT_RANGED, false, "Assault rifles", "Power"},
+    {"Masamune",     "Items.Preset_Masamune_Default",     CR_BP_R,  CR_SLOT_RANGED, false, "Assault rifles", "Power"},
+    {"Kyubi",        "Items.Preset_Kyubi_Default",        CR_BP_R,  CR_SLOT_RANGED, false, "Assault rifles", "Power"},
+    {"Pulsar",       "Items.Preset_Pulsar_Default",       CR_BP_R,  CR_SLOT_RANGED, false, "SMGs", "Power"},
+    {"Guillotine",   "Items.Preset_Guillotine_Default",   CR_BP_RS, CR_SLOT_RANGED, false, "SMGs", "Power"},
+    {"Shingen",      "Items.Preset_Shingen_Default",      CR_BP_RA, CR_SLOT_RANGED, false, "SMGs", "Smart"},
+    {"Dian",         "Items.Preset_Dian_Default",         CR_BP_RA, CR_SLOT_RANGED, false, "SMGs", "Smart"},
+    {"Tactician",    "Items.Preset_Tactician_Default",    CR_BP_RN, CR_SLOT_RANGED, false, "Shotguns", "Power"},
+    {"Crusher",      "Items.Preset_Crusher_Default",      CR_BP_RN, CR_SLOT_RANGED, false, "Shotguns", "Power"},
+    {"Pozhar",       "Items.Preset_Pozhar_Default",       CR_BP_RA, CR_SLOT_RANGED, false, "Shotguns", "Power"},
+    {"Satara",       "Items.Preset_Satara_Default",       CR_BP_RA, CR_SLOT_RANGED, false, "Shotguns", "Tech"},
+    {"Grad",         "Items.Preset_Grad_Default",         CR_BP_RN, CR_SLOT_RANGED, false, "Sniper rifles", "Power"},
+    {"Ashura",       "Items.Preset_Ashura_Default",       CR_BP_RA, CR_SLOT_RANGED, false, "Sniper rifles", "Smart"},
+    {"Achilles",     "Items.Preset_Achilles_Default",     CR_BP_RA, CR_SLOT_RANGED, false, "Precision rifles", "Tech"},
+    {"SOR-22",       "Items.Preset_Sor22_Default",        CR_BP_RN, CR_SLOT_RANGED, false, "Precision rifles", "Power"},
+    {"Machete",      "Items.Preset_Machete_Default",      CR_BP_M,  CR_SLOT_MELEE,  true,  "Blades", "Blade"},
+    {"Kukri",        "Items.Preset_Kukri_Default",        CR_BP_M,  CR_SLOT_MELEE,  true,  "Blades", "Blade"},
+    {"Tomahawk",     "Items.Preset_Tomahawk_Default",     CR_BP_M,  CR_SLOT_MELEE,  true,  "Blades", "Throwable"},
+    {"Hammer",       "Items.Preset_Hammer_Default",       CR_BP_M,  CR_SLOT_MELEE,  true,  "Blunt weapons", "Blunt"},
+    {"Punknife",     "Items.Preset_Punk_Knife_Default",   CR_BP_M,  CR_SLOT_MELEE,  true,  "Blades", "Throwable"},
 };
 static const int kCrNumBases = (int)(sizeof(kCrBases) / sizeof(kCrBases[0]));
+static const char* kCrCategories[] = {
+    "All weapons", "Pistols", "Revolvers", "Assault rifles", "SMGs", "Shotguns",
+    "Sniper rifles", "Precision rifles", "Blades", "Blunt weapons"
+};
+static const int kCrNumCategories = (int)(sizeof(kCrCategories) / sizeof(kCrCategories[0]));
+
+// Match every space-separated search word against the weapon name, category and mechanism.
+static bool crBaseMatches(int index, int category, const std::string& query) {
+    if (index < 0 || index >= kCrNumBases || category < 0 || category >= kCrNumCategories) return false;
+    const CrBase& base = kCrBases[index];
+    if (category && strcmp(base.category, kCrCategories[category])) return false;
+    const std::string haystack = lower(std::string(base.label) + " " + base.category + " " + base.mechanism);
+    const std::string words = lower(query);
+    for (size_t start = 0; start < words.size();) {
+        while (start < words.size() && isspace((unsigned char)words[start])) ++start;
+        size_t end = start;
+        while (end < words.size() && !isspace((unsigned char)words[end])) ++end;
+        if (end > start && haystack.find(words.substr(start, end - start)) == std::string::npos) return false;
+        start = end;
+    }
+    return true;
+}
+
+static int crVisibleSelection(int previous, int category, const std::string& query) {
+    if (crBaseMatches(previous, category, query)) return previous;
+    for (int i = 0; i < kCrNumBases; ++i) if (crBaseMatches(i, category, query)) return i;
+    return -1;
+}
 
 struct CrStat { const char* stat; const char* mod; const char* val; };
 struct CrEff  { const char* name; CrStat stats[2]; int nstats; bool meleeOnly; };
@@ -1227,6 +1291,8 @@ static const CrEff kCrEffects[] = {
 static const int kCrNumEffects = (int)(sizeof(kCrEffects) / sizeof(kCrEffects[0]));
 
 static int   g_crBase = 0;
+static int   g_crCategory = 0;
+static char  g_crSearch[96] = {};
 static char  g_crName[64]   = "Crit Machine";
 static char  g_crWhite[256] = "Built in a back-alley ripperdoc's. One of a kind.";
 static char  g_crGold[256]  = "Custom iconic ability.";
@@ -1297,6 +1363,7 @@ static bool crAppendNames(const std::string& path, long k1, const std::string& v
 // Generate + deploy. Returns the record id, or "" with err set.
 static std::string crGenWeapon(int baseIdx, const std::string& name, const std::string& white,
                                const std::string& gold, const bool* effSel, long* outKeys, std::string& err) {
+    if (baseIdx < 0 || baseIdx >= kCrNumBases) { err = "Select a base weapon first."; return ""; }
     std::string game = crGameRoot();
     if (game.empty()) { err = "could not locate game dir"; return ""; }
     std::string tweaks = game + "/r6/tweaks";
@@ -1357,13 +1424,18 @@ static void crSetStatus(const std::string& s) { std::lock_guard<std::mutex> lk(g
 
 // Wait on the worker thread for a response carrying this exact request ID. The render thread stays
 // responsive, and an old response or a delayed regular console command cannot report false success.
-static bool crRequest(const char* op, const std::string& record, const long* keys, std::string& message) {
+static bool crRequest(const char* op, const std::string& record, const long* keys, std::string& message,
+                      const CrBase* base = nullptr) {
     @autoreleasepool {
         NSString* requestID = [[NSUUID UUID] UUIDString];
         NSMutableDictionary* req = [@{@"id":requestID, @"pid":@(getpid()), @"op":[NSString stringWithUTF8String:op],
             @"deadline":@([[NSDate date] timeIntervalSince1970] * 1000.0 + 20000.0)} mutableCopy];
         if (!record.empty()) req[@"record"] = [NSString stringWithUTF8String:record.c_str()];
         if (keys) req[@"keys"] = @[@(keys[0]), @(keys[1]), @(keys[2])];
+        if (base) {
+            req[@"baseRecord"] = [NSString stringWithUTF8String:base->preset];
+            req[@"blueprint"] = [NSString stringWithUTF8String:base->bp];
+        }
         NSData* data = [NSJSONSerialization dataWithJSONObject:req options:0 error:nil];
         if (!data || ![data writeToFile:[NSString stringWithUTF8String:CREATOR_REQ_PATH] options:NSDataWritingAtomic error:nil]) {
             message = "Could not contact the console runtime."; return false;
@@ -1376,6 +1448,12 @@ static bool crRequest(const char* op, const std::string& record, const long* key
                 if ([obj isKindOfClass:[NSDictionary class]] && [obj[@"id"] isEqual:requestID]
                     && [obj[@"ok"] isKindOfClass:[NSNumber class]] && [obj[@"message"] isKindOfClass:[NSString class]]) {
                     message = [obj[@"message"] UTF8String];
+                    if (base && [obj[@"ok"] boolValue] &&
+                        (![obj[@"baseRecord"] isEqual:[NSString stringWithUTF8String:base->preset]] ||
+                         ![obj[@"blueprint"] isEqual:[NSString stringWithUTF8String:base->bp]])) {
+                        message = "The Creator runtime did not verify this weapon. Reinstall NightCity Console and restart the game.";
+                        return false;
+                    }
                     return [obj[@"ok"] boolValue];
                 }
             }
@@ -1387,9 +1465,14 @@ static bool crRequest(const char* op, const std::string& record, const long* key
 }
 
 static void crCreateThread(int baseIdx, std::string name, std::string white, std::string gold, std::vector<char> sel) {
-    crSetStatus("Checking the game and TweakXL…");
+    if (baseIdx < 0 || baseIdx >= kCrNumBases) {
+        crSetStatus("FAILED: Select a base weapon first."); g_crBusy = false; return;
+    }
+    crSetStatus("Checking the selected weapon and required records…");
     std::string result;
-    if (!crRequest("check", "", nullptr, result)) { crSetStatus("FAILED: " + result); g_crBusy = false; return; }
+    if (!crRequest("check", "", nullptr, result, &kCrBases[baseIdx])) {
+        crSetStatus("FAILED: " + result); g_crBusy = false; return;
+    }
     crSetStatus("Generating \"" + name + "\" ...");
     bool eff[64] = { false }; for (size_t i = 0; i < sel.size() && i < 64; ++i) eff[i] = sel[i] != 0;
     std::string err;
@@ -1409,13 +1492,35 @@ static void drawCreatorTab() {
     ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.0f, 1.0f), "CYBERMODMAN  -  Custom Iconic Weapon Creator");
     ImGui::TextDisabled("Pick a base, name it, choose effects, hit Create. (Load a save first so it can be given.)");
     ImGui::Separator();
-    ImGui::SetNextItemWidth(300);
-    if (ImGui::BeginCombo("Base", kCrBases[g_crBase].label)) {
-        for (int i = 0; i < kCrNumBases; ++i) { bool sel = (i == g_crBase);
-            if (ImGui::Selectable(kCrBases[i].label, sel)) g_crBase = i;
-            if (sel) ImGui::SetItemDefaultFocus(); }
+    static bool firstDraw = true;
+    static std::vector<int> matches;
+    bool filtersChanged = firstDraw;
+    ImGui::SetNextItemWidth(185);
+    filtersChanged |= ImGui::Combo("Category", &g_crCategory, kCrCategories, kCrNumCategories);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(260);
+    filtersChanged |= ImGui::InputTextWithHint("##CreatorSearch", "Search name, type or category...", g_crSearch, sizeof(g_crSearch));
+    ImGui::SameLine();
+    if (ImGui::Button("Clear##CreatorSearch")) { g_crSearch[0] = '\0'; filtersChanged = true; }
+    if (filtersChanged) {
+        matches.clear();
+        for (int i = 0; i < kCrNumBases; ++i) if (crBaseMatches(i, g_crCategory, g_crSearch)) matches.push_back(i);
+        g_crBase = crVisibleSelection(g_crBase, g_crCategory, g_crSearch);
+        firstDraw = false;
+    }
+    const std::string preview = g_crBase < 0 ? "No matching weapons" :
+        std::string(kCrBases[g_crBase].label) + "  (" + kCrBases[g_crBase].mechanism + ")";
+    ImGui::SetNextItemWidth(520);
+    if (ImGui::BeginCombo("Base", preview.c_str(), ImGuiComboFlags_HeightLarge)) {
+        for (int i : matches) {
+            const bool selected = (i == g_crBase);
+            const std::string label = std::string(kCrBases[i].label) + "  (" + kCrBases[i].mechanism + ")";
+            if (ImGui::Selectable(label.c_str(), selected)) g_crBase = i;
+            if (selected) ImGui::SetItemDefaultFocus();
+        }
         ImGui::EndCombo();
     }
+    ImGui::TextDisabled("%d of %d weapons | No Phantom Liberty required", (int)matches.size(), kCrNumBases);
     ImGui::SetNextItemWidth(300); ImGui::InputText("Name", g_crName, sizeof(g_crName));
     ImGui::SetNextItemWidth(520); ImGui::InputText("White flavor", g_crWhite, sizeof(g_crWhite));
     ImGui::SetNextItemWidth(520); ImGui::InputText("Gold ability text", g_crGold, sizeof(g_crGold));
@@ -1427,13 +1532,14 @@ static void drawCreatorTab() {
     }
     ImGui::Separator();
     bool busy = g_crBusy.load();
-    if (busy) ImGui::BeginDisabled();
+    if (busy || g_crBase < 0) ImGui::BeginDisabled();
     if (ImGui::Button("Create & Apply", ImVec2(190, 34)) && !g_crBusy.exchange(true)) {
         std::vector<char> sel(kCrNumEffects); for (int i = 0; i < kCrNumEffects; ++i) sel[i] = g_crEff[i] ? 1 : 0;
         std::thread(crCreateThread, g_crBase, std::string(g_crName),
                     std::string(g_crWhite), std::string(g_crGold), sel).detach();
     }
-    if (busy) { ImGui::EndDisabled(); ImGui::SameLine(); ImGui::TextDisabled("working..."); }
+    if (busy || g_crBase < 0) ImGui::EndDisabled();
+    if (busy) { ImGui::SameLine(); ImGui::TextDisabled("working..."); }
     { std::lock_guard<std::mutex> lk(g_crMtx);
       if (!g_crStatus.empty()) { ImGui::Separator(); ImGui::TextWrapped("%s", g_crStatus.c_str()); } }
 }

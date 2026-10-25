@@ -927,10 +927,12 @@ function createLocalizationGate(names,fill) {
             return (e.isStatic?'staticFuncs':'funcs')+' flags=0x'+e.fn.add(0xa8).readU32().toString(16)+
                 ' '+sigStr(e.fn)+' ret='+(e.retType.isNull()?'void':nameOf(e.retType));
         }
-        function creatorRecordMethod() {
+        function creatorRecordMethod(methods) {
             const classes=['gamedataTweakDBInterface','TweakDBInterface'];
-            const e=resolveAny(classes,'GetWeaponItemRecord') || resolveAny(classes,'GetItemRecord');
-            if (!e) throw new Error('Creator cannot find TweakDBInterface.GetWeaponItemRecord or GetItemRecord in RTTI.');
+            methods=methods || ['GetWeaponItemRecord','GetItemRecord'];
+            let e=null;
+            for (const method of methods) { e=resolveAny(classes,method); if (e) break; }
+            if (!e) throw new Error('Creator cannot find TweakDBInterface.'+methods.join(' or ')+' in RTTI.');
             // Native 2.5 registers these context-free accessors in CClass.funcs, not staticFuncs.
             // Array placement is not a valid availability check; validate the actual call signature.
             const params=e.fn.add(0x28).readPointer(), count=e.fn.add(0x30).readU32();
@@ -976,7 +978,7 @@ function createLocalizationGate(names,fill) {
             const quantity=resolveFunc('gameTransactionSystem','GetItemQuantity'), give=resolveFunc('gameTransactionSystem','GiveItem');
             if (!quantity) throw new Error('Creator cannot find gameTransactionSystem.GetItemQuantity in RTTI.');
             if (!give) throw new Error('Creator cannot find gameTransactionSystem.GiveItem in RTTI.');
-            const queryIDs=new Map(), giveIDs=new Map(), lastCounts=new Map();
+            const queryIDs=new Map(), giveIDs=new Map(), lastCounts=new Map(), typedRecords=new Map();
             function queryID(name) {
                 // CreateQuery uses rngSeed=1: match this TDBID regardless of the instance's random seed.
                 if (!queryIDs.has(name)) queryIDs.set(name,callFunc(query.fn,owner,query.retType,[name]));
@@ -992,6 +994,12 @@ function createLocalizationGate(names,fill) {
             return {
                 reload: reload,
                 hasRecord: function(name){ return creatorHasRecord(record,name,owner); },
+                hasTypedRecord: function(method,name){
+                    // Blueprints, attachment slots and ability packages are not WeaponItem records.
+                    // Resolve each native typed accessor lazily, preserving the 2.5 funcs-table ABI.
+                    if (!typedRecords.has(method)) typedRecords.set(method,creatorRecordMethod([method]));
+                    return creatorHasRecord(typedRecords.get(method),name,owner);
+                },
                 quantity: function(name){
                     const id=queryID(name), count=callFuncRaw(quantity.fn,tx,quantity.retType,
                         [{kind:'handle',inst:owner},{kind:'item16',ptr:id}]).readS32();
@@ -1018,6 +1026,31 @@ function createLocalizationGate(names,fill) {
         // operation. All engine calls run from the executor queue; timers only enqueue verification.
         let creatorActive=null;
         const creatorCompleted=new Map();
+        function creatorPreflight(ctx,req) {
+            if (typeof req.baseRecord!=='string' || !/^Items\.Preset_[A-Za-z0-9_]{1,128}$/.test(req.baseRecord))
+                throw new Error('Invalid or missing Creator base weapon. Select a base and try again.');
+            const slots={
+                'Items.Iconic_Ranged_Weapon_Blueprint':'AttachmentSlots.IconicWeaponModLegendary',
+                'Items.Iconic_Ranged_Weapon_NoMuzzle_Blueprint':'AttachmentSlots.IconicWeaponModLegendary',
+                'Items.Iconic_Ranged_Weapon_NoScope_Blueprint':'AttachmentSlots.IconicWeaponModLegendary',
+                'Items.Iconic_Ranged_Weapon_NoAttachments_Blueprint':'AttachmentSlots.IconicWeaponModLegendary',
+                'Items.Iconic_Melee_Blueprint':'AttachmentSlots.IconicMeleeWeaponMod1'
+            };
+            if (typeof req.blueprint!=='string' || !Object.prototype.hasOwnProperty.call(slots,req.blueprint))
+                throw new Error('Invalid or missing Creator blueprint. Select a base and try again.');
+            if (!ctx.hasRecord(req.baseRecord))
+                throw new Error('The selected base weapon is unavailable in this game: '+req.baseRecord+'. Choose another base.');
+            const required=[
+                ['GetItemBlueprintRecord',req.blueprint,'weapon blueprint'],
+                ['GetAttachmentSlotRecord',slots[req.blueprint],'iconic attachment slot'],
+                ['GetGameplayLogicPackageRecord','Items.IconicWeaponModAbilityBase','iconic ability template'],
+                ['GetItemRecord','Items.IconicWeaponModBase','iconic mod template']
+            ];
+            for (const record of required) {
+                if (!ctx.hasTypedRecord(record[0],record[1]))
+                    throw new Error('Creator '+record[2]+' is unavailable in this game: '+record[1]+'.');
+            }
+        }
         function creatorInventoryEvidence(req,state) {
             return state ? Object.assign({record:req.record,before:state.before,after:state.after},
                 state.ctx.inventoryEvidence(req.record)) : {};
@@ -1051,7 +1084,11 @@ function createLocalizationGate(names,fill) {
                     return;
                 }
                 const ctx=creatorContext();
-                if (req.op==='check') { creatorRespond(req,true,'Creator is ready.'); return; }
+                if (req.op==='check') {
+                    creatorPreflight(ctx,req);
+                    creatorRespond(req,true,'Creator is ready.',{baseRecord:req.baseRecord,blueprint:req.blueprint});
+                    return;
+                }
                 if (!/^Items\.CyberModMan[A-Za-z0-9_]+$/.test(req.record||'')) throw new Error('Invalid custom weapon record.');
                 if (!Array.isArray(req.keys) || req.keys.length!==3 || req.keys.some(function(k){ return !Number.isSafeInteger(k)||k<1||k>0xffffffff; }))
                     throw new Error('Invalid custom weapon localization keys.');

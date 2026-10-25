@@ -7,6 +7,11 @@ Iconic Weapon Creator introduced in the previous 2.5 release.
 
 ## What's new
 
+- **Expanded Iconic Weapon Creator:** choose from 37 base-game weapons across
+  nine categories, with search by name or weapon type. No Phantom Liberty is
+  required for these choices. The selected weapon, blueprint and shared Iconic
+  records are checked before any weapon files are written. Existing creations
+  are preserved.
 - **Optional mod installs:** Equipment-EX 1.2.9 and Cyberware-EX 1.5.6 are included
   in the app. Choose either or both in **Optional Mods…**; neither installs
   automatically. Existing manual installations are kept.

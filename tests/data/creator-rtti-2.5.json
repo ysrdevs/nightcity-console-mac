@@ -9,7 +9,10 @@
     "gamedataTweakDBInterface": {
       "parent": "IScriptable",
       "funcs": [
+        "GetAttachmentSlotRecord",
         "GetWeaponItemRecord",
+        "GetItemBlueprintRecord",
+        "GetGameplayLogicPackageRecord",
         "GetItemRecord"
       ],
       "staticFuncs": []

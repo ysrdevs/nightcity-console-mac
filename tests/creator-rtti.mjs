@@ -66,7 +66,7 @@ function harness(options = {}) {
         f.add(0x10).writeU64(fnv(method)); f.add(0x18).writePointer(ret);
         ret.writePointer(name === 'gameItemID' ? itemType : handleType);
         f.add(0x28).writePointer(params); params.writePointer(param); param.writePointer(tdbType);
-        f.add(0x30).writeU32(options.badSignature ? 2 : 1);
+        f.add(0x30).writeU32(options.badSignature || options.badSignatureMethod === method ? 2 : 1);
       });
     }
   }
@@ -90,11 +90,19 @@ function harness(options = {}) {
       if (methods.get(fn.address) === 'CreateQuery') {
         constructed.query++; return setItem(alloc(), args[0], 1);
       }
-      assert.match(methods.get(fn.address), /^Get(?:WeaponItem|Item)Record$/);
+      const lookup = methods.get(fn.address);
+      assert.match(lookup, /^Get(?:WeaponItem|Item|ItemBlueprint|AttachmentSlot|GameplayLogicPackage)Record$/);
       // The native wrapper ignores x0, but its nonstatic executor route requires a live context.
       assert(receiver === owner || receiver === outerContext);
       events.push(['lookup', args[0]]);
-      const result = alloc(); if (args[0] === 'Items.Preset_Lexington_Default') result.writePointer(alloc());
+      const records = {
+        'Items.Preset_Lexington_Default': ['GetWeaponItemRecord', 'GetItemRecord'],
+        'Items.Iconic_Ranged_Weapon_Blueprint': ['GetItemBlueprintRecord'],
+        'AttachmentSlots.IconicWeaponModLegendary': ['GetAttachmentSlotRecord'],
+        'Items.IconicWeaponModAbilityBase': ['GetGameplayLogicPackageRecord'],
+        'Items.IconicWeaponModBase': ['GetItemRecord'],
+      };
+      const result = alloc(); if (records[args[0]]?.includes(lookup)) result.writePointer(alloc());
       return result;
     },
     callFuncRaw: (fn, receiver, ret, args) => {
@@ -130,10 +138,31 @@ function harness(options = {}) {
   assert.deepEqual(h.constructed, { fromTDBID: 1, query: 1 });
   assert.equal(h.inventory[0].seed, 3);
   assert.equal(JSON.parse(creator.inventoryEvidence('Items.Preset_Lexington_Default').queryItemID).seed, 1);
+  // Blueprint/slot/ability records require their typed accessor; the weapon accessor
+  // must not be used as a generic existence test just because it returns a handle.
+  assert.equal(creator.hasRecord('Items.Iconic_Ranged_Weapon_Blueprint'), false);
+  for (const [method, name] of [
+    ['GetItemBlueprintRecord', 'Items.Iconic_Ranged_Weapon_Blueprint'],
+    ['GetAttachmentSlotRecord', 'AttachmentSlots.IconicWeaponModLegendary'],
+    ['GetGameplayLogicPackageRecord', 'Items.IconicWeaponModAbilityBase'],
+    ['GetItemRecord', 'Items.IconicWeaponModBase'],
+  ]) {
+    assert.equal(h.resolveFunc('gamedataTweakDBInterface', method).isStatic, false);
+    assert.equal(creator.hasTypedRecord(method, name), true);
+    assert.equal(creator.hasTypedRecord(method, 'Items.Absent'), false);
+  }
 }
 {
   const h = harness({ missing: 'GetWeaponItemRecord' });
   assert.equal(h.creatorContext().hasRecord('Items.Preset_Lexington_Default'), true);
+}
+for (const method of ['GetItemBlueprintRecord', 'GetAttachmentSlotRecord', 'GetGameplayLogicPackageRecord', 'GetItemRecord']) {
+  const missing = harness({ missing: method });
+  assert.throws(() => missing.creatorContext().hasTypedRecord(method, 'Items.Unused'), /Creator cannot find/);
+  assert.deepEqual(missing.events, []);
+  const malformed = harness({ badSignatureMethod: method });
+  assert.throws(() => malformed.creatorContext().hasTypedRecord(method, 'Items.Unused'), /unsupported signature/);
+  assert.deepEqual(malformed.events, []);
 }
 for (const [conditions, expected] of [
   [{ missing: 'GetItemQuantity' }, /gameTransactionSystem\.GetItemQuantity/],

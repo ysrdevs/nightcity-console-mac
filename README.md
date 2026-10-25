@@ -46,7 +46,7 @@ Equipment-EX and Cyberware-EX are included as optional installs, unchecked by de
 - Teleport with saved position bookmarks (save a spot, return to it later).
 - A generic `call <Class> <Method>` bridge that can invoke any observed RTTI method, plus quest-fact editing.
 - Action confirmations: every command reports exactly what it did at the bottom of the overlay.
-- Iconic Weapon Creator with custom names, descriptions and effects that persist after saving and reloading.
+- Iconic Weapon Creator with 37 base-game weapons, nine categories and search by name or weapon type. Custom names, descriptions and effects persist after saving and reloading. Creation checks the selected base and required Iconic records before writing files; Phantom Liberty is not required for these weapon choices.
 - Native Mods tab that lists, enables, and disables loose `.archive` mods by renaming `.archive` to `.archive.off`.
 - Add Mod installs supported ZIPs or folders, including multiple selections, and prepares script mods for the selected game version.
 - Optional Mods offers Equipment-EX and Cyberware-EX, plus an official Virtual Atelier download link and import button. The built-in Mod Guide explains installation and file locations.
