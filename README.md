@@ -30,7 +30,9 @@ A native Apple Silicon in-game console, cheat menu, and item browser for Cyberpu
 
 ## Status
 
-**1.7.0 adds Virtual Atelier, Cyberware-EX and Equipment-EX support on Cyberpunk 2077 2.5.0, native macOS Steam.** Store browsing and purchases, dual operating systems, wardrobe outfits, and save/relaunch persistence have passed local player testing together. The Iconic Weapon Creator, console commands and existing 2.3.1 compatibility remain part of the app.
+**1.7.1 fixes a reported save-loading hang on Cyberpunk 2077 2.5.0, native macOS Steam, and expands Export Diagnostics with an on-demand game thread sample.** The affected player confirmed that the loading fix works. See the [1.7.1 release notes](docs/RELEASE-1.7.1-PUBLIC.md) for details and update instructions.
+
+The performance improvements, 37-weapon Iconic Weapon Creator, Virtual Atelier, Cyberware-EX and Equipment-EX support introduced in 1.7.0 are retained. Store browsing and purchases, dual operating systems, wardrobe outfits, and save/relaunch persistence have passed local player testing together. Console commands and existing 2.3.1 compatibility remain part of the app.
 
 The 2.5 payload includes native macOS RED4ext, TweakXL, ArchiveXL and the Codeware features needed by these tested mods. Codeware support is scoped: this does not make every Codeware-dependent or Windows CET mod compatible. The launcher only stages native declarations for plugins whose game addresses pass its compatibility check.
 
@@ -50,7 +52,7 @@ Equipment-EX and Cyberware-EX are included as optional installs, unchecked by de
 - Native Mods tab that lists, enables, and disables loose `.archive` mods by renaming `.archive` to `.archive.off`.
 - Add Mod installs supported ZIPs or folders, including multiple selections, and prepares script mods for the selected game version.
 - Optional Mods offers Equipment-EX and Cyberware-EX, plus an official Virtual Atelier download link and import button. The built-in Mod Guide explains installation and file locations.
-- Export Diagnostics saves a local support ZIP with bounded logs, version information, installed mod inventory and performance telemetry.
+- Export Diagnostics saves a local support ZIP with an on-demand game thread sample, bounded logs, runtime and script integrity checks, version information, installed mod inventory and optional performance telemetry.
 
 See [docs/COMMANDS.md](docs/COMMANDS.md) for the full command list and known limits.
 
@@ -74,9 +76,9 @@ Prefer a walkthrough? Watch the install and usage video:
 
 No Terminal, no file editing. The app finds your game, installs the runtime files (re-signing the game binary so the console can load), and launches it. Steam Cloud saves keep working.
 
-Updating from an older version: after replacing the app, click Install once (it reads "Reinstall NightCity Console"), then Play. No need to uninstall first.
+Updating from an older version: quit the game and the older launcher, replace the app, then click Install once (it reads "Reinstall NightCity Console") and Play. This installs the updated runtime, including the 1.7.1 loading fix. No need to uninstall first.
 
-The 1.7.0 app and DMG are Developer ID signed and notarized by Apple, with stapled
+The 1.7.1 app and DMG are Developer ID signed and notarized by Apple, with stapled
 tickets. The ZIP also contains the stapled app.
 
 ### Virtual Atelier, Cyberware-EX and Equipment-EX on 2.5
@@ -88,6 +90,8 @@ The tested combination is:
 | [Virtual Atelier](https://www.nexusmods.com/cyberpunk2077/mods/2987) | 1.6.0 package | Store cards, names/icons, search, cart purchases and purchased-item persistence; tested with PUBLICNET 1.2.1 |
 | [Cyberware-EX](https://github.com/psiberx/cp2077-cyberware-ex) | 1.5.6, default configuration | Second operating-system slot, abilities including Sandevistan, normal weapons/arms and save/relaunch persistence |
 | [Equipment-EX](https://github.com/psiberx/cp2077-equipment-ex) | 1.2.9 | Added clothing slots, wardrobe search, named outfits, appearance changes, outfit switching and save/relaunch persistence |
+
+A Middle Torso over Inner Torso clothing combination showed clipping in local testing; Outer Torso over Inner Torso worked for the tested combination. A matched comparison with 1.7.0 is not available, so this has not been established as a new regression.
 
 1. Update NightCity Console and click **Install** / **Reinstall NightCity Console**.
 2. Open **Optional Mods…**, select **Equipment-EX 1.2.9** and/or **Cyberware-EX 1.5.6**, then click **Install Selected**. Both start unchecked. Existing installations are detected and kept; the Cyberware pack uses the tested default configuration without extra presets or add-ons.

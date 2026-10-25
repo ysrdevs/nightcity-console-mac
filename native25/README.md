@@ -1,7 +1,7 @@
 # Native dependencies for Cyberpunk 2077 2.5
 
 This directory records the accepted prebuilt native dependencies used by
-NightCity Console 1.7.0. The Console launcher, overlay and command runtime are
+NightCity Console 1.7.1. The Console launcher, overlay and command runtime are
 built from this repository. The current macOS native framework adaptations are
 maintained separately; their implementation sources and build recipe are not
 included in this release tree. Publication in separate repositories is planned.
@@ -16,6 +16,12 @@ functionality retains the existing limitation. Equipment-EX and Cyberware-EX are
 available as separate optional packages; installing the native frameworks does
 not enable them automatically. Virtual Atelier and store packs are downloaded
 separately.
+
+The 1.7.1 ArchiveXL input includes the player-confirmed save-loading fix. It
+preserves the game's native sleeve suffix instead of querying attachment slots
+again during suffix resolution, avoiding the reported loading lock. The other
+native inputs, including their plugin scripts and resources, retain the accepted
+1.7.0 profile. This does not establish compatibility for every clothing combination.
 
 `accepted-payload.json` records the 52 runtime files from the accepted combined
 checkpoint. Release staging checks those input bytes before copying anything.
