@@ -15,18 +15,26 @@ cd "$(dirname "$0")/.."
 APP="build/NightCity Console.app"
 BUILD_APP=1
 SIGN_ONLY=0
+SKIP_SIGNING=0
+OUTPUT_DIR="dist"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --existing-app)
       [ "$#" -ge 2 ] || { echo "--existing-app requires a path" >&2; exit 1; }
       APP="$2"; BUILD_APP=0; shift 2 ;;
     --sign-only) SIGN_ONLY=1; shift ;;
-    *) echo "Usage: $0 [--existing-app path] [--sign-only]" >&2; exit 1 ;;
+    --skip-signing) SKIP_SIGNING=1; shift ;;
+    --output-dir)
+      [ "$#" -ge 2 ] || { echo "--output-dir requires a path" >&2; exit 1; }
+      OUTPUT_DIR="$2"; shift 2 ;;
+    *) echo "Usage: $0 [--existing-app path] [--sign-only | --skip-signing] [--output-dir path]" >&2; exit 1 ;;
   esac
 done
-DMG="dist/NightCity-Console-for-Mac.dmg"
-ZIP="dist/NightCity-Console-for-Mac.zip"          # distributable zip (made from the stapled app)
-SUBZIP="dist/_notarize.zip"     # temporary zip used only for the notarization upload
+[ "$SKIP_SIGNING" = 0 ] || { [ "$BUILD_APP" = 0 ] && [ "$SIGN_ONLY" = 0 ]; } \
+  || { echo "--skip-signing requires --existing-app and cannot use --sign-only" >&2; exit 1; }
+DMG="$OUTPUT_DIR/NightCity-Console-for-Mac.dmg"
+ZIP="$OUTPUT_DIR/NightCity-Console-for-Mac.zip"  # distributable zip (made from the stapled app)
+SUBZIP="$OUTPUT_DIR/_notarize.zip"              # submission copy of the tested app
 
 : "${SIGN_IDENTITY:?set SIGN_IDENTITY to 'Developer ID Application: NAME (TEAMID)'}"
 if [ "$SIGN_ONLY" = 0 ]; then
@@ -37,9 +45,19 @@ if [ "$BUILD_APP" = 1 ]; then
   echo "==> building release from explicit inputs, then signing with Developer ID"
   NIGHTCITY_BUILD_MODE=release ./launcher/build-app.sh
 else
-  echo "==> signing the existing app without rebuilding or fetching dependencies"
+  echo "==> using the existing app without rebuilding or fetching dependencies"
 fi
 python3 tools/verify-release-bundle.py "$APP"
+
+if [ "$SKIP_SIGNING" = 1 ]; then
+  codesign --verify --deep --strict "$APP"
+  SIGNED_INFO="$(codesign -d --verbose=4 "$APP" 2>&1)"
+  printf '%s\n' "$SIGNED_INFO" | grep -Fq "Authority=$SIGN_IDENTITY" \
+    || { echo "The existing app does not match SIGN_IDENTITY" >&2; exit 1; }
+  printf '%s\n' "$SIGNED_INFO" | grep -q 'flags=.*runtime' \
+    || { echo "The existing app lacks hardened runtime" >&2; exit 1; }
+  echo "==> preserving the tested Developer ID signatures"
+else
 
 # The bundled nctool is a self-contained .NET helper that JITs. Under hardened runtime CoreCLR SIGKILLs the
 # instant it writes executable memory unless these entitlements are present (validated locally: JIT + a full
@@ -69,17 +87,41 @@ done
 codesign --force --options runtime --timestamp --entitlements "$NCTOOL_ENTS" --sign "$SIGN_IDENTITY" "$NCTOOL_EXE"
 codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
+fi
 if [ "$SIGN_ONLY" = 1 ]; then
   echo "Signed locally: $APP (no notarization upload or packaging requested)."
   exit 0
 fi
 
 echo "==> notarizing the app"
-mkdir -p dist
+mkdir -p "$OUTPUT_DIR"
+
+notarize() {
+  local artifact="$1" kind="$2" receipt="$OUTPUT_DIR/$2-notarization.json" submission_id
+  xcrun notarytool submit "$artifact" --keychain-profile "$NOTARY_PROFILE" --wait --output-format json > "$receipt"
+  submission_id="$(python3 - "$receipt" <<'PY'
+import json, sys, uuid
+record = json.load(open(sys.argv[1]))
+print(uuid.UUID(record['id']))
+PY
+)"
+  xcrun notarytool log "$submission_id" --keychain-profile "$NOTARY_PROFILE" "$OUTPUT_DIR/$kind-notarization-log.json"
+  python3 - "$receipt" <<'PY'
+import json, sys
+record = json.load(open(sys.argv[1]))
+if record.get('status') != 'Accepted':
+    raise SystemExit('Apple notarization was not accepted: ' + str(record.get('status')))
+print('Apple accepted submission ' + record['id'])
+PY
+}
+
 rm -f "$SUBZIP"
 /usr/bin/ditto -c -k --keepParent "$APP" "$SUBZIP"
-xcrun notarytool submit "$SUBZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+notarize "$SUBZIP" app
 xcrun stapler staple "$APP"          # staple the ticket onto the app on disk
+xcrun stapler validate "$APP"
+codesign --verify --deep --strict "$APP"
+spctl --assess --type execute --verbose=2 "$APP"
 rm -f "$SUBZIP"
 
 echo "==> packaging the stapled app (.zip + .dmg)"
@@ -99,8 +141,14 @@ ln -s /Applications "$STAGE/Applications"            # the drag-here shortcut
 # shortcut conveys "drag the app here" (the fancy icon layout is dropped for a build that always succeeds).
 hdiutil create -volname "$VOL" -srcfolder "$STAGE" -format UDZO -ov "$DMG" >/dev/null
 rm -rf "$STAGE"
-xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG"
+notarize "$DMG" dmg
 xcrun stapler staple "$DMG"
+xcrun stapler validate "$DMG"
+codesign --verify --strict "$DMG"
+spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
+hdiutil verify "$DMG" >/dev/null
+(cd "$OUTPUT_DIR" && shasum -a 256 NightCity-Console-for-Mac.dmg NightCity-Console-for-Mac.zip) > "$OUTPUT_DIR/SHA256SUMS"
 
 echo "done (signed, notarized, stapled - no Gatekeeper warnings):"
 echo "  $DMG"

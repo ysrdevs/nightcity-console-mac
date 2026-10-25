@@ -624,6 +624,147 @@ rpc.exports = {
     }
 };
 
+// BEGIN NATIVE EXECUTOR GATE
+// The executor is called from many engine workers. Even an immediately-returning JavaScript
+// Interceptor callback takes Frida's shared JS lock. Filter idle calls in native code instead.
+// This cache stores argument identities only: all game-memory reads stay in guarded JavaScript.
+// The existing 500ms poll invalidates identities to rediscover recycled objects; pending commands
+// and observers bypass the filter immediately. Nesting remains native and per thread throughout.
+function nativeAtomicHelpers() {
+    function address(name){ const p=Module.findGlobalExportByName('nightcity_atomic_'+name); if(!p)throw new Error('Native atomic helpers unavailable.'); return p; }
+    const load32=address('load32'),store32=address('store32'),loadPointer=address('load_pointer'),storePointer=address('store_pointer');
+    return {load32:load32,loadPointer:loadPointer,
+        read32:new NativeFunction(load32,'uint',['pointer'],{scheduling:'exclusive'}),
+        write32:new NativeFunction(store32,'void',['pointer','uint'],{scheduling:'exclusive'}),
+        writePointer:new NativeFunction(storePointer,'void',['pointer','pointer'],{scheduling:'exclusive'})};
+}
+function createExecutorGate(enter, leave) {
+    const atomic=nativeAtomicHelpers();
+    const state=Memory.alloc(32);
+    state.writeByteArray(new Uint8Array(32));
+    const enterCallback=new NativeCallback(enter,'uint',['pointer','pointer','pointer']);
+    const leaveCallback=new NativeCallback(leave,'void',['pointer','uint']);
+    const module=new CModule(`
+        #include <gum/guminterceptor.h>
+        typedef struct {
+            guint pending, observers, busy, from_tdbid;
+            gpointer player;
+            guint epoch;
+        } GateState;
+        typedef struct {
+            guint depth, epoch;
+            guintptr contexts[88];
+            gpointer functions[32];
+        } ThreadState;
+        typedef struct { gpointer context; } CallState;
+        extern GateState gate_state;
+        extern guint atomic_load32(const guint *address);
+        extern gpointer atomic_load_pointer(gpointer const *address);
+        extern guint enter_js(gpointer fn, gpointer context, gpointer frame);
+        extern void leave_js(gpointer context, guint depth);
+        void on_enter(GumInvocationContext *ic) {
+            ThreadState *thread=gum_invocation_context_get_listener_thread_data(ic,sizeof(ThreadState));
+            CallState *call=gum_invocation_context_get_listener_invocation_data(ic,sizeof(CallState));
+            thread->depth++;
+            guint epoch=atomic_load32(&gate_state.epoch);
+            if(thread->epoch!=epoch) {
+                for(guint i=0;i<88;i++)thread->contexts[i]=0;
+                for(guint i=0;i<32;i++)thread->functions[i]=NULL;
+                thread->epoch=epoch;
+            }
+            call->context=NULL;
+            if (atomic_load32(&gate_state.busy)) return;
+            gpointer fn=gum_invocation_context_get_nth_argument(ic,0);
+            gpointer context=gum_invocation_context_get_nth_argument(ic,1);
+            if (!fn || !context) return;
+            guintptr key=(guintptr)context;
+            guint ci=((key >> 4) ^ (key >> 13)) % 88;
+            guint fi=(((guintptr)fn >> 4) ^ ((guintptr)fn >> 13)) % 32;
+            guintptr cached=thread->contexts[ci];
+            guint kind=((cached & ~(guintptr)3)==key) ? (cached & 3) : 0;
+            gboolean needs_function=!atomic_load32(&gate_state.from_tdbid) && thread->functions[fi]!=fn;
+            if (!kind || needs_function || atomic_load32(&gate_state.pending) ||
+                    atomic_load32(&gate_state.observers) ||
+                    (kind==2 && atomic_load_pointer(&gate_state.player)!=context)) {
+                kind=enter_js(fn,context,gum_invocation_context_get_nth_argument(ic,2));
+                if (kind && (key & 3)==0) {
+                    thread->contexts[ci]=key | kind;
+                    thread->functions[fi]=fn;
+                }
+            }
+            if (kind) call->context=context;
+        }
+        void on_leave(GumInvocationContext *ic) {
+            ThreadState *thread=gum_invocation_context_get_listener_thread_data(ic,sizeof(ThreadState));
+            CallState *call=gum_invocation_context_get_listener_invocation_data(ic,sizeof(CallState));
+            if (thread->depth) thread->depth--;
+            if (!atomic_load32(&gate_state.busy) && atomic_load32(&gate_state.pending))
+                leave_js(call->context,thread->depth);
+        }
+    `,{gate_state:state,enter_js:enterCallback,leave_js:leaveCallback,atomic_load32:atomic.load32,atomic_load_pointer:atomic.loadPointer},{toolchain:'internal'});
+    return {
+        // Keep code, memory and callbacks alive as long as the attached listener.
+        module:module,state:state,atomic:atomic,enterCallback:enterCallback,leaveCallback:leaveCallback,
+        callbacks:{onEnter:module.on_enter,onLeave:module.on_leave},
+        pending(value){atomic.write32(state,value?1:0);},
+        observers(value){atomic.write32(state.add(4),value?1:0);},
+        busy(value){atomic.write32(state.add(8),value?1:0);},
+        fromTdbid(){atomic.write32(state.add(12),1);},
+        player(value){atomic.writePointer(state.add(16),value);},
+        refresh(){atomic.write32(state.add(24),(atomic.read32(state.add(24))+1)>>>0);},
+    };
+}
+// END NATIVE EXECUTOR GATE
+
+// BEGIN NATIVE LOCALIZATION GATE
+// Almost every localization lookup belongs to the base game. Match numeric custom keys
+// before entering JS; immutable tables keep a concurrent lookup safe during Creator reload.
+function createLocalizationGate(names,fill) {
+    const atomic=nativeAtomicHelpers();
+    const state=Memory.alloc(Process.pointerSize); state.writePointer(ptr(0));
+    const tables=[];
+    const fillCallback=new NativeCallback(fill,'void',['pointer','uint','pointer']);
+    const module=new CModule(`
+        #include <gum/guminterceptor.h>
+        typedef struct { guint count; guint keys[1]; } KeyTable;
+        typedef struct { gpointer out,found; guint key; gboolean matched; } CallState;
+        extern gpointer key_table;
+        extern gpointer atomic_load_pointer(gpointer const *address);
+        extern void fill_js(gpointer out,guint key,gpointer found);
+        void on_enter(GumInvocationContext *ic) {
+            CallState *call=gum_invocation_context_get_listener_invocation_data(ic,sizeof(CallState));
+            call->matched=FALSE;
+            KeyTable *table=atomic_load_pointer(&key_table);
+            if (!table) return;
+            guint key=(guint)(guintptr)gum_invocation_context_get_nth_argument(ic,1);
+            guint lo=0,hi=table->count;
+            while (lo<hi) { guint mid=lo+(hi-lo)/2; if(table->keys[mid]<key)lo=mid+1;else hi=mid; }
+            if (lo>=table->count || table->keys[lo]!=key) return;
+            call->matched=TRUE;
+            call->key=key;
+            call->out=(gpointer)ic->cpu_context->x[8];
+            call->found=gum_invocation_context_get_nth_argument(ic,3);
+        }
+        void on_leave(GumInvocationContext *ic) {
+            CallState *call=gum_invocation_context_get_listener_invocation_data(ic,sizeof(CallState));
+            if(call->matched)fill_js(call->out,call->key,call->found);
+        }
+    `,{key_table:state,fill_js:fillCallback,atomic_load_pointer:atomic.loadPointer},{toolchain:'internal'});
+    const gate={module:module,state:state,tables:tables,fillCallback:fillCallback,atomic:atomic,
+        callbacks:{onEnter:module.on_enter,onLeave:module.on_leave},
+        reload(map){
+            const keys=Object.keys(map).map(k=>Number(k)>>>0).sort((a,b)=>a-b);
+            const table=Memory.alloc(4+keys.length*4); table.writeU32(keys.length);
+            for(let i=0;i<keys.length;i++)table.add(4+i*4).writeU32(keys[i]);
+            tables.push(table); // old readers may still hold the previous table
+            atomic.writePointer(state,table);
+        }};
+    gate.reload(names);
+    return gate;
+}
+// END NATIVE LOCALIZATION GATE
+
+
 // ============================================================================
 // CP2077SaveKit MINI-CET v3 -- universal RTTI call + enums + chains.
 //   give <Items.NAME> <qty> | money <amt> | call <Class> <method> [args] | perks <n> | attrs <n> | relic <n>
@@ -658,6 +799,9 @@ rpc.exports = {
             GetClass=new NativeFunction(rv.add(0x10).readPointer(),'pointer',['pointer','uint64']);
             GetEnum =new NativeFunction(rv.add(0x18).readPointer(),'pointer',['pointer','uint64']); }
         let player=null, playerVt=null, fromtd=null, busy=false, lastCmd='', lastLReq=''; const pendingQ=[];
+        let executorGate=null;
+        // Every producer (including Creator retry timers) arms the native command gate.
+        pendingQ.push=function(){ const n=Array.prototype.push.apply(this,arguments); if(executorGate)executorGate.pending(n>0); return n; };
         // Executor nesting depth per thread. One shared counter stalled the queue for the rest of the session
         // whenever a script call on some other thread never returned (seen on 2.5 during quests).
         const depthByTid={}; let qWaitSince=0;
@@ -701,11 +845,11 @@ rpc.exports = {
             const mh='0x'+fnv(methodName).toString(16);
             const ch=className?('0x'+fnv(className).toString(16)):null;
             const ob={ classHash:ch, className:className||'*', methodName:methodName, cb:cb||null, hits:0, diag:(!cb)||!!(opts&&opts.diag) };
-            (obsByMethod[mh]=obsByMethod[mh]||[]).push(ob); obsCount++;
+            (obsByMethod[mh]=obsByMethod[mh]||[]).push(ob); obsCount++; if(executorGate)executorGate.observers(true);
             log('observe + '+ob.className+'.'+methodName+'  (methodHash '+mh+(ch?(', classHash '+ch):'')+')');
             return ob;
         }
-        function cmUnobserve(){ obsByMethod={}; obsCount=0; log('observe: all cleared'); }
+        function cmUnobserve(){ obsByMethod={}; obsCount=0; if(executorGate)executorGate.observers(false); log('observe: all cleared'); }
         // ===== script-object creation + field access (for building the native menu) =====
         // NO sig-scanned addresses (the JSON's CClass_CreateInstance hash is bogus on this binary - it points
         // at a parser). Instead use the CClass vtable, which we already call successfully (nameOf uses vt+0x10).
@@ -1428,7 +1572,7 @@ rpc.exports = {
             if(t[0]==='findinst'&&t[1]){ const m=clsByName(t[1]); if(!m){ log('findinst: class '+t[1]+' UNKNOWN'); return; }
                 const inst=instReg[m.sub(base).add(FV0).toString(16)]; log('findinst '+t[1]+' -> '+(inst?inst:'NONE captured')); return; }
             log('unknown: '+line); }
-        setInterval(function(){ try{ creatorPoll(); const c=readFile(CMD); const s=(c||'').trim();
+        setInterval(function(){ try{ if(executorGate)executorGate.refresh(); creatorPoll(); const c=readFile(CMD); const s=(c||'').trim();
             if(!s){ lastCmd=''; }                          // file empty -> re-arm so an identical next command fires again
             else if(s!==lastCmd){ lastCmd=s; const cmd=s.replace(/^\d+\t/,''); pendingQ.push(cmd); clearFile(CMD); log('queued: '+cmd); }
             if(!pendingQ.length) qWaitSince=0; else if(!qWaitSince) qWaitSince=Date.now();
@@ -1454,26 +1598,53 @@ rpc.exports = {
                 log('shutdown-exit hook installed (Main+0x'+OFF.main.toString(16)+')'); }
             else log('shutdown-exit: _exit unresolved'); }catch(e){ log('shutdown-exit err: '+e); }
         log('==== MINI-CET v3 (universal call + perks/attrs/relic) ready ====');
-        Interceptor.attach(execAddr,{
-            onEnter:function(args){ this.commandContext=null; const tid=this.threadId; depthByTid[tid]=(depthByTid[tid]||0)+1; if(busy) return;
-                try{ const fn=args[0],ctx=args[1]; if(fn.isNull()||ctx.isNull()) return;
-                    if(!fromtd){ const nm='0x'+fn.add(0x08).readU64().toString(16); if(nm==='0x150155547ef75590'){ const rp=fn.add(0x18).readPointer(); fromtd={fn:fn,ctx:ctx,retType:rp.isNull()?ptr(0):rp.readPointer()}; } }
-                    const vt=ctx.readPointer(); if(vt.isNull()) return;
-                    this.commandContext=ctx; // borrowed only while dispatching at this invocation's onLeave
-                    // Observe dispatch (zero cost when no observers registered). Must run BEFORE the
-                    // player/seenVt early-returns below, or observers would fire at most once per vtable.
-                    if(obsCount){ const omh='0x'+fn.add(0x10).readU64().toString(16); const olist=obsByMethod[omh];
-                        if(olist){ let cmeta=null; try{ cmeta=new NativeFunction(vt.add(8).readPointer(),'pointer',['pointer'])(ctx); }catch(e){}
-                            for(let oi=0;oi<olist.length;oi++){ const ob=olist[oi]; if(ob.classHash && (cmeta===null || !classIsA(cmeta, ob.classHash))) continue; obsFire(ob, ctx, args[2], fn); } } }
-                    if(playerVt && vt.equals(playerVt)){ player=ctx; addCand(ctx); return; }
-                    const vk=vt.toString(); if(seenVt.has(vk)) return; seenVt.add(vk);
-                    const fn0=vt.readPointer(); if(fn0.isNull()) return;
-                    const meta=new NativeFunction(vt.add(8).readPointer(),'pointer',['pointer'])(ctx);  // GetType -> CClass
-                    if(meta.isNull()) return; const fv=meta.sub(base).add(FV0).toString(16); instReg[fv]=ctx;
-                    if(nameOf(meta)===PLAYER){ playerVt=vt; player=ctx; addCand(ctx); }
-                }catch(e){} },
-            onLeave:function(r){ const tid=this.threadId, d=(depthByTid[tid]||1)-1; if(d>0) depthByTid[tid]=d; else delete depthByTid[tid]; if(busy) return; if(pendingQ.length&&canDispatchCommand(pendingQ[0],d,this.commandContext)){ const cmd=pendingQ.shift(); busy=true; try{ execute(cmd,this.commandContext); }catch(e){ log('exec err '+e); } busy=false; } this.commandContext=null; }
-        });
+        function captureExecutorContext(fn,ctx,frame) {
+            if(busy) return 0;
+            try {
+                if(fn.isNull()||ctx.isNull()) return 0;
+                if(!fromtd){ const nm='0x'+fn.add(0x08).readU64().toString(16); if(nm==='0x150155547ef75590'){
+                    const rp=fn.add(0x18).readPointer(); fromtd={fn:fn,ctx:ctx,retType:rp.isNull()?ptr(0):rp.readPointer()};
+                    if(executorGate)executorGate.fromTdbid();
+                } }
+                const vt=ctx.readPointer(); if(vt.isNull()) return 0;
+                // Observers must run before either cache early-return, including known classes.
+                if(obsCount){ const omh='0x'+fn.add(0x10).readU64().toString(16); const olist=obsByMethod[omh];
+                    if(olist){ let cmeta=null; try{ cmeta=new NativeFunction(vt.add(8).readPointer(),'pointer',['pointer'])(ctx); }catch(e){}
+                        for(let oi=0;oi<olist.length;oi++){ const ob=olist[oi]; if(ob.classHash && (cmeta===null || !classIsA(cmeta,ob.classHash))) continue; obsFire(ob,ctx,frame,fn); } } }
+                if(playerVt && vt.equals(playerVt)){ player=ctx; addCand(ctx); if(executorGate)executorGate.player(ctx); return 2; }
+                const vk=vt.toString(); if(seenVt.has(vk)) return 1; seenVt.add(vk);
+                const fn0=vt.readPointer(); if(fn0.isNull()) return 1;
+                const meta=new NativeFunction(vt.add(8).readPointer(),'pointer',['pointer'])(ctx);
+                if(meta.isNull()) return 1; const fv=meta.sub(base).add(FV0).toString(16); instReg[fv]=ctx;
+                if(nameOf(meta)===PLAYER){ playerVt=vt; player=ctx; addCand(ctx); if(executorGate)executorGate.player(ctx); return 2; }
+                return 1;
+            }catch(e){ return 0; }
+        }
+        function drainExecutorCommand(context,depth) {
+            if(busy || !pendingQ.length || !canDispatchCommand(pendingQ[0],depth,context)) return;
+            const cmd=pendingQ.shift(); busy=true; if(executorGate)executorGate.busy(true);
+            try{ execute(cmd,context); }catch(e){ log('exec err '+e); }
+            finally{ busy=false; if(executorGate){ executorGate.pending(pendingQ.length>0); executorGate.busy(false); } }
+        }
+        // BEGIN EXECUTOR LISTENER
+        try {
+            if(isGame231())throw new Error('2.3.1 retains its original callback path.');
+            executorGate=createExecutorGate(captureExecutorContext,drainExecutorCommand);
+            executorGate.pending(pendingQ.length>0); executorGate.observers(obsCount>0);
+            Interceptor.attach(execAddr,executorGate.callbacks);
+            log('executor: native idle filter enabled (commands and observers remain active)');
+        } catch(e) {
+            executorGate=null;
+            // Older Gadget builds can keep the proven bridge when native C callbacks are unavailable.
+            Interceptor.attach(execAddr,{
+                onEnter:function(args){ const tid=this.threadId; depthByTid[tid]=(depthByTid[tid]||0)+1;
+                    this.commandContext=captureExecutorContext(args[0],args[1],args[2])?args[1]:null; },
+                onLeave:function(){ const tid=this.threadId,d=(depthByTid[tid]||1)-1;
+                    if(d>0)depthByTid[tid]=d;else delete depthByTid[tid]; drainExecutorCommand(this.commandContext,d); this.commandContext=null; }
+            });
+            log('executor: using compatibility callbacks; native idle filter unavailable: '+e);
+        }
+        // END EXECUTOR LISTENER
 
         // ---- AUTO-LOAD: apply installed mods on launch, no console needed (NightCity Console increment 4).
         // Queue `tweakload` then `archiveload` into pendingQ so they run on the ENGINE thread (drained by the
@@ -1520,6 +1691,7 @@ var cmnStrCache = {}; // text -> persistent Frida buffer (kept alive; reused)
 var cmnBase = null;
 var cmnReserve = null;   // NativeFunction(FUN_10002c904): grows a CString to a game-pool heap buffer
 var cmnAttached = false;
+var cmnNativeGate = null;
 function cmnLog(s){ try{ var f=new File(CMN_LOG,'a'); f.write(s+'\n'); f.flush(); f.close(); }catch(e){} try{ console.log('[CMN] '+s); }catch(e2){} }
 function cmnLoadFile(path, label, verbose){
     var n = 0;
@@ -1547,6 +1719,7 @@ function cmnLoad(){
     var n = cmnLoadFile(CMN_CONFIG, 'cybermodman_names.json', true);
     if (isGame231()) n += cmnLoadFile(CMN_XL_LOC, 'cp2077_xl_loc.json (ArchiveXL)', false);
     cmnLog('total custom name(s): '+n);
+    if(cmnNativeGate)cmnNativeGate.reload(cmnMap);
     return n;
 }
 function cmnUtf8Length(s) {
@@ -1598,21 +1771,27 @@ function cmnInstall(){
             !matches(cmnB.add(off.poolCString),'ff0301d1f65701a9f44f02a9fd7b03a9fdc30091f40301aaf30300aa3f50007183010054e00313aa088c41f8'))
             throw new Error('Custom localization code fingerprint mismatch; no hook installed.');
         cmnReserve = new NativeFunction(cmnB.add(off.poolCString), 'void', ['pointer','uint']);
-        Interceptor.attach(addr, {
-            onEnter: function (a) { this.out = this.context.x8; this.k1 = this.context.x1; this.fp = this.context.x3; },
-            onLeave: function (r) {
-                try {
-                    if (!this.k1) return;
-                    var name = cmnMap[this.k1.toUInt32() >>> 0];
-                    if (name === undefined) return;
-                    var __k = this.k1.toUInt32() >>> 0;
-                    if (cmnHit[__k] === undefined) cmnHit[__k] = 0;
-                    if (cmnHit[__k]++ < 4) cmnLog('HIT key='+__k+' (0x'+__k.toString(16)+') fill="'+String(name).substring(0,48)+'"');
-                    var b = this.out; if (!b || b.isNull()) return;
-                    if (cmnPutStr(b, name) && this.fp && !this.fp.isNull()) { try { this.fp.writeU8(1); } catch (e) {} }
-                } catch (e) {}
-            }
-        });
+        function fillName(out,key,found) {
+            try {
+                const name=cmnMap[key]; if(name===undefined || !out || out.isNull())return;
+                if(cmnHit[key]===undefined)cmnHit[key]=0;
+                if(cmnHit[key]++<4)cmnLog('HIT key='+key+' (0x'+key.toString(16)+') fill="'+String(name).substring(0,48)+'"');
+                if(cmnPutStr(out,name) && found && !found.isNull())found.writeU8(1);
+            } catch(e) {}
+        }
+        try {
+            if(isGame231())throw new Error('2.3.1 retains its original callback path.');
+            cmnNativeGate=createLocalizationGate(cmnMap,fillName);
+            Interceptor.attach(addr,cmnNativeGate.callbacks);
+            cmnLog('native key filter enabled');
+        } catch(e) {
+            cmnNativeGate=null;
+            Interceptor.attach(addr,{
+                onEnter:function(a){this.out=this.context.x8;this.key=a[1].toUInt32()>>>0;this.found=a[3];},
+                onLeave:function(){fillName(this.out,this.key,this.found);}
+            });
+            cmnLog('using compatibility callbacks; native key filter unavailable: '+e);
+        }
         cmnAttached = true;
         cmnLog('interceptor attached at '+addr+' (game '+getGameVersion()+', RVA 0x'+off.locLookup.toString(16)+')');
     } catch (e) { cmnLog('attach error: '+e); }

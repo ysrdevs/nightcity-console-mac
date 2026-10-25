@@ -32,3 +32,14 @@ docs/EXECUTE-AND-SHIP-PLAN.md
 docs/MACOS-MODDING-PLATFORM-PLAN.md
 docs/SESSION-CHECKPOINT.md
 overlay/lua-5.1.5/
+
+# Unpublished native port sources are maintained in separate private checkouts.
+/development/
+/native25/patches/
+/native25/scripts/
+/native25/sources.lock.json
+/tools/build-native25.py
+/docs/CODEWARE-2.5-DEVELOPMENT.md
+/docs/CYBERWARE-EQUIPMENT-2.5-DEVELOPMENT.md
+/docs/RELEASE-1.7.0-HANDOFF.md
+/docs/RELEASE-1.7.0-TESTING.md

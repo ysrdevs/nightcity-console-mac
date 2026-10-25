@@ -19,6 +19,9 @@
 #include <deque>
 #include <mutex>
 #include <atomic>
+#include <array>
+#include <fcntl.h>
+#include "frame_cadence.h"
 #include <thread>
 #include <chrono>
 #include <unistd.h>
@@ -50,6 +53,29 @@ static void olog(const char* fmt, ...) {
     FILE* f = fopen("/tmp/cp2077_overlay.log", "a"); if (f) { fprintf(f, "%s\n", buf); fclose(f); }
     fprintf(stderr, "[OVERLAY] %s\n", buf);
 }
+
+// BEGIN RUNTIME ATOMIC HELPERS
+// Frida's small CModule compiler has no C11 atomics on ARM64. Keep publication in
+// compiler-verified acquire/release helpers, shared by the executor and name filters.
+#ifdef __cplusplus
+extern "C" {
+#endif
+__attribute__((visibility("default"))) uint32_t nightcity_atomic_load32(const uint32_t* address) {
+    return __atomic_load_n(address, __ATOMIC_ACQUIRE);
+}
+__attribute__((visibility("default"))) void nightcity_atomic_store32(uint32_t* address, uint32_t value) {
+    __atomic_store_n(address, value, __ATOMIC_RELEASE);
+}
+__attribute__((visibility("default"))) void* nightcity_atomic_load_pointer(void* const* address) {
+    return __atomic_load_n(address, __ATOMIC_ACQUIRE);
+}
+__attribute__((visibility("default"))) void nightcity_atomic_store_pointer(void** address, void* value) {
+    __atomic_store_n(address, value, __ATOMIC_RELEASE);
+}
+#ifdef __cplusplus
+}
+#endif
+// END RUNTIME ATOMIC HELPERS
 
 // ---- state ----
 // presentDrawable: is implemented per-GPU-family command-buffer class (AGXG13X/G14/G15/G16F/...). The class
@@ -101,22 +127,47 @@ static void readMode() {
     else g_mode = NCC_FULL;
 }
 
-// ---- frame-time instrumentation: measure the game's real per-frame cadence at nextDrawable
-// (called once per frame regardless of how it presents, so it works in every mode). Logs avg +
-// worst-case present interval every 120 frames so we get milliseconds instead of "feels stuttery". ----
-static double g_lastFrameT = 0.0, g_ftSum = 0.0, g_ftMax = 0.0; static int g_ftCount = 0;
-static void frameTick() {
-    double now = CACurrentMediaTime();
-    if (g_lastFrameT > 0.0) {
-        double dt = (now - g_lastFrameT) * 1000.0;   // ms
-        g_ftSum += dt; if (dt > g_ftMax) g_ftMax = dt; g_ftCount++;
-        if (g_ftCount >= 120) {
-            olog("frametime: avg=%.2fms max=%.2fms over %d frames (mode=%s console=%s)",
-                 g_ftSum / g_ftCount, g_ftMax, g_ftCount, modeName(), g_show.load() ? "open" : "closed");
-            g_ftSum = 0.0; g_ftMax = 0.0; g_ftCount = 0;
+// Optional frame-cadence diagnostics. Disabled by default: no nextDrawable hook, clock reads,
+// or periodic log writes. NCC_PERF=1 enables a bounded summary for controlled comparisons.
+// Drawable acquisition intervals are a cadence proxy, not GPU render time or a gameplay FPS claim.
+static bool g_perfEnabled = false;
+static std::atomic<bool> g_perfWriteBusy{false};
+static void frameTick(id layer) {
+    static nightcity::FrameCadence cadence;
+    nightcity::CadenceWindow window;
+    const auto result = cadence.tick(reinterpret_cast<uintptr_t>((__bridge void*)layer), g_show.load(),
+                                     [] { return CACurrentMediaTime(); }, window);
+    if (result != nightcity::CadenceResult::ready) return;
+    if (g_perfWriteBusy.exchange(true)) return; // never accumulate background work
+    const NccMode mode = g_mode;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        auto sorted = window.intervals;
+        std::sort(sorted.begin(), sorted.end());
+        double sum = 0.0;
+        for (double value : sorted) sum += value;
+        char temporary[] = "/tmp/cp2077_perf.XXXXXX";
+        int fd = mkstemp(temporary); // exclusively create a regular 0600 file; never open an existing FIFO
+        if (fd >= 0) {
+            FILE* file = fdopen(fd, "w");
+            if (file) {
+                fprintf(file, "{\"schema_version\":1,\"process_id\":%d,\"recorded_at_unix\":%lld,"
+                    "\"measurement\":\"CAMetalLayer.nextDrawable\",\"mode\":\"%s\",\"console_open\":%s,"
+                    "\"sample_count\":%zu,\"frame_count\":%llu,\"elapsed_seconds\":%.3f,"
+                    "\"layer_id\":%llu,\"tracked_layers\":%zu,\"dropped_samples\":%llu,"
+                    "\"idle_resets\":%llu,\"visibility_resets\":%llu,"
+                    "\"interval_avg_ms\":%.3f,\"interval_p95_ms\":%.3f,\"interval_max_ms\":%.3f}\n",
+                    getpid(), (long long)time(nullptr), mode == NCC_OFF ? "off" : mode == NCC_PASSTHRU ? "passthru" : "full",
+                    window.consoleOpen ? "true" : "false", sorted.size(), (unsigned long long)window.frames, window.elapsed,
+                    (unsigned long long)window.layerID, window.trackedLayers, (unsigned long long)window.droppedSamples,
+                    (unsigned long long)window.idleResets, (unsigned long long)window.visibilityResets,
+                    sum / sorted.size(), sorted[113], sorted.back());
+                const bool written = !ferror(file);
+                const bool closed = fclose(file) == 0;
+                if (!written || !closed || rename(temporary, "/tmp/cp2077_perf.json") != 0) unlink(temporary);
+            } else { close(fd); unlink(temporary); }
         }
-    }
-    g_lastFrameT = now;
+        g_perfWriteBusy = false;
+    });
 }
 
 // ---- input event queue (main thread -> render thread) ----
@@ -136,6 +187,14 @@ static std::atomic<bool> g_recenterMouse{false};   // center the cursor when the
 static void refreshOut() {
     FILE* f = fopen(OUT_PATH, "r"); if (!f) return;
     g_lines.clear();
+    constexpr long tailBytes = 128 * 1024;
+    if (fseek(f, 0, SEEK_END) == 0) {
+        long size = ftell(f);
+        const long offset = size > tailBytes ? size - tailBytes : 0;
+        if (fseek(f, offset, SEEK_SET) == 0 && offset > 0) {
+            int c; do { c = fgetc(f); } while (c != '\n' && c != EOF); // discard a partial first line
+        }
+    }
     char line[2048];
     while (fgets(line, sizeof(line), f)) { size_t n = strlen(line); if (n && line[n-1] == '\n') line[n-1] = 0; g_lines.push_back(line); }
     fclose(f);
@@ -1755,7 +1814,10 @@ static void rebuildTabs() {
 // Console tab body, factored out so the tab loop can call it for the builtin Console tab.
 static void drawConsoleInner(int req, int myTab) {
     ImGui::BeginChild("scroll", ImVec2(0, -ImGui::GetFrameHeightWithSpacing()), false, ImGuiWindowFlags_HorizontalScrollbar);
-    for (auto& l : g_lines) ImGui::TextUnformatted(l.c_str());
+    ImGuiListClipper clipper;
+    clipper.Begin((int)g_lines.size());
+    while (clipper.Step())
+        for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) ImGui::TextUnformatted(g_lines[i].c_str());
     if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 4.0f) ImGui::SetScrollHereY(1.0f);
     ImGui::EndChild();
     ImGui::Separator();
@@ -1939,7 +2001,7 @@ static void my_sendEvent(id self, SEL _cmd, NSEvent* ev) {
 static IMP g_origNextDrawable = NULL;
 static id my_nextDrawable(id self, SEL _cmd) {
     id d = ((id(*)(id, SEL))g_origNextDrawable)(self, _cmd);
-    frameTick();   // once per frame, every mode: our frame-cadence probe
+    if (d) frameTick(self);   // optional, bounded per-layer streams shared across engine workers
     static std::atomic<bool> logged{false};
     if (!logged.exchange(true))
         olog("nextDrawable FIRED: layer=%s drawable=%s", class_getName(object_getClass(self)),
@@ -1947,6 +2009,7 @@ static id my_nextDrawable(id self, SEL _cmd) {
     return d;
 }
 static void installLayerDiag() {
+    if (!g_perfEnabled) return;
     Class c = objc_getClass("CAMetalLayer");
     if (!c) { olog("diag: no CAMetalLayer"); return; }
     Method m = class_getInstanceMethod(c, sel_registerName("nextDrawable"));
@@ -2007,6 +2070,9 @@ static void installInputHook() {
 __attribute__((constructor))
 static void overlay_init() {
     readMode();
+    const char* perf = getenv("NCC_PERF");
+    g_perfEnabled = perf && !strcmp(perf, "1");
+    olog("frame cadence diagnostics: %s (NCC_PERF=1 opts in)", g_perfEnabled ? "enabled" : "disabled");
     olog("==== CP2077 overlay dylib loaded (NCC_MODE=%s) ====", modeName());
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         installPresentHook();

@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "game_version": "2.5.0",
+  "mods": [
+    {
+      "name": "CyberwareEx",
+      "version": "1.5.6",
+      "source_commit": "855d9a42eecdb635d5c9d15e6949107b9b3b1b00",
+      "methods": [
+        {
+          "name": "GetActiveItem",
+          "before_token_sha256": "30532f1bab45a32d1e4e362a884b094d8aae55d3c6121b0ee1955ed29dae2e9c",
+          "after_token_sha256": "05890a8948e95cf58a2e70c63bc81dcd96b2e3ec456bc82de1e9cc7d440a3549",
+          "replacement": "@wrapMethod(EquipmentSystemPlayerData)\npublic final const func GetActiveItem(equipArea: gamedataEquipmentArea, opt isLeftHandWeapon: Bool) -> ItemID {\n    if Equals(equipArea, gamedataEquipmentArea.SystemReplacementCW) {\n        return this.GetTaggedItem(equipArea, n\"Cyberdeck\");\n    }\n\n    // Game 2.5 uses this flag to resolve the active left-hand weapon. Preserve\n    // the game's selection for every area outside the mod's cyberdeck lookup.\n    return wrappedMethod(equipArea, isLeftHandWeapon);\n}"
+        },
+        {
+          "name": "UpdateArmSlot",
+          "before_token_sha256": "b28b9ac9d487ae78aab50525253107d1d60b8a40029db89cc6e3781b07d73897",
+          "after_token_sha256": "766cf4445eb8cedcf326f07599282b7415c4f5a73f3a56c5d20f9d7c5a70e603",
+          "replacement": "@if(!ModuleExists(\"CyberarmOverhaul\"))\n@wrapMethod(EquipmentSystemPlayerData)\npublic final static func UpdateArmSlot(owner: ref<gamePuppet>, itemToDraw: ItemID, equipHolsteredItem: Bool) {\n    // The 2.5 method also accepts non-player puppets. Keep their original game\n    // behavior, while retaining Cyberware-EX's player and Johnny handling.\n    let player = owner as PlayerPuppet;\n    if !IsDefined(player) {\n        wrappedMethod(owner, itemToDraw, equipHolsteredItem);\n        return;\n    }\n    if !ItemID.IsValid(itemToDraw) || player.IsJohnnyReplacer() {\n      return;\n    }\n\n    let equipmentData = EquipmentSystem.GetData(owner);\n\n    if !IsDefined(equipmentData) {\n      return;\n    }\n\n    let transactionSystem = GameInstance.GetTransactionSystem(owner.GetGame());\n    let rightWeapon = transactionSystem.GetItemInSlot(owner, t\"AttachmentSlots.WeaponRight\");\n    let leftWeapon = transactionSystem.GetItemInSlot(owner, t\"AttachmentSlots.WeaponLeft\");\n    let rightRecord: wref<Item_Record>;\n    let leftRecord: wref<Item_Record>;\n    if IsDefined(rightWeapon) {\n        rightRecord = TweakDBInterface.GetItemRecord(ItemID.GetTDBID(rightWeapon.GetItemID()));\n    }\n    if IsDefined(leftWeapon) {\n        leftRecord = TweakDBInterface.GetItemRecord(ItemID.GetTDBID(leftWeapon.GetItemID()));\n    }\n\n    let cyberArmsInUse = IsDefined(rightRecord) && rightRecord.TagsContains(n\"Meleeware\");\n    let launcherInUse = IsDefined(leftRecord) && leftRecord.TagsContains(n\"ProjectileLauncher\");\n\n    let meleeWareID = ItemID.None();\n    let slotIndex = 0;\n    let equipAreaIndex = equipmentData.GetEquipAreaIndex(gamedataEquipmentArea.ArmsCW);\n    if equipAreaIndex < 0 || equipAreaIndex >= ArraySize(equipmentData.m_equipment.equipAreas) {\n        return;\n    }\n    let numberOfSlots = ArraySize(equipmentData.m_equipment.equipAreas[equipAreaIndex].equipSlots);\n    while slotIndex < numberOfSlots {\n        let itemID = equipmentData.m_equipment.equipAreas[equipAreaIndex].equipSlots[slotIndex].itemID;\n        if ItemID.IsValid(itemID) {\n            meleeWareID = itemID;\n            let itemRecord = TweakDBInterface.GetItemRecord(ItemID.GetTDBID(itemID));\n            if IsDefined(itemRecord) && !itemRecord.TagsContains(n\"ProjectileLauncher\") {\n                break;\n            }\n        }\n        slotIndex += 1;\n    }\n\n    if !ItemID.IsValid(meleeWareID) {\n        meleeWareID = equipmentData.GetBaseFistsItemID();\n    }\n\n    if !launcherInUse && !cyberArmsInUse {\n        let meleeWareRecord = TweakDBInterface.GetWeaponItemRecord(ItemID.GetTDBID(meleeWareID));\n        if !IsDefined(meleeWareRecord) || !IsDefined(meleeWareRecord.HolsteredItem()) {\n            return;\n        }\n        let holsteredArmsID = ItemID.CreateQuery(meleeWareRecord.HolsteredItem().GetID());\n        if !ItemID.IsValid(holsteredArmsID) {\n            return;\n        }\n\n        if !transactionSystem.HasItem(owner, holsteredArmsID) {\n            transactionSystem.GiveItem(owner, holsteredArmsID, 1);\n        }\n\n        EquipmentSystemPlayerData.ForceQualityAndDuplicateStatsShard(owner, meleeWareID, holsteredArmsID);\n\n        if !equipmentData.IsEquipped(holsteredArmsID) {\n            equipmentData.EquipItem(holsteredArmsID, false, false);\n        }\n    } else {\n        equipmentData.UnequipItem(equipmentData.GetEquipAreaIndex(gamedataEquipmentArea.RightArm), 0, true);\n    }\n}"
+        }
+      ]
+    },
+    {
+      "name": "EquipmentEx",
+      "version": "1.2.9",
+      "source_commit": "3208ff4c1caa2e3f08c3e20a8e7c3e6b1e95124d",
+      "files": [
+        {
+          "filename": "EquipmentEx.Global.reds",
+          "before_sha256": "a841b96564e720119ed00fdf5250dff45a1209ec43a336aec431efe2df021d7c",
+          "after_sha256": "f17e756eca72d8efb1c54db64ce51081526a2ef2dae72dc21202fb0fbc14210a",
+          "before": "while i <= ArraySize(this.m_clothingVisualsInfo)",
+          "after": "while i < ArraySize(this.m_clothingVisualsInfo)"
+        },
+        {
+          "filename": "EquipmentSystem.reds",
+          "before_sha256": "d3cfbac3e59733a71e2028dc6c8fd23c14d1e2ca11c0eb1f858a986bae9815ea",
+          "after_sha256": "eeac5c35ec4e36f8b6f60e1b83781aa2f6873f3c6ba6cf5f077a4ab3df5711db",
+          "before": "while i <= ArraySize(this.m_clothingVisualsInfo)",
+          "after": "while i < ArraySize(this.m_clothingVisualsInfo)"
+        }
+      ]
+    }
+  ],
+  "native_archives": [
+    "55a438e9315ca227f12f90aacec0711914bd9241e60307242c204410f45ecf8e",
+    "89e6aa1b0b39822c899f1c50dd196c529e38d8800c4e6d7249b192809bbb88ea"
+  ],
+  "verified_repacks": [
+    {
+      "name": "Virtual Atelier 1.6.0",
+      "input_sha256": "f656c2be21585a85d234603ca3e69f508969891628e83dececf8b0877f7bc3bb",
+      "accepted_archive_sha256": "89e6aa1b0b39822c899f1c50dd196c529e38d8800c4e6d7249b192809bbb88ea",
+      "resources": {
+        "base/gameplay/gui/virtual_atelier.inkatlas": "f6833fff0fb9bb7170b86cf11c2a5b27f1c551ab04a3f97c478a8ced1dd200a9",
+        "base/gameplay/gui/virtual_atelier.inkwidget": "2713091d11c1d1f4ac004ab070828213c33364ea5c165c5ff189c7c76eee2c6b",
+        "base/gameplay/gui/virtual_atelier.xbm": "65e4acef9846c8f1f266daa0c0bbb11cbb009ffd371a9ee65939917a51d7d0ef",
+        "base/gameplay/gui/virtual_atelier_1080p.xbm": "a44e1c0df179c7215ebed70d92fb30dfe8c369209ac70b415c0c52333284e654",
+        "base/gameplay/gui/virtual_atelier_cart.inkatlas": "aeb514f276371a095cca7c7e07e13c138c1e6faa9f354c8225a29e48bbec2fb8",
+        "base/gameplay/gui/virtual_atelier_cart.xbm": "0b79d0d0e53e32b74fea2ce5cc093e7d5d9a000bce0ea09a5176edb706a7de53",
+        "base/gameplay/gui/virtual_atelier_owned.inkatlas": "b0666b1ace26d47a991eb363263f57fcfc7a75a13ecce950867bb98345668da8",
+        "base/gameplay/gui/virtual_atelier_owned.xbm": "b3f25008f5db3bdc95a7b5cd0c28d3141fa2abaa98f2039cd96b75ce3cc2b0ef",
+        "base/gameplay/gui/virtual_atelier_preview.inkwidget": "726787256c7169c41c66c6555f646e02e008c5d703b1c5e9bf69e37a3f3bfbca",
+        "base/gameplay/gui/virtual_atelier_slots.inkwidget": "3942ea6cb5c33e73ef925605e4b4b5bd47da68f086c4ce15b1bddaf6ebc775a9",
+        "base/gameplay/gui/virtual_atelier_stores.inkwidget": "e03efae363f47a36ff4fd40e5dd99578bbf07449c8c9fe0f4f73659d0b263a27",
+        "base/localization/cz-cz/onscreens/virtual-atelier.json": "03fcf8aad8d2d0b30ee5e01dc56ef13d1732a6c173ff13dd75d14922eb0441cd",
+        "base/localization/de-de/onscreens/virtual-atelier.json": "d084b07c918d12c07d1c92a0872aa2959277e48444c9de1aa9a0a289463daac8",
+        "base/localization/en-us/onscreens/virtual-atelier.json": "df63c8696d417f76a3ba64f9bb06de371341976a543b8e3c6750b23b22418b54",
+        "base/localization/fr-fr/onscreens/virtual-atelier.json": "b65b4cf40bca77f0ecb22b441e7e93d02e2025dbcbdf9648b40cdd53a93048ac",
+        "base/localization/it-it/onscreens/virtual-atelier.json": "6a88a48aca2b2154c64ec798580907af1cc34e83958a99ffabff7f83bc13aae3",
+        "base/localization/pt-br/onscreens/virtual-atelier.json": "d95052915c1d3b99eca4010ce88f0ae71045fee51c778147ba57be3c5642f858",
+        "base/localization/ru-ru/onscreens/virtual-atelier.json": "75d15db0916e3e16fc91da8480373668c4b8e403e24fdcc3aa2a5aa927f2d6be",
+        "base/localization/tr-tr/onscreens/virtual-atelier.json": "a602a710e172b0ad9262e66e34f963405e65f4a2229f94c510fc72de1d73a89c",
+        "base/localization/zh-cn/onscreens/virtual-atelier.json": "cd8047ca316a5265844df6dbb287750c379ecdc06a6cf653af95e72bc4f153b0",
+        "base/localization/zh-tw/onscreens/virtual-atelier.json": "9edaa0b58619e664a925a8bc04be9ec41266ff5aa4cecdb518cbcdf9c330337f"
+      }
+    }
+  ]
+}

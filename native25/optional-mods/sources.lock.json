@@ -1,0 +1,165 @@
+{
+  "schema": 1,
+  "game_version": "2.5.0",
+  "zip_format": {
+    "compression": "stored",
+    "timestamp": [
+      1980,
+      1,
+      1,
+      0,
+      0,
+      0
+    ],
+    "unix_mode": "100644",
+    "sorted_entries": true
+  },
+  "mods": [
+    {
+      "manifest": {
+        "id": "equipment-ex",
+        "name": "Equipment-EX",
+        "version": "1.2.9",
+        "package": "equipment-ex-1.2.9.zip",
+        "license": "MIT",
+        "license_path": "licenses/EquipmentEx-MIT.txt",
+        "source_url": "https://github.com/psiberx/cp2077-equipment-ex",
+        "script_directory": "r6/scripts/EquipmentEx"
+      },
+      "source": {
+        "repository": "https://github.com/psiberx/cp2077-equipment-ex",
+        "commit": "3208ff4c1caa2e3f08c3e20a8e7c3e6b1e95124d",
+        "release_zip_sha256": "0f38728206f0783a039111de3c8d5cd7e92c09a8afcdd11dc8b892e4e211a646"
+      },
+      "files": {
+        "archive/Mac/mod/EquipmentEx.archive": "55a438e9315ca227f12f90aacec0711914bd9241e60307242c204410f45ecf8e",
+        "archive/Mac/mod/EquipmentEx.archive.xl": "1c74bd3100080dd71441a719d2923eb6ff1861390f07de1e2258b821744887df",
+        "r6/config/redsUserHints/EquipmentEx.toml": "ff31b37e95f99f24ad4dae64239bf4ed08b1e9b5fddc6d8216cb19e5bc004dd3",
+        "r6/scripts/EquipmentEx/EquipmentEx.Global.reds": "f2733852f9da51f9b04b2cabeba0294aef62fbffe8f3eadbd2236b50a6e62278",
+        "r6/scripts/EquipmentEx/EquipmentEx.reds": "8a28fe3dad71d8111c04f2eca28bf904606fb74f49e27f3d9a222af1375443ab",
+        "r6/scripts/EquipmentEx/LICENSE": "abbe8d2050ded0d446f3a8b3b8efe3a35b0f392392f61d75f49fe59bd56d84e1"
+      },
+      "transforms": [
+        {
+          "path": "r6/scripts/EquipmentEx/EquipmentEx.Global.reds",
+          "before": "while i <= ArraySize(this.m_clothingVisualsInfo)",
+          "after": "while i < ArraySize(this.m_clothingVisualsInfo)"
+        }
+      ],
+      "installed_files": {
+        "archive/Mac/mod/EquipmentEx.archive": "55a438e9315ca227f12f90aacec0711914bd9241e60307242c204410f45ecf8e",
+        "archive/Mac/mod/EquipmentEx.archive.xl": "1c74bd3100080dd71441a719d2923eb6ff1861390f07de1e2258b821744887df",
+        "r6/config/redsUserHints/EquipmentEx.toml": "ff31b37e95f99f24ad4dae64239bf4ed08b1e9b5fddc6d8216cb19e5bc004dd3",
+        "r6/scripts/EquipmentEx/EquipmentEx.Global.reds": "8ff261a9e13a27368194848b0a9f52fe7113d0ce579a03b56c7e2d5a78477ecc",
+        "r6/scripts/EquipmentEx/EquipmentEx.reds": "8a28fe3dad71d8111c04f2eca28bf904606fb74f49e27f3d9a222af1375443ab",
+        "r6/scripts/EquipmentEx/LICENSE": "abbe8d2050ded0d446f3a8b3b8efe3a35b0f392392f61d75f49fe59bd56d84e1"
+      },
+      "package_sha256": "e253f5a4ceb963f26d9ff4350977903f2492e19410912a54a4d0fee484453b7b"
+    },
+    {
+      "manifest": {
+        "id": "cyberware-ex",
+        "name": "Cyberware-EX",
+        "version": "1.5.6",
+        "package": "cyberware-ex-1.5.6.zip",
+        "license": "MIT",
+        "license_path": "licenses/CyberwareEx-MIT.txt",
+        "source_url": "https://github.com/psiberx/cp2077-cyberware-ex",
+        "script_directory": "r6/scripts/CyberwareEx"
+      },
+      "source": {
+        "repository": "https://github.com/psiberx/cp2077-cyberware-ex",
+        "commit": "855d9a42eecdb635d5c9d15e6949107b9b3b1b00",
+        "source_archive_sha256": "0e0283a56aeefa3c30ad41b69cb09cb6fff3338a98843e8f165bea9e72723a0e"
+      },
+      "files": {
+        "r6/scripts/CyberwareEx/CompatibilityManager.reds": "ffefa81f7af20921338d969052d0d84fa925f1b9b899263f63ff7edd80ad670b",
+        "r6/scripts/CyberwareEx/Customization.reds": "22d0af0d445b259f4b1549391f39a7deabc7de737a63cf8ac16a6c7b5281044c",
+        "r6/scripts/CyberwareEx/CyberwareConfig.reds": "0ffc3514b7c480cc308b4ff7a7af783a99f010ae39c60ca8b6723b5e3c2fc072",
+        "r6/scripts/CyberwareEx/CyberwareHelper.reds": "309fb2c6a6089cb0f4aaec746eb0555b28265c2b9c2e877bce14efd520a7c35f",
+        "r6/scripts/CyberwareEx/ExtendedMode.reds": "2076123b08a4831ee931a897299f67b1b24ea2629d1402afd812f83547e3aa9c",
+        "r6/scripts/CyberwareEx/Facade.reds": "961f936af5f9f0170bb315cccf40bb29b81dfc7cc93962f658c5c881c0cfaec7",
+        "r6/scripts/CyberwareEx/LICENSE": "1d100b43953216b15bee84aa5f955e3976bab63e7a30bdf90836eb091f232c47",
+        "r6/scripts/CyberwareEx/Localization/EnglishPackage.reds": "4e18d21183e7cc91abce95621fc6c4bf418a9784a488df1ad04e06c3d67f70ee",
+        "r6/scripts/CyberwareEx/Localization/LocalizationProvider.reds": "8f198365bd43e665f221997165419ab6fc8737c38598d17a65e53481304638f2",
+        "r6/scripts/CyberwareEx/OverrideConfig.reds": "f3e432a3bb5cd467818a072e3f0a2aa3f6f657379d82531b2223f638ccbe753b",
+        "r6/scripts/CyberwareEx/OverrideManager.reds": "7ec4ad066fc357f3b3ca607a81110f6800cc89ed7ba9dcde37c3b15b5be5c02a",
+        "r6/scripts/CyberwareEx/OverrideMode.reds": "3e8e239bd81ad7623e5f0e6a6dc9c4f35e10e4adda0ea2ab3ce269f80c24cb32",
+        "r6/scripts/CyberwareEx/Overrides/Device.reds": "de9d7bd467b53980613c9b8dea6448a708ad21b26e114f48f9220f3518a480fe",
+        "r6/scripts/CyberwareEx/Overrides/EquipmentSystem.reds": "e0d1c8d3642dfdd53abc37f885e0b1dd6027cc141134c77d7d01a62fd3e173d7",
+        "r6/scripts/CyberwareEx/Overrides/EquipmentSystemPlayerData.reds": "4f7543b26395f69669fc75d8636dee6eb7ebaf78ae433d17b9f2db43dc043fd0",
+        "r6/scripts/CyberwareEx/Overrides/PSM/DoubleJumpDecisions.reds": "01740b1ec980c0a3ddb7218445809242225135a494b15cce14bb84e06c30d6c7",
+        "r6/scripts/CyberwareEx/Overrides/PSM/EquippedDecisions.reds": "6c7df0ad9197056f6178eacffa96e169202dd41dbeee680ea431905cc130f7fe",
+        "r6/scripts/CyberwareEx/Overrides/PSM/TimeDilationFocusModeDecisions.reds": "fc54eb6aa2e5b06df57093d2db8d266996ab1801005f0cbdc9c938d9abc6f2a9",
+        "r6/scripts/CyberwareEx/Overrides/PlayerDevelopmentData.reds": "765de61b43cd95fc451b3f84fe8a83577318de208e6fccd14128489fcae7e1b6",
+        "r6/scripts/CyberwareEx/Overrides/PlayerPuppet.reds": "45eb4e1244ac0aa387bb34e101b8ead15e516bae1a624888f31912552e9f910c",
+        "r6/scripts/CyberwareEx/Overrides/QuestTrackerGameController.reds": "a803ef55f842ac253328d4f8ac789fc40fc31ad91e04131db3a3e4cc508656d9",
+        "r6/scripts/CyberwareEx/Overrides/UI/ChargedHotkeyItemCyberwareController.reds": "e8e31031f1084e3be57d52588fec6ec8158e37eb583d5c7f196c8d838eb5e7cf",
+        "r6/scripts/CyberwareEx/Overrides/UI/CyberwareInventoryMiniGrid.reds": "e4de23af7d306b71f904a2b3b66f728ef086fa3c5de3fb524bc9ccd3ecd6c3ce",
+        "r6/scripts/CyberwareEx/Overrides/UI/HotkeyConsumableWidgetController.reds": "1c9023cfb32821536d00273c7e943c688fd23d878eb3835e4246d7969320b416",
+        "r6/scripts/CyberwareEx/Overrides/UI/HotkeysWidgetController.reds": "eecd166a2accbbc38ff58b0c46f337c9360e1cec2efc63a9d1c044ec614af077",
+        "r6/scripts/CyberwareEx/Overrides/UI/InventoryItemDisplayController.reds": "480e95c0ccb13ce31e4e12b568283299547e0b683018bb2e4a8daf5c6e957eba",
+        "r6/scripts/CyberwareEx/Overrides/UI/ItemDisplayUtils.reds": "e88a0a1a26608783eef34cc9fad6c2eba8b326d5679b2deac37faccd018470fe",
+        "r6/scripts/CyberwareEx/Overrides/UI/QuickhacksListGameController.reds": "9660e57bb623aeb6ca0bf73da249b4315fa8be950e4a6ec3b0b040c653797d44",
+        "r6/scripts/CyberwareEx/Overrides/UI/RadialWheelController.reds": "2719433c9134b163ada367dca321bf72cfbe9e01d3ef54adb3f8667f0edd33a0",
+        "r6/scripts/CyberwareEx/Overrides/UI/RipperDocGameController.reds": "93b5923bc8228c4993df845addca69aca142a0836c0d3b350f51a2100eab59b0",
+        "r6/scripts/CyberwareEx/Overrides/UI/RipperdocMetersArmor.reds": "4814f88d3d4093e55e42260aa6e91223d5b18f29b9e53ae35342d831c51243da",
+        "r6/scripts/CyberwareEx/Overrides/UI/RipperdocMetersCapacity.reds": "ba8b8a040080d0829b80c5a9632a23434a8fcc8abbd2412c2bcb023922ab4fae",
+        "r6/scripts/CyberwareEx/Overrides/UI/RipperdocPerkTooltip.reds": "54e0c92bf5989a682b73670d3f5d742f2756d7e8f309cc278463331d73b97ae1",
+        "r6/scripts/CyberwareEx/Overrides/UI/gameuiInventoryGameController.reds": "973df56a6bbb4076a3dd79678158e86ce79b84fd4890dc0a9e98b849c1187a26",
+        "r6/scripts/CyberwareEx/Overrides/UI/healthbarWidgetGameController.reds": "e2e340f5f97ba84182e014ee28f3dda81f2c2a226791f904091ac5d29ee1135b",
+        "r6/scripts/CyberwareEx/Tweaks/AdjustCyberwareCompatibility.reds": "50d65ce7722feb77110033840ffa571415710745ae48c833b8579788f7a67f1e",
+        "r6/scripts/CyberwareEx/Tweaks/RegisterAttachmentSlots.reds": "49fdee946ca66acc4763568379fb930cc9bd47cce4e60d3ccc815f5634b99f2e",
+        "r6/scripts/CyberwareEx/Tweaks/RegisterCyberwareSlots.reds": "cd2f60a7a20b1b452d4257a4c62a2a691b366041d674f58a2a00568a3d4798be",
+        "r6/scripts/CyberwareEx/UI/ConfirmationPopup.reds": "35334774581e743de295a72ea13df9531b40ce74e569966b247b06abf37da4b3",
+        "r6/scripts/CyberwareEx/UI/ConflictsPopup.reds": "0821edda95e47d37011363d07c3dcad8505973debcad905ff3f65170f46a1b25",
+        "r6/scripts/CyberwareEx/UI/RequirementsPopup.reds": "bd16918c3d42e02325f842ba6cd951c8d0504e1063ad680ba4671332761625a6"
+      },
+      "transforms": [],
+      "installed_files": {
+        "r6/scripts/CyberwareEx/CompatibilityManager.reds": "ffefa81f7af20921338d969052d0d84fa925f1b9b899263f63ff7edd80ad670b",
+        "r6/scripts/CyberwareEx/Customization.reds": "22d0af0d445b259f4b1549391f39a7deabc7de737a63cf8ac16a6c7b5281044c",
+        "r6/scripts/CyberwareEx/CyberwareConfig.reds": "0ffc3514b7c480cc308b4ff7a7af783a99f010ae39c60ca8b6723b5e3c2fc072",
+        "r6/scripts/CyberwareEx/CyberwareHelper.reds": "309fb2c6a6089cb0f4aaec746eb0555b28265c2b9c2e877bce14efd520a7c35f",
+        "r6/scripts/CyberwareEx/ExtendedMode.reds": "2076123b08a4831ee931a897299f67b1b24ea2629d1402afd812f83547e3aa9c",
+        "r6/scripts/CyberwareEx/Facade.reds": "961f936af5f9f0170bb315cccf40bb29b81dfc7cc93962f658c5c881c0cfaec7",
+        "r6/scripts/CyberwareEx/LICENSE": "1d100b43953216b15bee84aa5f955e3976bab63e7a30bdf90836eb091f232c47",
+        "r6/scripts/CyberwareEx/Localization/EnglishPackage.reds": "4e18d21183e7cc91abce95621fc6c4bf418a9784a488df1ad04e06c3d67f70ee",
+        "r6/scripts/CyberwareEx/Localization/LocalizationProvider.reds": "8f198365bd43e665f221997165419ab6fc8737c38598d17a65e53481304638f2",
+        "r6/scripts/CyberwareEx/OverrideConfig.reds": "f3e432a3bb5cd467818a072e3f0a2aa3f6f657379d82531b2223f638ccbe753b",
+        "r6/scripts/CyberwareEx/OverrideManager.reds": "7ec4ad066fc357f3b3ca607a81110f6800cc89ed7ba9dcde37c3b15b5be5c02a",
+        "r6/scripts/CyberwareEx/OverrideMode.reds": "3e8e239bd81ad7623e5f0e6a6dc9c4f35e10e4adda0ea2ab3ce269f80c24cb32",
+        "r6/scripts/CyberwareEx/Overrides/Device.reds": "de9d7bd467b53980613c9b8dea6448a708ad21b26e114f48f9220f3518a480fe",
+        "r6/scripts/CyberwareEx/Overrides/EquipmentSystem.reds": "e0d1c8d3642dfdd53abc37f885e0b1dd6027cc141134c77d7d01a62fd3e173d7",
+        "r6/scripts/CyberwareEx/Overrides/EquipmentSystemPlayerData.reds": "2507bad9d44987364c17057efb480944b602577f32d215bbbf7a215ca76d6d24",
+        "r6/scripts/CyberwareEx/Overrides/PSM/DoubleJumpDecisions.reds": "01740b1ec980c0a3ddb7218445809242225135a494b15cce14bb84e06c30d6c7",
+        "r6/scripts/CyberwareEx/Overrides/PSM/EquippedDecisions.reds": "6c7df0ad9197056f6178eacffa96e169202dd41dbeee680ea431905cc130f7fe",
+        "r6/scripts/CyberwareEx/Overrides/PSM/TimeDilationFocusModeDecisions.reds": "fc54eb6aa2e5b06df57093d2db8d266996ab1801005f0cbdc9c938d9abc6f2a9",
+        "r6/scripts/CyberwareEx/Overrides/PlayerDevelopmentData.reds": "765de61b43cd95fc451b3f84fe8a83577318de208e6fccd14128489fcae7e1b6",
+        "r6/scripts/CyberwareEx/Overrides/PlayerPuppet.reds": "45eb4e1244ac0aa387bb34e101b8ead15e516bae1a624888f31912552e9f910c",
+        "r6/scripts/CyberwareEx/Overrides/QuestTrackerGameController.reds": "a803ef55f842ac253328d4f8ac789fc40fc31ad91e04131db3a3e4cc508656d9",
+        "r6/scripts/CyberwareEx/Overrides/UI/ChargedHotkeyItemCyberwareController.reds": "e8e31031f1084e3be57d52588fec6ec8158e37eb583d5c7f196c8d838eb5e7cf",
+        "r6/scripts/CyberwareEx/Overrides/UI/CyberwareInventoryMiniGrid.reds": "e4de23af7d306b71f904a2b3b66f728ef086fa3c5de3fb524bc9ccd3ecd6c3ce",
+        "r6/scripts/CyberwareEx/Overrides/UI/HotkeyConsumableWidgetController.reds": "1c9023cfb32821536d00273c7e943c688fd23d878eb3835e4246d7969320b416",
+        "r6/scripts/CyberwareEx/Overrides/UI/HotkeysWidgetController.reds": "eecd166a2accbbc38ff58b0c46f337c9360e1cec2efc63a9d1c044ec614af077",
+        "r6/scripts/CyberwareEx/Overrides/UI/InventoryItemDisplayController.reds": "480e95c0ccb13ce31e4e12b568283299547e0b683018bb2e4a8daf5c6e957eba",
+        "r6/scripts/CyberwareEx/Overrides/UI/ItemDisplayUtils.reds": "e88a0a1a26608783eef34cc9fad6c2eba8b326d5679b2deac37faccd018470fe",
+        "r6/scripts/CyberwareEx/Overrides/UI/QuickhacksListGameController.reds": "9660e57bb623aeb6ca0bf73da249b4315fa8be950e4a6ec3b0b040c653797d44",
+        "r6/scripts/CyberwareEx/Overrides/UI/RadialWheelController.reds": "2719433c9134b163ada367dca321bf72cfbe9e01d3ef54adb3f8667f0edd33a0",
+        "r6/scripts/CyberwareEx/Overrides/UI/RipperDocGameController.reds": "93b5923bc8228c4993df845addca69aca142a0836c0d3b350f51a2100eab59b0",
+        "r6/scripts/CyberwareEx/Overrides/UI/RipperdocMetersArmor.reds": "4814f88d3d4093e55e42260aa6e91223d5b18f29b9e53ae35342d831c51243da",
+        "r6/scripts/CyberwareEx/Overrides/UI/RipperdocMetersCapacity.reds": "ba8b8a040080d0829b80c5a9632a23434a8fcc8abbd2412c2bcb023922ab4fae",
+        "r6/scripts/CyberwareEx/Overrides/UI/RipperdocPerkTooltip.reds": "54e0c92bf5989a682b73670d3f5d742f2756d7e8f309cc278463331d73b97ae1",
+        "r6/scripts/CyberwareEx/Overrides/UI/gameuiInventoryGameController.reds": "973df56a6bbb4076a3dd79678158e86ce79b84fd4890dc0a9e98b849c1187a26",
+        "r6/scripts/CyberwareEx/Overrides/UI/healthbarWidgetGameController.reds": "e2e340f5f97ba84182e014ee28f3dda81f2c2a226791f904091ac5d29ee1135b",
+        "r6/scripts/CyberwareEx/Tweaks/AdjustCyberwareCompatibility.reds": "50d65ce7722feb77110033840ffa571415710745ae48c833b8579788f7a67f1e",
+        "r6/scripts/CyberwareEx/Tweaks/RegisterAttachmentSlots.reds": "49fdee946ca66acc4763568379fb930cc9bd47cce4e60d3ccc815f5634b99f2e",
+        "r6/scripts/CyberwareEx/Tweaks/RegisterCyberwareSlots.reds": "cd2f60a7a20b1b452d4257a4c62a2a691b366041d674f58a2a00568a3d4798be",
+        "r6/scripts/CyberwareEx/UI/ConfirmationPopup.reds": "35334774581e743de295a72ea13df9531b40ce74e569966b247b06abf37da4b3",
+        "r6/scripts/CyberwareEx/UI/ConflictsPopup.reds": "0821edda95e47d37011363d07c3dcad8505973debcad905ff3f65170f46a1b25",
+        "r6/scripts/CyberwareEx/UI/RequirementsPopup.reds": "bd16918c3d42e02325f842ba6cd951c8d0504e1063ad680ba4671332761625a6"
+      },
+      "package_sha256": "ac72557fb7188dad0de4868d54a1c12a7c9c1f42d65104d4a83e71292c1c0ee0"
+    }
+  ]
+}

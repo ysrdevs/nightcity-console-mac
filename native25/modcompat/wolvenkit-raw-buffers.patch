@@ -1,0 +1,21 @@
+diff --git a/WolvenKit.RED4/Archive/IO/CR2WWriter.File.cs b/WolvenKit.RED4/Archive/IO/CR2WWriter.File.cs
+index 22b6df5d..8b863733 100644
+--- a/WolvenKit.RED4/Archive/IO/CR2WWriter.File.cs
++++ b/WolvenKit.RED4/Archive/IO/CR2WWriter.File.cs
+@@ -499,7 +499,15 @@ public partial class CR2WWriter
+             buffer.ParentTypes.First() is "animAnimationBufferCompressed.inplaceCompressedBuffer"
+                 or "animAnimationBufferSimd.inplaceCompressedBuffer";
+ 
+-        var compBuf = buffer.GetCompressedBytes(isInplaceCompressedBuffer);
++        // macOS fix: WolvenKit's Kraken (libkraken) re-compresses CR2W buffers into a KARK stream the game's
++        // RENDER-blob decompressor crashes on (SIGTRAP), even though non-render resources load fine. The engine
++        // treats a buffer as uncompressed when diskSize == memSize (FUN_102253624: returns diskSize<memSize) and
++        // takes a safe memcpy path. So write NON-inplace buffers RAW (uncompressed) -> diskSize==memSize -> no
++        // engine-side decompression -> edited meshes/textures render without crashing. Inplace-compressed
++        // animation buffers must stay compressed (the engine decompresses them in place).
++        var compBuf = isInplaceCompressedBuffer
++            ? buffer.GetCompressedBytes(isInplaceCompressedBuffer)
++            : buffer.GetBytes();
+         writer.Write(compBuf);
+ 
+         result.diskSize = (uint)compBuf.Length;

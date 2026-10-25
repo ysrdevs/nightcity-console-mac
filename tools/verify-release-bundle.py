@@ -26,13 +26,18 @@ def verify(app, check_inputs=False):
         raise ValueError("release-inputs.json does not identify the pinned public baseline")
     if check_inputs:
         for relative, expected in manifest["files"].items():
+            helpers["runtime_path"](relative)
             if helpers["digest"](resources / relative) != expected:
                 raise ValueError(f"staged input changed while assembling bundle: {relative}")
-    for parent in (resources / "plugins", resources / "native25/plugins"):
-        unexpected = {p.name for p in parent.iterdir() if p.is_dir()} - set(helpers["PLUGINS"])
+    for parent, allowed in ((resources / "plugins", helpers["PLUGINS"]),
+                            (resources / "native25/plugins", helpers["NATIVE25_PLUGINS"])):
+        unexpected = {p.name for p in parent.iterdir() if p.is_dir()} - set(allowed)
         if unexpected:
             raise ValueError(f"private/unexpected plugins in release: {sorted(unexpected)}")
+    if (resources / "native25/CODEWARE_TEST_BUILD.json").exists():
+        raise ValueError("private Codeware handoff metadata must not ship in a release")
     for path in sorted(app.rglob("*")):
+        helpers["runtime_path"](path.relative_to(app).as_posix())
         if path.name.startswith("._"):
             raise ValueError(f"AppleDouble sidecar in release: {path}")
         if path.is_symlink():
@@ -73,7 +78,7 @@ def verify(app, check_inputs=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("app", type=Path)
-    parser.add_argument("--check-inputs", action="store_true", help="compare source hashes before codesign changes binaries")
+    parser.add_argument("--check-inputs", action="store_true", help="compare runtime input hashes before codesign changes binaries")
     args = parser.parse_args()
     try:
         verify(args.app, args.check_inputs)

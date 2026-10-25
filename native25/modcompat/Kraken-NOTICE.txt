@@ -1,0 +1,8 @@
+WolvenKit/Kraken
+https://github.com/WolvenKit/kraken
+
+kraken.cpp identifies the decompressor as Copyright (C) 2016, Powzix and
+licenses it under GNU GPL version 3 or any later version. See the accompanying
+WolvenKit-GPL3.txt for the GPL text. Other source notices remain in the upstream
+repository. The exact historical source commit of this pre-existing binary was
+not recorded; its unchanged binary SHA-256 is in sources.lock.json.

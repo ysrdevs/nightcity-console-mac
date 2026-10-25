@@ -55,6 +55,13 @@ else
   echo "  [warn] deps/native25 missing (set NATIVE25_DIR for tools/fetch-deps.sh) - on 2.5 only the console installs"
 fi
 
+echo "==> bundling optional Equipment-EX and Cyberware-EX packages"
+if [ "$MODE" = "release" ]; then
+  ditto "$DEPS/optional-mods" "$APP/Contents/Resources/optional-mods"
+else
+  python3 tools/prepare-optional-mods.py --output "$APP/Contents/Resources/optional-mods"
+fi
+
 echo "==> bundling nctool mod engine (drag-drop installer)"
 # nctool is the cp2077 archive/mod engine. Publish it self-contained (multi-file: the single-file variant
 # tucks libkraken into a lib/ subfolder the runtime can't find) so the shipped app needs no dotnet; the
@@ -85,6 +92,9 @@ mkdir -p "$APP/Contents/Resources/scc"
 SCC_DEPS="$DEPS"
 [ "$MODE" != "release" ] || SCC_DEPS="$DEPS/scc"
 if cp "$SCC_DEPS/scc" "$SCC_DEPS/libscc_lib.dylib" "$APP/Contents/Resources/scc/" 2>/dev/null; then
+  if [ -f "$SCC_DEPS/LICENSE" ]; then
+    cp "$SCC_DEPS/LICENSE" "$APP/Contents/Resources/scc/"
+  fi
   chmod +x "$APP/Contents/Resources/scc/scc"
   echo "  bundled scc + libscc_lib.dylib"
 else

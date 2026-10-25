@@ -89,17 +89,21 @@ if [ -n "${NATIVE25_DIR:-}" ]; then
   cp "$NATIVE25_DIR/RED4ext.dylib" deps/native25/
   cp "$NATIVE25_DIR/bin/red4ext_plugin_check" deps/native25/bin/
   cp "$NATIVE25_DIR/bin/x64/cyberpunk2077_addresses.json" deps/native25/bin/x64/
-  for p in TweakXL ArchiveXL; do
+  for p in TweakXL ArchiveXL Codeware; do
     mkdir -p "deps/native25/plugins/$p"
     cp "$NATIVE25_DIR/plugins/$p/$p.dylib" "deps/native25/plugins/$p/"
-    for d in Scripts Data; do
+    for d in Scripts Data Bundle; do
       [ -d "$NATIVE25_DIR/plugins/$p/$d" ] && rsync -a --exclude '._*' "$NATIVE25_DIR/plugins/$p/$d" "deps/native25/plugins/$p/"
+    done
+    for f in LICENSE THIRD_PARTY_LICENSES; do
+      [ ! -f "$NATIVE25_DIR/plugins/$p/$f" ] || cp "$NATIVE25_DIR/plugins/$p/$f" "deps/native25/plugins/$p/"
     done
   done
   # ArchiveXL's resource bundle (ArchiveXL.archive + the .xl configs) from the official release matching the plugin
   # version; the archive format is the same on macOS. Built by its author from bundle/source with WolvenKit.
   AXL_VER=1.27.4
   AXL_ZIP_SHA=6c638dc1108a565ff4806835a17f704cbb2ab2afeb8ccf700080797c3f70591c
+  if [ ! -f deps/native25/plugins/ArchiveXL/Bundle/ArchiveXL.archive ]; then
   TMP="$(mktemp -d)"
   if curl -fsSL -o "$TMP/axl.zip" "https://github.com/psiberx/cp2077-archive-xl/releases/download/v$AXL_VER/ArchiveXL-$AXL_VER.zip" \
      && [ "$(shasum -a 256 "$TMP/axl.zip" | cut -d' ' -f1)" = "$AXL_ZIP_SHA" ]; then
@@ -111,6 +115,7 @@ if [ -n "${NATIVE25_DIR:-}" ]; then
     echo "  [warn] could not download ArchiveXL $AXL_VER (or its checksum did not match) - no ArchiveXL bundle"
   fi
   rm -rf "$TMP"
+  fi
   echo "  got native 2.5 payload ($(find deps/native25 -type f | wc -l | tr -d ' ') files)"
 fi
 

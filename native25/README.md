@@ -1,48 +1,68 @@
 # Native dependencies for Cyberpunk 2077 2.5
 
-`sources.lock.json` and `patches/` preserve the native source inputs for NightCity Console's 2.5 player build. A clean checkout can rebuild these dependencies without the original developer directories or an installed game. The public 2.3.1 binaries remain a separate, preserved compatibility input.
+This directory records the accepted prebuilt native dependencies used by
+NightCity Console 1.7.0. The Console launcher, overlay and command runtime are
+built from this repository. The current macOS native framework adaptations are
+maintained separately; their implementation sources and build recipe are not
+included in this release tree. Publication in separate repositories is planned.
 
-The upstream macOS ports and their authors retain their history and attribution. The patch series contains only NightCity's local commits by ysrdevs:
+## Accepted profile
 
-| Component | Pinned upstream | Local changes |
-| --- | --- | --- |
-| [RED4ext](https://github.com/fentz26/RED4ext-macos) | `a70a5e4e70deeb46ab5671abb4b448605677e744` | Host application library paths for background tests; retry hook transactions when threads exit; keep hook island searches inside the ARM64 branch window; diagnose exhausted allocation windows and use a guarded absolute hook fallback |
-| [RED4ext.SDK](https://github.com/fentz26/RED4ext.SDK-macos) | `64c1cd0095084ebbed65e725d1f9bc589d7a6e73` | None; generate the 2.5 layouts from its committed RTTI dump |
-| [TweakXL](https://github.com/fentz26/cp2077-tweak-xl-macos) | `040d54cabf5a6b5fa46453d59537dc236d8fa0ea` | Preserve the launcher's staged scripts between launches |
-| [ArchiveXL](https://github.com/fentz26/cp2077-archive-xl-macos) | `fcfc94a2cf23cdee51e267377977f0ac4693f2a0` | Preserve the launcher's staged scripts between launches |
+The 2.5 payload includes RED4ext, TweakXL, ArchiveXL and **Codeware's scoped UI
+profile with the verified wardrobe method**. It supports the player-tested VA 1.6.0,
+Cyberware-EX 1.5.6 default preset and Equipment-EX 1.2.9 flows. This is not full
+Codeware world/entity/weather/quest/service-persistence support. Clipboard
+functionality retains the existing limitation. Equipment-EX and Cyberware-EX are
+available as separate optional packages; installing the native frameworks does
+not enable them automatically. Virtual Atelier and store packs are downloaded
+separately.
 
-The manifest records every local patch's original commit and SHA-256, the resulting Git tree, and the macOS build submodule pins. It excludes Windows-only dependencies and the unused vendor SDKs. Both plugins' pinned CMake sources fetch spdlog 1.16.0 and yaml-cpp 0.8.0 with SHA-256 verification; the same pins are listed in the manifest for review.
+`accepted-payload.json` records the 52 runtime files from the accepted combined
+checkpoint. Release staging checks those input bytes before copying anything.
+It preserves the tested plugin scripts and resources, adds license notices and
+records input hashes. Private development metadata is excluded.
+Signing later changes Mach-O signatures; the input manifest records the accepted
+dependency bytes before release signing. A different native payload needs its own
+testing and acceptance manifest before replacing these release inputs.
 
-The RED4ext series includes allocation diagnostics (`5dcda66`) and the absolute-hook fallback (`27566e1`). When the near and ADRP allocation windows are exhausted, the fallback uses a 16-byte entry patch after validating function boundaries, relocation, page boundaries, interior branches and return addresses. Its forced-exhaustion regression tests ship in the patch. Source replay and CTest results do not replace a live check of the final payload under the complete injected stack.
+## Assemble the Console with prebuilt dependencies
 
-## Build
+Provide `NATIVE25_DIR` as a complete prebuilt runtime tree containing:
 
-Use an Apple Silicon Mac with Xcode command line tools, Python 3.10 or later, CMake 3.26 or later, Ninja and Git on `PATH`. The SDK layout generator invokes the local compiler. Internet access is needed for the pinned source commits, submodules, dependency archives and ArchiveXL resource bundle.
+- `RED4ext.dylib`, `config.ini` and `bin/red4ext_plugin_check`;
+- `bin/x64/cyberpunk2077_addresses.json` for game 2.5.0;
+- `plugins/TweakXL`, `plugins/ArchiveXL` and `plugins/Codeware`, including each
+  plugin's library, scripts, resources and license notices.
 
-From the Console repository:
+The required files and exact input hashes are in
+[`accepted-payload.json`](accepted-payload.json). Release assembly validates them
+before replacing its staging directory. A signed release app may have different
+library hashes because signing changes those files; extracting arbitrary signed
+libraries is not a substitute for the accepted input checkpoint.
 
-```sh
-python3 tools/build-native25.py --workspace build/native25 --jobs 4
-```
+See [release assembly instructions](../docs/RELEASE-BUILD.md) for the baseline
+ZIP, native dependency tree and installer-helper inputs. The public 2.3.1
+dependencies are extracted separately from the pinned 1.5.0 ZIP and remain
+unchanged. This repository does not currently provide a complete source rebuild
+of the macOS native frameworks.
 
-Use `--cmake /path/to/cmake` when CMake is not on `PATH`. The workspace must not already exist: the script creates only its own source/build/output directories and never resets an existing checkout. `--prepare-only` fetches, patches and verifies sources without compiling. To perform a full build afterwards, choose a fresh workspace. `--verify-sources /path/to/native-sources` checks an existing set of four repositories without writing to them.
+The plugin `.reds` files, address database and ArchiveXL resources are required
+runtime content and remain in the distributed app. All bundled components retain
+their own licenses; see [third-party notices](../THIRD_PARTY_LICENSES.md).
 
-The script:
+## Mod installation compatibility
 
-1. Fetches exact upstream commits, applies the checked local patches with `git am`, and verifies the resulting trees. Patch application preserves authors. The new commit IDs can differ because committer metadata differs; the checked source trees must match exactly.
-2. Initializes only the pinned macOS submodules and generates a shared SDK with `data/rtti_layout_macos_25.json`, `RED4EXT_GAME_VERSION_25`, and `--output-include`. It checks all 10,270 generated include files against the recorded aggregate SHA-256. A compiler-dependent layout change stops the build for review.
-3. Builds RED4ext with Ninja / RelWithDebInfo, and TweakXL and ArchiveXL with Makefiles / Release, matching the validated build configurations. All use ARM64 and `-DRED4EXT_GAME_VERSION_25`. RED4ext's version tag is pinned to 1.29.1; timestamp/branch version metadata is disabled to avoid incidental differences.
-4. Runs the loader's CTest suite, stages scripts and TweakXL data, and downloads the official ArchiveXL 1.27.4 resource bundle with ZIP and archive checksums. `ArchiveXL.archive` is an upstream asset built with WolvenKit, not rebuilt by this macOS script.
-5. Checks ARM64 architecture and system-only dynamic dependencies, signs the output ad hoc, and runs the native plugin checker against the exact 2.5 address database.
+`modcompat/` contains only the small compatibility changes, exact guards, source
+snapshot and notices for the installer helper. The helper applies the tested
+Cyberware 1.5.6 method changes and Equipment 1.2.9 restoration-loop fix when a
+supported package is installed, and checks already installed mods before 2.5
+compilation. It refuses unknown versions, duplicates or edited target methods
+instead of replacing them. The original 2.3.1 path is unchanged.
 
-The generated `build/native25/red4ext` is the `NATIVE25_DIR` input accepted by `tools/fetch-deps.sh` in release mode. It contains the loader, plugin checker, canonical addresses, configuration, TweakXL and ArchiveXL with their scripts/data/resources/licenses, and source/build manifests. TweakXL's optional reload-key input XML is kept separately at `optional-game-files/r6/input/tweakxl.xml`; NightCity's Creator uses its own reload call. Codeware, Virtual Atelier and CET-Lua are not built or staged.
+See [the helper source and test recipe](modcompat/README.md) and the
+[mod installation guide](../docs/MOD-INSTALLATION.md). The release assembly
+workflow builds the app without installing into or launching a game.
 
-For the complete app, supply the remaining explicit inputs described in [the release build instructions](../docs/RELEASE-BUILD.md). The native build never installs into or launches the game and never uploads anything.
-
-## Verification boundary
-
-The source trees and patch replay were verified locally. The loader and plugins were built separately from those same source trees during 2.5 testing; the full clean-download orchestration script still needs its own end-to-end run. CTest and the plugin checker do not establish Creator success in a running game. That acceptance requires a new weapon record, an inventory quantity increase, the custom name and text, and persistence after restart.
-
-This is a reproducible source recipe, not a promise of byte-identical signed binaries across Xcode/macOS versions. The validated generated headers came from Xcode 27.1 (27A9269). `BUILD_INFO.json` records the actual toolchain, source-manifest hash, generated SDK hash and output hashes for each completed build.
-
-To update a dependency, pin a reviewed upstream SHA, regenerate only the local patch series, update the expected patched tree and checksums, rebuild, then repeat offline and in-game acceptance. Do not replace pins with moving branches or package a dirty checkout.
+The [optional package recipe](optional-mods/README.md) preserves the two MIT core
+packages, notices and exact installation hashes. These are offered only for 2.5;
+the existing public 2.3.1 framework payload remains unchanged.

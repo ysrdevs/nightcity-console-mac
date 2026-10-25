@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>nctool</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Update="nightcity-mod-compat.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <ProjectReference Include="..\..\_refs\WolvenKit\WolvenKit.RED4\WolvenKit.RED4.csproj" />
+    <ProjectReference Include="..\..\_refs\WolvenKit\WolvenKit.Common\WolvenKit.Common.csproj" />
+  </ItemGroup>
+</Project>

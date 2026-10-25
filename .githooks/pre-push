@@ -1,0 +1,11 @@
+#!/bin/sh
+# Install THIS file and a copy of tools/check-public-history.py together in the
+# persistent Git common hooks directory. Do not set core.hooksPath to a checkout.
+set -eu
+hook_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+checker="$hook_dir/check-public-history.py"
+if [ ! -f "$checker" ]; then
+  echo "Public-history guard blocked the push: persistent checker is missing." >&2
+  exit 1
+fi
+exec /usr/bin/env python3 "$checker" --pre-push "$@"

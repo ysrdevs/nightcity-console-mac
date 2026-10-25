@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 import CryptoKit
 
 enum Const {
-    static let appVersion = "1.6.1"
+    static let appVersion = "1.7.0"
     static let supportedGameVersions = ["2.3.1", "2.5.0"]
     // Payload files that only work on game 2.3.1: the RED4ext AddressLib is a 2.3.1 address list, and on any
     // other version RED4ext would resolve its hashes to the wrong code.
@@ -35,7 +35,15 @@ final class Model: ObservableObject {
     @Published var updateTag: String? = nil        // the new release tag (for the "What's new in ..." title)
     @Published var updateBody: String? = nil       // the release notes / changelog (GitHub release body)
     @Published var needsDiskAccess: Bool = false  // set when an op fails because the game is on a drive we can't access
+    @Published var recordPerformance: Bool = false {
+        didSet { defaults.set(recordPerformance, forKey: "recordPerformance") }
+    }
 
+    @Published private(set) var gameIsRunning = false
+    @Published private(set) var optionalMods: [OptionalMod] = []
+    @Published private(set) var optionalModsError: String?
+    private var workspaceObservers: [NSObjectProtocol] = []
+    private var optionalModStatuses: [String: String] = [:]
     private let defaults = UserDefaults.standard
 
     // Game libraries on a second/external drive live under /Volumes; macOS blocks writing there without
@@ -53,8 +61,62 @@ final class Model: ObservableObject {
 
     init() {
         gamePath = defaults.string(forKey: "gamePath") ?? Const.defaultGame
+        recordPerformance = defaults.bool(forKey: "recordPerformance")
+        do { optionalMods = try OptionalModCatalog.load(resources: Bundle.main.resourceURL).mods }
+        catch { optionalModsError = error.localizedDescription }
+        refreshRunningGame()
+        for event in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+            workspaceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: event, object: nil, queue: .main) { [weak self] _ in
+                self?.refreshRunningGame()
+            })
+        }
         refresh()
         checkForUpdates()
+    }
+
+    deinit {
+        for observer in workspaceObservers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
+    }
+
+    private func refreshRunningGame() {
+        gameIsRunning = NSWorkspace.shared.runningApplications.contains {
+            $0.executableURL?.lastPathComponent == "Cyberpunk2077"
+        }
+    }
+
+    @discardableResult
+    private func canChangeGameFiles() -> Bool {
+        guard !busy else { status = "Please wait for the current operation to finish."; return false }
+        refreshRunningGame()
+        guard !gameIsRunning else { status = "Quit Cyberpunk 2077 before installing or removing mods."; return false }
+        return true
+    }
+
+    var canInstallOptionalMods: Bool {
+        gameFound && native25Active && installed && optionalModsError == nil && !busy && !gameIsRunning
+    }
+
+    func optionalModStatus(_ mod: OptionalMod) -> String? {
+        optionalModStatuses[mod.id]
+    }
+
+    func installOptionalMods(ids: Set<String>) {
+        guard canChangeGameFiles() else { return }
+        gameVersion = readGameVersion()
+        guard native25Active else { status = "These optional packs require Cyberpunk 2077 2.5.0."; return }
+        guard !ids.isEmpty else { status = "Select at least one optional mod."; return }
+        do {
+            let catalog = try OptionalModCatalog.load(resources: Bundle.main.resourceURL)
+            let selected = catalog.mods.filter { ids.contains($0.id) }
+            guard selected.count == ids.count else { throw OptionalModError.invalidCatalog }
+            for mod in selected {
+                guard OptionalModCatalog.installedStatus(mod, gameRoot: URL(fileURLWithPath: gamePath)) == nil else {
+                    throw OptionalModError.alreadyInstalled(mod.name)
+                }
+            }
+            let urls = try selected.map { try catalog.verifiedPackage(for: $0) }
+            installMods(from: urls)
+        } catch { status = error.localizedDescription }
     }
 
     var binaryPath: String { "\(gamePath)/Cyberpunk2077.app/Contents/MacOS/Cyberpunk2077" }
@@ -161,6 +223,10 @@ final class Model: ObservableObject {
         if native25Active {
             do { _ = try stageNativePluginScripts() }
             catch { return error.localizedDescription }
+            // Apply only the recognized, tested mod adaptations before compiling. Unknown or
+            // edited targets must stop here rather than launching with an incompatible cache.
+            let compatibility = runNctool(["compat25", gamePath])
+            guard compatibility.ok else { return lastLine(compatibility.out) }
         }
         let scriptsDir = "\(gamePath)/r6/scripts"
         stripAppleDoubles(scriptsDir)   // scc reads "._x.reds" sidecars as sources and stops ("Could not load script sources")
@@ -188,6 +254,7 @@ final class Model: ObservableObject {
     }
 
     func setGamePath(_ p: String) {
+        guard !busy else { return }
         gamePath = p
         defaults.set(p, forKey: "gamePath")
         refresh()
@@ -448,6 +515,7 @@ final class Model: ObservableObject {
     }
 
     func install() {
+        guard canChangeGameFiles() else { return }
         guard gameFound else { status = "Game not found."; return }
         guard let res = Bundle.main.resourceURL else { status = "Bundle resources missing."; return }
         gameVersion = readGameVersion()   // the game may have been updated since the app started
@@ -581,6 +649,7 @@ final class Model: ObservableObject {
     }
 
     func uninstall() {
+        guard canChangeGameFiles() else { return }
         let fm = FileManager.default
         for f in Const.payload {
             let p = "\(red4Dir)/\(f)"
@@ -611,6 +680,8 @@ final class Model: ObservableObject {
     }
 
     func play() {
+        refreshRunningGame()
+        guard !gameIsRunning else { status = "Cyberpunk 2077 is already running."; return }
         guard gameFound else { status = "Game not found."; return }
         guard !busy else { status = "Please wait for the current operation to finish."; return }
         gameVersion = readGameVersion()      // a game update while the app was open changes which files belong
@@ -652,6 +723,10 @@ final class Model: ObservableObject {
             catch { status = error.localizedDescription; return }
         }
         let sccReady = fm.isExecutableFile(atPath: sccGamePath)
+        if stageNative && !sccReady {
+            status = "Can't prepare 2.5 mods: the script compiler is missing. Click Install again."
+            return
+        }
         if needRegen || needCompile || canStagePlugins || stageNative {
             busy = true; progress = 0
             busyDetail = needRegen ? "Preparing mods…" : "Compiling scripts…"
@@ -735,6 +810,7 @@ final class Model: ObservableObject {
         env["DYLD_INSERT_LIBRARIES"] = inject
         env["DYLD_FORCE_FLAT_NAMESPACE"] = "1"
         env["SteamAppId"] = "1091500"
+        env["NCC_PERF"] = recordPerformance ? "1" : "0"
         // Arm the RED4ext loader's hooking gate (manual inline hooks for simple-prologue targets). Without
         // these, every plugin hook (ArchiveXL garment fixes, Codeware's WidgetSpawningService = the
         // dynamic-widget render fix for Codeware UI mods) silently no-ops. Keep this offset list in sync
@@ -830,6 +906,9 @@ final class Model: ObservableObject {
                 found.append(InstalledMod(name: name, manifestPath: mp, fileCount: files.count))
             }
         }
+        optionalModStatuses = Dictionary(uniqueKeysWithValues: optionalMods.compactMap { mod in
+            OptionalModCatalog.installedStatus(mod, gameRoot: URL(fileURLWithPath: gamePath)).map { (mod.id, $0) }
+        })
         mods = found.sorted { $0.name.lowercased() < $1.name.lowercased() }
     }
 
@@ -874,63 +953,84 @@ final class Model: ObservableObject {
         return nil
     }
 
-    // Install a dragged/picked mod (.zip or folder). Runs OFF the main thread (rawrepack of a large archive
-    // takes seconds) so the window never beachballs; streams live progress into busyDetail.
-    func installMod(from url: URL) {
+    func importVirtualAtelier(from urls: [URL]) {
+        guard canChangeGameFiles() else { return }
+        guard !ModImportPlan.hasVirtualAtelier(in: URL(fileURLWithPath: gamePath)) else {
+            status = "Virtual Atelier is already present. Keep it, or remove its existing installation before importing a replacement. See Guide for updating mods."
+            return
+        }
+        installMods(from: urls)
+    }
+
+    // A single queue handles every selected ZIP/folder, then compiles the complete set once.
+    // Freeze the destination while busy; changing it midway could deploy or compile into another game.
+    func installMod(from url: URL) { installMods(from: [url]) }
+
+    func installMods(from urls: [URL]) {
+        guard canChangeGameFiles() else { return }
+        guard !urls.isEmpty else { return }
+        do { try ModImportPlan.validate(urls) }
+        catch { status = error.localizedDescription; return }
         guard gameFound else { status = "Game not found."; return }
+        gameVersion = readGameVersion()
         guard fullyInstalled() else { status = "Install NightCity Console first, then add mods."; return }
         guard nctoolPath() != nil else { status = "nctool helper missing from the app bundle."; return }
-        guard !busy else { status = "Please wait for the current mod to finish installing."; return }
-        let base = url.deletingPathExtension().lastPathComponent
-        busy = true; progress = 0; busyDetail = "Reading \(base)…"; status = "Installing \(base)…"
+        let destination = gamePath
+        let manifestRoot = modsManifestDir
+        busy = true; progress = 0; busyDetail = "Reading mods…"; status = "Installing mods…"
         DispatchQueue.global(qos: .userInitiated).async {
-            let manifest = "\(self.modsManifestDir)/\(base).json"
-            // Phase 1: deploy (nctool install) drives the bar 0 -> 0.6.
-            let r = self.runNctoolStreaming(["install", url.path, self.gamePath, manifest]) { line in
-                if let p = self.parseProgress(line) {
-                    DispatchQueue.main.async {
-                        self.progress = p.frac * 0.6
-                        if !p.label.isEmpty { self.busyDetail = p.label + "…" }
-                    }
-                } else if let msg = self.friendlyProgress(line) {
-                    DispatchQueue.main.async { self.busyDetail = msg }
-                }
-            }
-            guard r.ok else {
-                DispatchQueue.main.async {
-                    self.busy = false; self.busyDetail = ""; self.progress = 0
-                    self.status = "Couldn't install \(base): \(self.lastLine(r.out))"
-                }
-                return
-            }
-            // Phase 2: regenerate game data (nctool regen) drives the bar 0.6 -> 1.0.
-            var g = (ok: true, out: "")
-            if self.pluginsSupported {
-                g = self.runNctoolStreaming(["regen", self.gamePath]) { line in
+            var completed: [String] = []
+            var failure: String?
+            for (index, url) in urls.enumerated() {
+                let base = ModImportPlan.manifestBase(for: url)
+                let manifest = "\(manifestRoot)/\(base).json"
+                DispatchQueue.main.async { self.busyDetail = "Installing \(base) (\(index + 1)/\(urls.count))…" }
+                let r = self.runNctoolStreaming(["install", url.path, destination, manifest]) { line in
                     if let p = self.parseProgress(line) {
                         DispatchQueue.main.async {
-                            self.progress = 0.6 + p.frac * 0.4
+                            self.progress = (Double(index) + min(1, max(0, p.frac))) / Double(urls.count) * 0.8
+                            if !p.label.isEmpty { self.busyDetail = p.label + "…" }
+                        }
+                    } else if let msg = self.friendlyProgress(line) {
+                        DispatchQueue.main.async { self.busyDetail = msg }
+                    }
+                }
+                guard r.ok else { failure = "Couldn't install \(base): \(self.lastLine(r.out))"; break }
+                completed.append(base)
+            }
+            var gameData = (ok: true, out: "")
+            if self.pluginsSupported {
+                gameData = self.runNctoolStreaming(["regen", destination]) { line in
+                    if let p = self.parseProgress(line) {
+                        DispatchQueue.main.async {
+                            self.progress = 0.8 + p.frac * 0.19
                             if !p.label.isEmpty { self.busyDetail = p.label + "…" }
                         }
                     }
                 }
             }
-            // Phase 3: if any .reds are deployed (this mod or an earlier one), recompile the script cache
-            // so redscript mods are live on the next launch. ~0.3s.
-            var scriptWarn: String? = nil
-            if self.hasScripts() && FileManager.default.isExecutableFile(atPath: self.sccGamePath) {
+            // Even a partial batch needs its successfully installed scripts prepared.
+            var scriptWarning: String?
+            if (self.native25Active || self.hasScripts()) && FileManager.default.isExecutableFile(atPath: self.sccGamePath) {
                 DispatchQueue.main.async { self.progress = 0.99; self.busyDetail = "Compiling scripts…" }
-                scriptWarn = self.compileScripts()
+                scriptWarning = self.compileScripts()
+            } else if self.native25Active {
+                scriptWarning = "The script compiler is missing. Click Install again."
             }
+            let installedNames = completed.joined(separator: ", ")
+            let problem = failure
+            let warning = scriptWarning
+            let dataResult = gameData
             DispatchQueue.main.async {
                 self.busy = false; self.busyDetail = ""; self.progress = 0
                 self.refreshMods()
-                if let w = scriptWarn {
-                    self.status = "Installed \(base), but its scripts failed to compile (mod inactive): \(w)"
-                } else {
-                    self.status = g.ok ? "Installed \(base) · click Play."
-                                       : "Installed \(base) (game-data warning: \(self.lastLine(g.out)))"
-                }
+                var messages: [String] = []
+                if !completed.isEmpty { messages.append("Installed \(installedNames).") }
+                if let problem { messages.append(problem) }
+                if let warning { messages.append("Scripts need attention before Play: \(warning)") }
+                if !dataResult.ok { messages.append("Game-data warning: \(self.lastLine(dataResult.out))") }
+                if problem == nil && warning == nil && dataResult.ok { messages.append("Click Play.") }
+                self.status = messages.joined(separator: " ")
             }
         }
     }
@@ -938,7 +1038,7 @@ final class Model: ObservableObject {
     // Uninstall: delete every file the manifest recorded, drop the manifest, regen the handoffs. Off the main
     // thread so the regen doesn't beachball the window.
     func removeMod(_ mod: InstalledMod) {
-        guard !busy else { status = "Please wait for the current operation to finish."; return }
+        guard canChangeGameFiles() else { return }
         busy = true; progress = 0; busyDetail = "Removing \(mod.name)…"; status = "Removing \(mod.name)…"
         DispatchQueue.global(qos: .userInitiated).async {
             let fm = FileManager.default
@@ -958,14 +1058,18 @@ final class Model: ObservableObject {
             }
             // Recompile the script cache so a removed script mod actually leaves the game - the compiled
             // cache would otherwise keep serving it. With zero script mods left this restores base scripts.
+            var scriptWarn: String? = nil
             if FileManager.default.isExecutableFile(atPath: self.sccGamePath) {
                 DispatchQueue.main.async { self.busyDetail = "Compiling scripts…" }
-                _ = self.compileScripts()
+                scriptWarn = self.compileScripts()
+            } else if self.native25Active {
+                scriptWarn = "The script compiler is missing. Click Install again."
             }
             DispatchQueue.main.async {
                 self.busy = false; self.busyDetail = ""; self.progress = 0
                 self.refreshMods()
-                self.status = "Removed \(mod.name)."
+                self.status = scriptWarn.map { "Removed \(mod.name), but scripts could not be prepared: \($0)" }
+                    ?? "Removed \(mod.name)."
             }
         }
     }
@@ -977,6 +1081,12 @@ final class Model: ObservableObject {
 
 struct ContentView: View {
     @StateObject private var m = Model()
+    @StateObject private var diagnostics = DiagnosticsExportController()
+    @State private var showOptionalMods = false
+    @State private var showModGuide = false
+    @State private var resolvingDrop = false
+
+    private var changesDisabled: Bool { m.busy || m.gameIsRunning || resolvingDrop }
 
     var versionMismatch: Bool {
         guard let v = m.gameVersion else { return false }
@@ -1026,6 +1136,7 @@ struct ContentView: View {
                         .lineLimit(1).truncationMode(.middle)
                     Spacer()
                     Button("Browse…") { browse() }
+                        .disabled(changesDisabled)
                 }
             }
 
@@ -1042,13 +1153,13 @@ struct ContentView: View {
 
             HStack(spacing: 12) {
                 Button(m.installed ? "Reinstall NightCity Console" : "Install") { m.install() }
-                    .disabled(!m.gameFound)
+                    .disabled(!m.gameFound || changesDisabled)
                 Button("Play  ▶") { m.play() }
-                    .disabled(!m.installed || m.busy)
+                    .disabled(!m.installed || changesDisabled)
                     .keyboardShortcut(.defaultAction)
                 Spacer()
                 Button("Uninstall NightCity Console") { m.uninstall() }
-                    .disabled(!m.installed)
+                    .disabled(!m.installed || changesDisabled)
             }
 
             if m.needsDiskAccess {
@@ -1063,12 +1174,30 @@ struct ContentView: View {
             HStack {
                 Text("MODS").font(.caption2).foregroundColor(.secondary)
                 Spacer()
-                Button("Add Mod…") { addMod() }.disabled(!m.installed || m.busy)
+                Button("Guide") { showModGuide = true }
+                Button("Optional Mods…") { showOptionalMods = true }
+                    .disabled(resolvingDrop)
+                Button("Add Mod…") { addMod() }.disabled(!m.installed || changesDisabled)
             }
             modDropZone
             modsList
 
             Spacer()
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Button(diagnostics.exporting ? "Exporting…" : "Export Diagnostics…") { exportDiagnostics() }
+                        .disabled(diagnostics.exporting)
+                        .help("Save a local support ZIP without closing the game. Nothing is uploaded.")
+                    if diagnostics.exporting { ProgressView().controlSize(.small) }
+                    Spacer()
+                    Toggle("Record performance on next launch", isOn: $m.recordPerformance)
+                        .toggleStyle(.checkbox).font(.caption)
+                        .help("Enable this, relaunch the game, reproduce the slowdown, then export diagnostics. Turn it off when finished.")
+                }
+                if !diagnostics.message.isEmpty {
+                    Text(diagnostics.message).font(.caption).foregroundColor(.secondary).lineLimit(2)
+                }
+            }
             HStack {
                 Text(m.status).font(.callout).foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1082,6 +1211,17 @@ struct ContentView: View {
         }
         .padding(22)
         .frame(width: 620, height: 640)
+        .sheet(isPresented: $showOptionalMods) { OptionalModsView(model: m) }
+        .sheet(isPresented: $showModGuide) { ModInstallationGuide() }
+    }
+
+    func exportDiagnostics() {
+        diagnostics.export(DiagnosticsSnapshot(
+            gameRoot: URL(fileURLWithPath: m.gamePath, isDirectory: true),
+            appBundle: Bundle.main.bundleURL, appVersion: Const.appVersion,
+            gameVersion: m.gameVersion, installed: m.installed, status: m.status,
+            operationInProgress: m.busy, native25: m.native25Active,
+            separateScriptCache: m.separateScriptCache, performanceRecordingRequested: m.recordPerformance))
     }
 
     // Dashed drop target: drag a mod .zip or folder onto it to install. While an install/remove runs it
@@ -1103,6 +1243,11 @@ struct ContentView: View {
                         .font(.caption2).foregroundColor(.secondary)
                 }
                 .padding(.horizontal, 12)
+            } else if resolvingDrop {
+                ProgressView("Reading dropped mods…").font(.callout)
+            } else if m.gameIsRunning {
+                Label("Quit the game before changing mods", systemImage: "pause.circle")
+                    .font(.callout).foregroundColor(.secondary)
             } else {
                 VStack(spacing: 3) {
                     Image(systemName: "tray.and.arrow.down").font(.title3).foregroundColor(.secondary)
@@ -1114,7 +1259,7 @@ struct ContentView: View {
         }
         .frame(height: 70)
         .onDrop(of: [UTType.fileURL], isTargeted: nil) { providers in
-            m.busy ? false : handleDrop(providers)
+            (!m.installed || changesDisabled) ? false : handleDrop(providers)
         }
     }
 
@@ -1132,7 +1277,7 @@ struct ContentView: View {
                             Spacer()
                             Button { m.removeMod(mod) } label: { Image(systemName: "trash") }
                                 .buttonStyle(.borderless).foregroundColor(.red)
-                                .disabled(m.busy)
+                                .disabled(changesDisabled)
                                 .help("Remove \(mod.name)")
                         }
                         .padding(.horizontal, 6).padding(.vertical, 3)
@@ -1144,36 +1289,35 @@ struct ContentView: View {
     }
 
     func addMod() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = true
-        panel.allowsMultipleSelection = true
-        panel.prompt = "Add"
-        panel.message = "Select a mod .zip or mod folder"
-        if panel.runModal() == .OK { for url in panel.urls { m.installMod(from: url) } }
+        guard m.installed, !changesDisabled else { return }
+        ModFilePicker.choose(message: "Select mod ZIPs or extracted mod folders", multiple: true) { urls in
+            guard !changesDisabled else { return }
+            m.installMods(from: urls)
+        }
     }
 
-    // Resolve dropped file URLs and install each. Returns true if any provider was a file URL.
+    // Resolve the whole drop first so a single batch owns the install operation.
     func handleDrop(_ providers: [NSItemProvider]) -> Bool {
-        var accepted = false
-        for provider in providers where provider.canLoadObject(ofClass: URL.self) {
-            accepted = true
-            _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                guard let url = url, url.isFileURL else { return }
-                DispatchQueue.main.async { m.installMod(from: url) }
-            }
+        guard m.installed, !changesDisabled else { return false }
+        resolvingDrop = true
+        let accepted = ModFilePicker.resolveDrops(providers) { urls in
+            resolvingDrop = false
+            guard !m.busy, !m.gameIsRunning, !urls.isEmpty else { return }
+            m.installMods(from: urls)
         }
+        if !accepted { resolvingDrop = false }
         return accepted
     }
 
     func browse() {
+        guard !changesDisabled else { return }
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.prompt = "Select"
         panel.message = "Select your 'Cyberpunk 2077' folder"
-        if panel.runModal() == .OK, let url = panel.url { m.setGamePath(url.path) }
+        if panel.runModal() == .OK, let url = panel.url, !changesDisabled { m.setGamePath(url.path) }
     }
 }
 

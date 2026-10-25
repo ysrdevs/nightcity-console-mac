@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "package": {
+    "name": "Virtual_Atelier_1.6.0_ozVyzb6ty.zip",
+    "sha256": "6ecb01efe1af73e156c722682e61ce1e6148d902d75d53dab2fa69fe692ffe1c",
+    "internal_Version_reds": "1.4.8 (stale; all 46 script files match accepted gameplay copy exactly)"
+  },
+  "source_archive_sha256": "f656c2be21585a85d234603ca3e69f508969891628e83dececf8b0877f7bc3bb",
+  "accepted_archive_sha256": "89e6aa1b0b39822c899f1c50dd196c529e38d8800c4e6d7249b192809bbb88ea",
+  "initial_verification_repack_sha256": "2b296f2eabfe3f8883d98c8f3e6bb88cbae530682460ea453da072856b4a1b30",
+  "archive_bytes": 315392,
+  "resource_count": 21,
+  "all_extracted_resources_identical": true,
+  "all_scripts_identical": 46,
+  "xl_sha256": "5363e59b012a7cbdcd61f0c7f0f30b70363828f6316c06b4c96554f10daf2803",
+  "xl_destination": "archive/Mac/mod/VirtualAtelier.archive.xl",
+  "container_diff": {
+    "only_differences": "21 file-entry timestamps plus their covering index CRC64",
+    "normalized_sha256": "06a0557fb3c41fb1a2dc3b60de59539ca35d3afd8b16df7458b504dc867a0571",
+    "normalization": "Read little-endian UInt64 index offset at archive +8; zero index+8..15 (CRC64), then zero each of 21 entry timestamps at index+28+56*i+8..15. Result identical for accepted and installer output.",
+    "cause": "Pinned WolvenKit ArchiveWriter.cs constructs every FileEntry with DateTime.Now."
+  },
+  "installer_validation": "Exact original input SHA selects raw repack; re-read output, verify count and SHA-256 of every extracted resource against nightcity-mod-compat.json; only then deploy output. Original archive bytes are not passed through.",
+  "scope": "Static ZIP and fake-game install checks only; accepted gameplay was with the identical extracted resources/scripts. No installed game was modified or launched."
+}

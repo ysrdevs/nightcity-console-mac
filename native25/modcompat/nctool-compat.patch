@@ -1,0 +1,609 @@
+From 691d477e3d8bb62301d4de6371162ece9696c8ba Mon Sep 17 00:00:00 2001
+From: ysrdevs <singh.yuvraj31@icloud.com>
+Date: Sun, 25 Oct 2026 01:32:38 -0500
+Subject: [PATCH 1/3] Changes
+
+---
+ _tools/nctool/NightCityModCompatibility.cs | 162 +++++++++++++++++++++
+ _tools/nctool/Program.cs                   |  48 +++++-
+ _tools/nctool/nctool.csproj                |   1 +
+ _tools/nctool/nightcity-mod-compat.json    |  50 +++++++
+ 4 files changed, 259 insertions(+), 2 deletions(-)
+ create mode 100644 _tools/nctool/NightCityModCompatibility.cs
+ create mode 100644 _tools/nctool/nightcity-mod-compat.json
+
+diff --git a/_tools/nctool/NightCityModCompatibility.cs b/_tools/nctool/NightCityModCompatibility.cs
+new file mode 100644
+index 0000000..eb7b36f
+--- /dev/null
++++ b/_tools/nctool/NightCityModCompatibility.cs
+@@ -0,0 +1,162 @@
++using System.Diagnostics;
++using System.Security.Cryptography;
++using System.Text;
++using System.Text.Json;
++using System.Text.RegularExpressions;
++
++// The catalog contains only the tested compatibility deltas and their MIT
++// notices. No mod archive, store pack or full mod script bundle is distributed.
++public static class NightCityModCompatibility
++{
++    static readonly Regex Tokens = new("\"(?:\\\\.|[^\"\\\\])*\"|//[^\\r\\n]*|/\\*[\\s\\S]*?\\*/|\\s+|[A-Za-z_][A-Za-z_0-9]*|[0-9]+|.", RegexOptions.Compiled);
++    public static string Normalize(string text) => text.TrimStart('\uFEFF').Replace("\r\n", "\n").Replace('\r', '\n');
++    static string Hash(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
++    public static string TokenHash(string text) => Hash(string.Join("\n", Tokens.Matches(Normalize(text)).Cast<Match>()
++        .Select(m => m.Value).Where(t => !string.IsNullOrWhiteSpace(t) && !t.StartsWith("//") && !t.StartsWith("/*"))));
++    static JsonDocument Catalog() => JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "nightcity-mod-compat.json")));
++
++    public static bool IsGame25(string game)
++    {
++        var info = Path.Combine(game, "Cyberpunk2077.app", "Contents", "Info.plist");
++        if (!File.Exists(info)) throw new InvalidOperationException("Game Info.plist is missing; select the Cyberpunk 2077 folder.");
++        var start = new ProcessStartInfo("/usr/bin/plutil") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
++        foreach (var arg in new[] { "-extract", "CFBundleShortVersionString", "raw", "-o", "-", info }) start.ArgumentList.Add(arg);
++        using var process = Process.Start(start)!;
++        var version = process.StandardOutput.ReadToEnd().Trim();
++        process.StandardError.ReadToEnd(); process.WaitForExit();
++        if (process.ExitCode != 0) throw new InvalidOperationException("Cannot read the game's version; reinstall or select a complete game folder.");
++        return version == "2.5.0";
++    }
++
++    static void RequireRegularPath(string file, string root)
++    {
++        for (FileSystemInfo item = new FileInfo(file); item != null; item = item is FileInfo f ? f.Directory : ((DirectoryInfo)item).Parent)
++        {
++            if (item.LinkTarget != null) throw new InvalidOperationException("A compatibility target is a symlink; install an ordinary mod copy before applying compatibility updates.");
++            if (item.FullName == Path.GetFullPath(root)) break;
++        }
++    }
++
++    public static Dictionary<string, byte[]> Plan(string directory)
++    {
++        var result = new Dictionary<string, byte[]>(StringComparer.Ordinal);
++        if (!Directory.Exists(directory)) return result;
++        var scripts = Directory.EnumerateFiles(directory, "*.reds", SearchOption.AllDirectories).ToDictionary(p => p, p => {
++            RequireRegularPath(p, directory); return File.ReadAllText(p);
++        }, StringComparer.Ordinal);
++        using var catalog = Catalog();
++        foreach (var mod in catalog.RootElement.GetProperty("mods").EnumerateArray())
++        {
++            var name = mod.GetProperty("name").GetString()!;
++            var version = mod.GetProperty("version").GetString()!;
++            var facade = new Regex(@"public\s+abstract\s+class\s+" + Regex.Escape(name) + @"\s*\{\s*public\s+static\s+func\s+Version\s*\(\s*\)\s*->\s*String\s*=\s*""([^""]+)""");
++            var versions = scripts.SelectMany(p => facade.Matches(Normalize(p.Value)).Cast<Match>().Select(m => m.Groups[1].Value)).ToArray();
++            var modFiles = scripts.Where(p => Regex.IsMatch(p.Value, @"(?m)^\s*(?:module|import)\s+" + Regex.Escape(name) + @"(?:\W|$)")).ToArray();
++            if (versions.Length == 0 && modFiles.Length == 0) continue;
++            if (versions.Length != 1 || versions[0] != version)
++                throw new InvalidOperationException($"{name}: install the supported {version} core package once. Unknown or duplicate versions were left unchanged.");
++            if (mod.TryGetProperty("methods", out var methods))
++            {
++                foreach (var method in methods.EnumerateArray())
++                {
++                    var methodName = method.GetProperty("name").GetString()!;
++                    var found = new List<(string file, int start, int length, string body)>();
++                    foreach (var entry in scripts)
++                    {
++                        var text = result.TryGetValue(entry.Key, out var pending) ? Encoding.UTF8.GetString(pending) : entry.Value;
++                        var pattern = new Regex(@"(?m)^(?:@[^\r\n]+\r?\n)+[^\r\n]*\bfunc\s+" + Regex.Escape(methodName) + @"\s*\(");
++                        foreach (Match match in pattern.Matches(text))
++                        {
++                            if (!match.Value.Contains("Method(EquipmentSystemPlayerData)")) continue;
++                            var depth = 0; var opened = false; var end = -1;
++                            foreach (Match token in Tokens.Matches(text, match.Index))
++                            {
++                                if (token.Value == "{") { opened = true; depth++; }
++                                else if (token.Value == "}" && opened && --depth == 0) { end = token.Index + token.Length; break; }
++                            }
++                            if (end < 0) throw new InvalidOperationException($"{name}: malformed {methodName}; restore the supported core package.");
++                            found.Add((entry.Key, match.Index, end - match.Index, text.Substring(match.Index, end - match.Index)));
++                        }
++                    }
++                    if (found.Count != 1) throw new InvalidOperationException($"{name}: expected one {methodName}; remove duplicate core scripts or restore {version}.");
++                    var target = found[0]; var actual = TokenHash(target.body);
++                    if (actual == method.GetProperty("after_token_sha256").GetString()) continue;
++                    if (actual != method.GetProperty("before_token_sha256").GetString())
++                        throw new InvalidOperationException($"{name}: {methodName} differs from the supported {version} code. Your edits were preserved; restore the core package before playing on 2.5.");
++                    var original = result.TryGetValue(target.file, out var bytes) ? Encoding.UTF8.GetString(bytes) : scripts[target.file];
++                    var replacement = method.GetProperty("replacement").GetString()!;
++                    if (target.body.Contains("\r\n")) replacement = replacement.Replace("\n", "\r\n");
++                    result[target.file] = Encoding.UTF8.GetBytes(original[..target.start] + replacement + original[(target.start + target.length)..]);
++                }
++            }
++            else
++            {
++                var variants = mod.GetProperty("files").EnumerateArray().ToArray();
++                var candidates = modFiles.Where(p => variants.Any(v => v.GetProperty("filename").GetString() == Path.GetFileName(p.Key))).ToArray();
++                if (candidates.Length != 1) throw new InvalidOperationException($"{name}: expected one original core file; remove duplicates or restore {version}.");
++                var target = candidates[0]; var actual = Hash(Normalize(target.Value));
++                var known = false;
++                foreach (var variant in variants)
++                {
++                    if (actual == variant.GetProperty("after_sha256").GetString()) { known = true; break; }
++                    if (actual != variant.GetProperty("before_sha256").GetString()) continue;
++                    var before = variant.GetProperty("before").GetString()!; var after = variant.GetProperty("after").GetString()!;
++                    var normalized = Normalize(target.Value);
++                    if (normalized.Split(before).Length != 2) throw new InvalidOperationException($"{name}: ambiguous compatibility target.");
++                    var updated = normalized.Replace(before, after);
++                    if (Hash(updated) != variant.GetProperty("after_sha256").GetString()) throw new InvalidOperationException($"{name}: compatibility output failed validation.");
++                    if (target.Value.Contains("\r\n")) updated = updated.Replace("\n", "\r\n");
++                    result[target.Key] = Encoding.UTF8.GetBytes(updated); known = true; break;
++                }
++                if (!known) throw new InvalidOperationException($"{name}: modified or unsupported {version} core file was preserved. Restore the supported core package before playing on 2.5.");
++            }
++        }
++        return result;
++    }
++
++    public static void Apply(Dictionary<string, byte[]> plan)
++    {
++        var originals = plan.ToDictionary(p => p.Key, p => File.ReadAllBytes(p.Key));
++        var changed = new List<string>();
++        try
++        {
++            foreach (var item in plan)
++            {
++                RequireRegularPath(item.Key, Path.GetDirectoryName(item.Key)!);
++                if (!File.ReadAllBytes(item.Key).SequenceEqual(originals[item.Key])) throw new IOException("A mod changed during compatibility preparation; retry when editing is finished.");
++                AtomicWrite(item.Key, item.Value); changed.Add(item.Key);
++            }
++        }
++        catch
++        {
++            foreach (var path in changed.AsEnumerable().Reverse()) AtomicWrite(path, originals[path]);
++            throw;
++        }
++    }
++    static void AtomicWrite(string path, byte[] bytes)
++    {
++        var temp = path + ".nightcity-" + Guid.NewGuid().ToString("N");
++        try { File.WriteAllBytes(temp, bytes); File.Move(temp, path, true); }
++        finally { if (File.Exists(temp)) File.Delete(temp); }
++    }
++
++    public static int UpgradeGame(string game)
++    {
++        try
++        {
++            if (!IsGame25(game)) return 0;
++            var plan = Plan(Path.Combine(game, "r6", "scripts"));
++            Apply(plan);
++            Console.WriteLine($"[COMPAT] 2.5 compatibility ready ({plan.Count} files updated).");
++            return 0;
++        }
++        catch (Exception e) { Console.Error.WriteLine("[COMPAT] " + e.Message); return 2; }
++    }
++
++    public static bool IsKnownNativeArchive(string path)
++    {
++        using var catalog = Catalog();
++        var hash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
++        return catalog.RootElement.GetProperty("native_archives").EnumerateArray().Any(v => v.GetString() == hash);
++    }
++}
+diff --git a/_tools/nctool/Program.cs b/_tools/nctool/Program.cs
+index 6a16186..073d66f 100644
+--- a/_tools/nctool/Program.cs
++++ b/_tools/nctool/Program.cs
+@@ -20,6 +20,7 @@ if (args.Length < 1)
+     Console.Error.WriteLine("  nctool install <mod .zip|folder> <gameDir>          (one-step: rawrepack + deploy a mod to the macOS game dirs)");
+     Console.Error.WriteLine("  nctool regen <gameDir>                               (self-contained: regenerate all 5 /tmp handoffs from installed mods)");
+     Console.Error.WriteLine("  nctool stageplugins <gameDir>                        (copy each plugin's Scripts/*.reds into r6/scripts; run before every compile)");
++    Console.Error.WriteLine("  nctool compat25 <gameDir>                            (apply tested mod script compatibility for native game 2.5)");
+     return 1;
+ }
+ 
+@@ -50,6 +51,8 @@ switch (mode)
+         break;
+     case "install":
+         return Install(args[1], args[2], args.Length > 3 ? args[3] : null);
++    case "compat25":
++        return NightCityModCompatibility.UpgradeGame(args[1]);
+     case "regen":
+         return Regen(args[1]);
+     case "stageplugins":
+@@ -658,6 +661,23 @@ int Install(string src, string gameDir, string manifestOut)
+         return 2;
+     }
+ 
++    // Validate the entire incoming compatibility plan before deploying anything.
++    // Source folders and ZIPs remain unchanged; only destination bytes adapt.
++    bool native25;
++    Dictionary<string, byte[]> compatibility;
++    try
++    {
++        native25 = NightCityModCompatibility.IsGame25(gameDir);
++        compatibility = native25 ? NightCityModCompatibility.Plan(srcDir) : new();
++        if (native25) NightCityModCompatibility.Plan(Path.Combine(gameDir, "r6", "scripts"));
++    }
++    catch (Exception e)
++    {
++        Console.Error.WriteLine("[COMPAT] " + e.Message);
++        if (tmpUnzip != null) Directory.Delete(tmpUnzip, true);
++        return 2;
++    }
++
+     // Destination roots on macOS.
+     var modArchiveDir = Path.Combine(gameDir, "archive", "Mac", "mod");
+     var xlBundleDir   = Path.Combine(gameDir, "red4ext", "plugins", "ArchiveXL", "Bundle");
+@@ -687,6 +707,12 @@ int Install(string src, string gameDir, string manifestOut)
+             if (name.EndsWith(".archive", StringComparison.OrdinalIgnoreCase))
+             {
+                 var outArc = Path.Combine(modArchiveDir, name);
++                if (native25 && NightCityModCompatibility.IsKnownNativeArchive(path))
++                {
++                    File.Copy(path, outArc, true);
++                    Console.WriteLine($"[INSTALL] archive {name} -> archive/Mac/mod/ (verified native resource)");
++                    deployed.Add(outArc); archives++; continue;
++                }
+                 var loose = Path.Combine(tmpRoot, "arc_" + archives);
+                 Console.WriteLine($"[INSTALL] archive {name} -> rawrepack -> archive/Mac/mod/");
+                 double bse = (double)archives / Math.Max(1, nArch), spn = 1.0 / Math.Max(1, nArch);
+@@ -700,7 +726,9 @@ int Install(string src, string gameDir, string manifestOut)
+             }
+             if (name.EndsWith(".xl", StringComparison.OrdinalIgnoreCase))
+             {
+-                var xlDst = Path.Combine(xlBundleDir, name);
++                var pairedArchive = path.Substring(0, path.Length - 3);
++                var nativePair = native25 && File.Exists(pairedArchive) && NightCityModCompatibility.IsKnownNativeArchive(pairedArchive);
++                var xlDst = Path.Combine(nativePair ? modArchiveDir : xlBundleDir, name);
+                 File.Copy(path, xlDst, true);
+                 Console.WriteLine($"[INSTALL] xl {name} -> ArchiveXL/Bundle/");
+                 deployed.Add(xlDst);
+@@ -727,16 +755,32 @@ int Install(string src, string gameDir, string manifestOut)
+             var subRel = rel.Substring(ms + "r6/scripts/".Length);
+             var dst = Path.Combine(gameDir, "r6", "scripts", subRel.Replace('/', Path.DirectorySeparatorChar));
+             Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
+-            File.Copy(path, dst, true);
++            if (compatibility.TryGetValue(path, out var adapted)) File.WriteAllBytes(dst, adapted);
++            else File.Copy(path, dst, true);
+             deployed.Add(dst);
+             scripts++;
+             continue;
+         }
+ 
++        int mh = lower.IndexOf("r6/config/redsuserhints/", StringComparison.Ordinal);
++        if (mh >= 0)
++        {
++            var dst = Path.Combine(gameDir, "r6", "config", "redsUserHints", rel.Substring(mh + "r6/config/redsuserhints/".Length));
++            Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
++            File.Copy(path, dst, true); deployed.Add(dst); scripts++; continue;
++        }
++
+         // c) red4ext/plugins/** CONFIG (not native binaries - mods ship Windows .dll, useless on mac).
+         int mp = lower.IndexOf("red4ext/plugins/", StringComparison.Ordinal);
+         if (mp >= 0)
+         {
++            var pluginPath = rel.Substring(mp + "red4ext/plugins/".Length);
++            var pluginName = pluginPath.Split('/')[0];
++            if (native25 && new[] { "Codeware", "ArchiveXL", "TweakXL" }.Contains(pluginName, StringComparer.OrdinalIgnoreCase))
++            {
++                Console.WriteLine($"[INSTALL] {pluginName} is supplied by NightCity Console for native 2.5; preserving its tested files.");
++                skipped++; continue;
++            }
+             if (name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ||
+                 name.EndsWith(".dylib", StringComparison.OrdinalIgnoreCase) ||
+                 name.EndsWith(".so", StringComparison.OrdinalIgnoreCase))
+diff --git a/_tools/nctool/nctool.csproj b/_tools/nctool/nctool.csproj
+index db81d79..cd0880f 100644
+--- a/_tools/nctool/nctool.csproj
++++ b/_tools/nctool/nctool.csproj
+@@ -7,6 +7,7 @@
+     <AssemblyName>nctool</AssemblyName>
+   </PropertyGroup>
+   <ItemGroup>
++    <None Update="nightcity-mod-compat.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+     <ProjectReference Include="..\..\_refs\WolvenKit\WolvenKit.RED4\WolvenKit.RED4.csproj" />
+     <ProjectReference Include="..\..\_refs\WolvenKit\WolvenKit.Common\WolvenKit.Common.csproj" />
+   </ItemGroup>
+diff --git a/_tools/nctool/nightcity-mod-compat.json b/_tools/nctool/nightcity-mod-compat.json
+new file mode 100644
+index 0000000..55c613b
+--- /dev/null
++++ b/_tools/nctool/nightcity-mod-compat.json
+@@ -0,0 +1,50 @@
++{
++  "schema": 1,
++  "game_version": "2.5.0",
++  "mods": [
++    {
++      "name": "CyberwareEx",
++      "version": "1.5.6",
++      "source_commit": "855d9a42eecdb635d5c9d15e6949107b9b3b1b00",
++      "methods": [
++        {
++          "name": "GetActiveItem",
++          "before_token_sha256": "30532f1bab45a32d1e4e362a884b094d8aae55d3c6121b0ee1955ed29dae2e9c",
++          "after_token_sha256": "05890a8948e95cf58a2e70c63bc81dcd96b2e3ec456bc82de1e9cc7d440a3549",
++          "replacement": "@wrapMethod(EquipmentSystemPlayerData)\npublic final const func GetActiveItem(equipArea: gamedataEquipmentArea, opt isLeftHandWeapon: Bool) -> ItemID {\n    if Equals(equipArea, gamedataEquipmentArea.SystemReplacementCW) {\n        return this.GetTaggedItem(equipArea, n\"Cyberdeck\");\n    }\n\n    // Game 2.5 uses this flag to resolve the active left-hand weapon. Preserve\n    // the game's selection for every area outside the mod's cyberdeck lookup.\n    return wrappedMethod(equipArea, isLeftHandWeapon);\n}"
++        },
++        {
++          "name": "UpdateArmSlot",
++          "before_token_sha256": "b28b9ac9d487ae78aab50525253107d1d60b8a40029db89cc6e3781b07d73897",
++          "after_token_sha256": "766cf4445eb8cedcf326f07599282b7415c4f5a73f3a56c5d20f9d7c5a70e603",
++          "replacement": "@if(!ModuleExists(\"CyberarmOverhaul\"))\n@wrapMethod(EquipmentSystemPlayerData)\npublic final static func UpdateArmSlot(owner: ref<gamePuppet>, itemToDraw: ItemID, equipHolsteredItem: Bool) {\n    // The 2.5 method also accepts non-player puppets. Keep their original game\n    // behavior, while retaining Cyberware-EX's player and Johnny handling.\n    let player = owner as PlayerPuppet;\n    if !IsDefined(player) {\n        wrappedMethod(owner, itemToDraw, equipHolsteredItem);\n        return;\n    }\n    if !ItemID.IsValid(itemToDraw) || player.IsJohnnyReplacer() {\n      return;\n    }\n\n    let equipmentData = EquipmentSystem.GetData(owner);\n\n    if !IsDefined(equipmentData) {\n      return;\n    }\n\n    let transactionSystem = GameInstance.GetTransactionSystem(owner.GetGame());\n    let rightWeapon = transactionSystem.GetItemInSlot(owner, t\"AttachmentSlots.WeaponRight\");\n    let leftWeapon = transactionSystem.GetItemInSlot(owner, t\"AttachmentSlots.WeaponLeft\");\n    let rightRecord: wref<Item_Record>;\n    let leftRecord: wref<Item_Record>;\n    if IsDefined(rightWeapon) {\n        rightRecord = TweakDBInterface.GetItemRecord(ItemID.GetTDBID(rightWeapon.GetItemID()));\n    }\n    if IsDefined(leftWeapon) {\n        leftRecord = TweakDBInterface.GetItemRecord(ItemID.GetTDBID(leftWeapon.GetItemID()));\n    }\n\n    let cyberArmsInUse = IsDefined(rightRecord) && rightRecord.TagsContains(n\"Meleeware\");\n    let launcherInUse = IsDefined(leftRecord) && leftRecord.TagsContains(n\"ProjectileLauncher\");\n\n    let meleeWareID = ItemID.None();\n    let slotIndex = 0;\n    let equipAreaIndex = equipmentData.GetEquipAreaIndex(gamedataEquipmentArea.ArmsCW);\n    if equipAreaIndex < 0 || equipAreaIndex >= ArraySize(equipmentData.m_equipment.equipAreas) {\n        return;\n    }\n    let numberOfSlots = ArraySize(equipmentData.m_equipment.equipAreas[equipAreaIndex].equipSlots);\n    while slotIndex < numberOfSlots {\n        let itemID = equipmentData.m_equipment.equipAreas[equipAreaIndex].equipSlots[slotIndex].itemID;\n        if ItemID.IsValid(itemID) {\n            meleeWareID = itemID;\n            let itemRecord = TweakDBInterface.GetItemRecord(ItemID.GetTDBID(itemID));\n            if IsDefined(itemRecord) && !itemRecord.TagsContains(n\"ProjectileLauncher\") {\n                break;\n            }\n        }\n        slotIndex += 1;\n    }\n\n    if !ItemID.IsValid(meleeWareID) {\n        meleeWareID = equipmentData.GetBaseFistsItemID();\n    }\n\n    if !launcherInUse && !cyberArmsInUse {\n        let meleeWareRecord = TweakDBInterface.GetWeaponItemRecord(ItemID.GetTDBID(meleeWareID));\n        if !IsDefined(meleeWareRecord) || !IsDefined(meleeWareRecord.HolsteredItem()) {\n            return;\n        }\n        let holsteredArmsID = ItemID.CreateQuery(meleeWareRecord.HolsteredItem().GetID());\n        if !ItemID.IsValid(holsteredArmsID) {\n            return;\n        }\n\n        if !transactionSystem.HasItem(owner, holsteredArmsID) {\n            transactionSystem.GiveItem(owner, holsteredArmsID, 1);\n        }\n\n        EquipmentSystemPlayerData.ForceQualityAndDuplicateStatsShard(owner, meleeWareID, holsteredArmsID);\n\n        if !equipmentData.IsEquipped(holsteredArmsID) {\n            equipmentData.EquipItem(holsteredArmsID, false, false);\n        }\n    } else {\n        equipmentData.UnequipItem(equipmentData.GetEquipAreaIndex(gamedataEquipmentArea.RightArm), 0, true);\n    }\n}"
++        }
++      ]
++    },
++    {
++      "name": "EquipmentEx",
++      "version": "1.2.9",
++      "source_commit": "3208ff4c1caa2e3f08c3e20a8e7c3e6b1e95124d",
++      "files": [
++        {
++          "filename": "EquipmentEx.Global.reds",
++          "before_sha256": "a841b96564e720119ed00fdf5250dff45a1209ec43a336aec431efe2df021d7c",
++          "after_sha256": "f17e756eca72d8efb1c54db64ce51081526a2ef2dae72dc21202fb0fbc14210a",
++          "before": "while i <= ArraySize(this.m_clothingVisualsInfo)",
++          "after": "while i < ArraySize(this.m_clothingVisualsInfo)"
++        },
++        {
++          "filename": "EquipmentSystem.reds",
++          "before_sha256": "d3cfbac3e59733a71e2028dc6c8fd23c14d1e2ca11c0eb1f858a986bae9815ea",
++          "after_sha256": "eeac5c35ec4e36f8b6f60e1b83781aa2f6873f3c6ba6cf5f077a4ab3df5711db",
++          "before": "while i <= ArraySize(this.m_clothingVisualsInfo)",
++          "after": "while i < ArraySize(this.m_clothingVisualsInfo)"
++        }
++      ]
++    }
++  ],
++  "native_archives": [
++    "55a438e9315ca227f12f90aacec0711914bd9241e60307242c204410f45ecf8e",
++    "89e6aa1b0b39822c899f1c50dd196c529e38d8800c4e6d7249b192809bbb88ea"
++  ]
++}
+-- 
+2.54.0 (Apple Git-157)
+
+
+From f7d2ab77281ed639e73574f7124c4d982a65baf8 Mon Sep 17 00:00:00 2001
+From: ysrdevs <singh.yuvraj31@icloud.com>
+Date: Sun, 25 Oct 2026 01:44:50 -0500
+Subject: [PATCH 2/3] Changes
+
+---
+ _tools/nctool/NightCityModCompatibility.cs | 26 ++++++++++++++++---
+ _tools/nctool/Program.cs                   | 30 +++++++++++++++++++---
+ _tools/nctool/nightcity-mod-compat.json    | 30 ++++++++++++++++++++++
+ 3 files changed, 80 insertions(+), 6 deletions(-)
+
+diff --git a/_tools/nctool/NightCityModCompatibility.cs b/_tools/nctool/NightCityModCompatibility.cs
+index eb7b36f..9385542 100644
+--- a/_tools/nctool/NightCityModCompatibility.cs
++++ b/_tools/nctool/NightCityModCompatibility.cs
+@@ -52,7 +52,11 @@ public static class NightCityModCompatibility
+             var facade = new Regex(@"public\s+abstract\s+class\s+" + Regex.Escape(name) + @"\s*\{\s*public\s+static\s+func\s+Version\s*\(\s*\)\s*->\s*String\s*=\s*""([^""]+)""");
+             var versions = scripts.SelectMany(p => facade.Matches(Normalize(p.Value)).Cast<Match>().Select(m => m.Groups[1].Value)).ToArray();
+             var modFiles = scripts.Where(p => Regex.IsMatch(p.Value, @"(?m)^\s*(?:module|import)\s+" + Regex.Escape(name) + @"(?:\W|$)")).ToArray();
+-            if (versions.Length == 0 && modFiles.Length == 0) continue;
++            // Optional integrations may import another mod without installing
++            // that mod (VA does this for Equipment). Imports alone are not cores.
++            var declaresCore = scripts.Any(p => Regex.IsMatch(p.Value, @"(?m)^\s*module\s+" + Regex.Escape(name) + @"(?:\W|$)")
++                || Regex.IsMatch(p.Value, @"\bclass\s+" + Regex.Escape(name) + @"\s*\{"));
++            if (versions.Length == 0 && !declaresCore) continue;
+             if (versions.Length != 1 || versions[0] != version)
+                 throw new InvalidOperationException($"{name}: install the supported {version} core package once. Unknown or duplicate versions were left unchanged.");
+             if (mod.TryGetProperty("methods", out var methods))
+@@ -61,7 +65,7 @@ public static class NightCityModCompatibility
+                 {
+                     var methodName = method.GetProperty("name").GetString()!;
+                     var found = new List<(string file, int start, int length, string body)>();
+-                    foreach (var entry in scripts)
++                    foreach (var entry in modFiles)
+                     {
+                         var text = result.TryGetValue(entry.Key, out var pending) ? Encoding.UTF8.GetString(pending) : entry.Value;
+                         var pattern = new Regex(@"(?m)^(?:@[^\r\n]+\r?\n)+[^\r\n]*\bfunc\s+" + Regex.Escape(methodName) + @"\s*\(");
+@@ -153,10 +157,26 @@ public static class NightCityModCompatibility
+         catch (Exception e) { Console.Error.WriteLine("[COMPAT] " + e.Message); return 2; }
+     }
+ 
++    static string FileHash(string path)
++    {
++        using var stream = File.OpenRead(path);
++        return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
++    }
++
+     public static bool IsKnownNativeArchive(string path)
+     {
+         using var catalog = Catalog();
+-        var hash = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
++        var hash = FileHash(path);
+         return catalog.RootElement.GetProperty("native_archives").EnumerateArray().Any(v => v.GetString() == hash);
+     }
++
++    public static Dictionary<string, string>? KnownRepackResources(string path)
++    {
++        using var catalog = Catalog();
++        var hash = FileHash(path);
++        foreach (var input in catalog.RootElement.GetProperty("verified_repacks").EnumerateArray())
++            if (input.GetProperty("input_sha256").GetString() == hash)
++                return input.GetProperty("resources").EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString()!, StringComparer.Ordinal);
++        return null;
++    }
+ }
+diff --git a/_tools/nctool/Program.cs b/_tools/nctool/Program.cs
+index 073d66f..df2741a 100644
+--- a/_tools/nctool/Program.cs
++++ b/_tools/nctool/Program.cs
+@@ -717,7 +717,31 @@ int Install(string src, string gameDir, string manifestOut)
+                 Console.WriteLine($"[INSTALL] archive {name} -> rawrepack -> archive/Mac/mod/");
+                 double bse = (double)archives / Math.Max(1, nArch), spn = 1.0 / Math.Max(1, nArch);
+                 progressSink = (f, lbl) => Prog(bse + f * spn, lbl);
+-                RawRepack(path, loose, outArc);
++                var expectedResources = native25 ? NightCityModCompatibility.KnownRepackResources(path) : null;
++                var repacked = expectedResources != null ? Path.Combine(tmpRoot, name) : outArc;
++                if (RawRepack(path, loose, repacked) != 0)
++                    throw new InvalidOperationException($"{name}: archive conversion failed; restore the original mod package.");
++                if (expectedResources != null)
++                {
++                    // ArchiveWriter uses current timestamps, so verify the actual
++                    // unpacked resources against the accepted game's content.
++                    var reader = new ArchiveReader();
++                    if (reader.ReadArchive(repacked, hash, out var verified) != ArchiveErr.NoError || verified.FileCount != expectedResources.Count)
++                        throw new InvalidOperationException($"{name}: converted archive failed its resource count check.");
++                    foreach (var entry in verified.Files.Values.OfType<FileEntry>())
++                    {
++                        var resource = entry.Name.Replace('\\', '/');
++                        using var extracted = new MemoryStream();
++                        entry.Extract(extracted);
++                        extracted.Position = 0;
++                        var actual = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(extracted)).ToLowerInvariant();
++                        if (!expectedResources.TryGetValue(resource, out var expected) || actual != expected)
++                            throw new InvalidOperationException($"{name}: converted resource differs from the tested version ({resource}).");
++                    }
++                    verified.ReleaseFileHandle();
++                    File.Move(repacked, outArc, true);
++                    Console.WriteLine($"[INSTALL] verified {expectedResources.Count} resources against the tested native archive");
++                }
+                 progressSink = null;
+                 try { Directory.Delete(loose, true); } catch { }
+                 deployed.Add(outArc);
+@@ -727,10 +751,10 @@ int Install(string src, string gameDir, string manifestOut)
+             if (name.EndsWith(".xl", StringComparison.OrdinalIgnoreCase))
+             {
+                 var pairedArchive = path.Substring(0, path.Length - 3);
+-                var nativePair = native25 && File.Exists(pairedArchive) && NightCityModCompatibility.IsKnownNativeArchive(pairedArchive);
++                var nativePair = native25 && File.Exists(pairedArchive) && (NightCityModCompatibility.IsKnownNativeArchive(pairedArchive) || NightCityModCompatibility.KnownRepackResources(pairedArchive) != null);
+                 var xlDst = Path.Combine(nativePair ? modArchiveDir : xlBundleDir, name);
+                 File.Copy(path, xlDst, true);
+-                Console.WriteLine($"[INSTALL] xl {name} -> ArchiveXL/Bundle/");
++                Console.WriteLine($"[INSTALL] xl {name} -> {(nativePair ? "archive/Mac/mod/" : "ArchiveXL/Bundle/")}");
+                 deployed.Add(xlDst);
+                 xls++;
+                 continue;
+diff --git a/_tools/nctool/nightcity-mod-compat.json b/_tools/nctool/nightcity-mod-compat.json
+index 55c613b..541a02b 100644
+--- a/_tools/nctool/nightcity-mod-compat.json
++++ b/_tools/nctool/nightcity-mod-compat.json
+@@ -46,5 +46,35 @@
+   "native_archives": [
+     "55a438e9315ca227f12f90aacec0711914bd9241e60307242c204410f45ecf8e",
+     "89e6aa1b0b39822c899f1c50dd196c529e38d8800c4e6d7249b192809bbb88ea"
++  ],
++  "verified_repacks": [
++    {
++      "name": "Virtual Atelier 1.6.0",
++      "input_sha256": "f656c2be21585a85d234603ca3e69f508969891628e83dececf8b0877f7bc3bb",
++      "accepted_archive_sha256": "89e6aa1b0b39822c899f1c50dd196c529e38d8800c4e6d7249b192809bbb88ea",
++      "resources": {
++        "base/gameplay/gui/virtual_atelier.inkatlas": "f6833fff0fb9bb7170b86cf11c2a5b27f1c551ab04a3f97c478a8ced1dd200a9",
++        "base/gameplay/gui/virtual_atelier.inkwidget": "2713091d11c1d1f4ac004ab070828213c33364ea5c165c5ff189c7c76eee2c6b",
++        "base/gameplay/gui/virtual_atelier.xbm": "65e4acef9846c8f1f266daa0c0bbb11cbb009ffd371a9ee65939917a51d7d0ef",
++        "base/gameplay/gui/virtual_atelier_1080p.xbm": "a44e1c0df179c7215ebed70d92fb30dfe8c369209ac70b415c0c52333284e654",
++        "base/gameplay/gui/virtual_atelier_cart.inkatlas": "aeb514f276371a095cca7c7e07e13c138c1e6faa9f354c8225a29e48bbec2fb8",
++        "base/gameplay/gui/virtual_atelier_cart.xbm": "0b79d0d0e53e32b74fea2ce5cc093e7d5d9a000bce0ea09a5176edb706a7de53",
++        "base/gameplay/gui/virtual_atelier_owned.inkatlas": "b0666b1ace26d47a991eb363263f57fcfc7a75a13ecce950867bb98345668da8",
++        "base/gameplay/gui/virtual_atelier_owned.xbm": "b3f25008f5db3bdc95a7b5cd0c28d3141fa2abaa98f2039cd96b75ce3cc2b0ef",
++        "base/gameplay/gui/virtual_atelier_preview.inkwidget": "726787256c7169c41c66c6555f646e02e008c5d703b1c5e9bf69e37a3f3bfbca",
++        "base/gameplay/gui/virtual_atelier_slots.inkwidget": "3942ea6cb5c33e73ef925605e4b4b5bd47da68f086c4ce15b1bddaf6ebc775a9",
++        "base/gameplay/gui/virtual_atelier_stores.inkwidget": "e03efae363f47a36ff4fd40e5dd99578bbf07449c8c9fe0f4f73659d0b263a27",
++        "base/localization/cz-cz/onscreens/virtual-atelier.json": "03fcf8aad8d2d0b30ee5e01dc56ef13d1732a6c173ff13dd75d14922eb0441cd",
++        "base/localization/de-de/onscreens/virtual-atelier.json": "d084b07c918d12c07d1c92a0872aa2959277e48444c9de1aa9a0a289463daac8",
++        "base/localization/en-us/onscreens/virtual-atelier.json": "df63c8696d417f76a3ba64f9bb06de371341976a543b8e3c6750b23b22418b54",
++        "base/localization/fr-fr/onscreens/virtual-atelier.json": "b65b4cf40bca77f0ecb22b441e7e93d02e2025dbcbdf9648b40cdd53a93048ac",
++        "base/localization/it-it/onscreens/virtual-atelier.json": "6a88a48aca2b2154c64ec798580907af1cc34e83958a99ffabff7f83bc13aae3",
++        "base/localization/pt-br/onscreens/virtual-atelier.json": "d95052915c1d3b99eca4010ce88f0ae71045fee51c778147ba57be3c5642f858",
++        "base/localization/ru-ru/onscreens/virtual-atelier.json": "75d15db0916e3e16fc91da8480373668c4b8e403e24fdcc3aa2a5aa927f2d6be",
++        "base/localization/tr-tr/onscreens/virtual-atelier.json": "a602a710e172b0ad9262e66e34f963405e65f4a2229f94c510fc72de1d73a89c",
++        "base/localization/zh-cn/onscreens/virtual-atelier.json": "cd8047ca316a5265844df6dbb287750c379ecdc06a6cf653af95e72bc4f153b0",
++        "base/localization/zh-tw/onscreens/virtual-atelier.json": "9edaa0b58619e664a925a8bc04be9ec41266ff5aa4cecdb518cbcdf9c330337f"
++      }
++    }
+   ]
+ }
+-- 
+2.54.0 (Apple Git-157)
+
+
+From 2d61fb917006bf6d7cee19535bb29262d9eaa75b Mon Sep 17 00:00:00 2001
+From: ysrdevs <singh.yuvraj31@icloud.com>
+Date: Sun, 25 Oct 2026 01:47:03 -0500
+Subject: [PATCH 3/3] Changes
+
+---
+ _tools/nctool/NightCityModCompatibility.cs | 33 ++++++++++++++++++----
+ _tools/nctool/Program.cs                   |  5 ++--
+ 2 files changed, 30 insertions(+), 8 deletions(-)
+
+diff --git a/_tools/nctool/NightCityModCompatibility.cs b/_tools/nctool/NightCityModCompatibility.cs
+index 9385542..a4d3192 100644
+--- a/_tools/nctool/NightCityModCompatibility.cs
++++ b/_tools/nctool/NightCityModCompatibility.cs
+@@ -37,12 +37,22 @@ public static class NightCityModCompatibility
+         }
+     }
+ 
+-    public static Dictionary<string, byte[]> Plan(string directory)
++    public sealed class CompatibilityPlan : Dictionary<string, byte[]>
+     {
+-        var result = new Dictionary<string, byte[]>(StringComparer.Ordinal);
++        public string Root { get; }
++        internal Dictionary<string, byte[]> Originals { get; } = new(StringComparer.Ordinal);
++        public CompatibilityPlan(string root) : base(StringComparer.Ordinal) { Root = Path.GetFullPath(root); }
++    }
++
++    public static CompatibilityPlan Plan(string directory)
++    {
++        var result = new CompatibilityPlan(directory);
+         if (!Directory.Exists(directory)) return result;
+         var scripts = Directory.EnumerateFiles(directory, "*.reds", SearchOption.AllDirectories).ToDictionary(p => p, p => {
+-            RequireRegularPath(p, directory); return File.ReadAllText(p);
++            RequireRegularPath(p, directory);
++            var bytes = File.ReadAllBytes(p); result.Originals[p] = bytes;
++            using var reader = new StreamReader(new MemoryStream(bytes), Encoding.UTF8, true);
++            return reader.ReadToEnd();
+         }, StringComparer.Ordinal);
+         using var catalog = Catalog();
+         foreach (var mod in catalog.RootElement.GetProperty("mods").EnumerateArray())
+@@ -118,15 +128,26 @@ public static class NightCityModCompatibility
+         return result;
+     }
+ 
+-    public static void Apply(Dictionary<string, byte[]> plan)
++    public static void Validate(CompatibilityPlan plan)
++    {
++        foreach (var item in plan)
++        {
++            RequireRegularPath(item.Key, plan.Root);
++            if (!File.ReadAllBytes(item.Key).SequenceEqual(plan.Originals[item.Key]))
++                throw new IOException("A mod changed during compatibility preparation; retry when editing is finished.");
++        }
++    }
++
++    public static void Apply(CompatibilityPlan plan)
+     {
+-        var originals = plan.ToDictionary(p => p.Key, p => File.ReadAllBytes(p.Key));
++        Validate(plan); // Compare with the bytes actually validated by Plan, before any write.
++        var originals = plan.Originals;
+         var changed = new List<string>();
+         try
+         {
+             foreach (var item in plan)
+             {
+-                RequireRegularPath(item.Key, Path.GetDirectoryName(item.Key)!);
++                RequireRegularPath(item.Key, plan.Root);
+                 if (!File.ReadAllBytes(item.Key).SequenceEqual(originals[item.Key])) throw new IOException("A mod changed during compatibility preparation; retry when editing is finished.");
+                 AtomicWrite(item.Key, item.Value); changed.Add(item.Key);
+             }
+diff --git a/_tools/nctool/Program.cs b/_tools/nctool/Program.cs
+index df2741a..cc8808d 100644
+--- a/_tools/nctool/Program.cs
++++ b/_tools/nctool/Program.cs
+@@ -664,12 +664,13 @@ int Install(string src, string gameDir, string manifestOut)
+     // Validate the entire incoming compatibility plan before deploying anything.
+     // Source folders and ZIPs remain unchanged; only destination bytes adapt.
+     bool native25;
+-    Dictionary<string, byte[]> compatibility;
++    NightCityModCompatibility.CompatibilityPlan compatibility;
+     try
+     {
+         native25 = NightCityModCompatibility.IsGame25(gameDir);
+-        compatibility = native25 ? NightCityModCompatibility.Plan(srcDir) : new();
++        compatibility = native25 ? NightCityModCompatibility.Plan(srcDir) : new(srcDir);
+         if (native25) NightCityModCompatibility.Plan(Path.Combine(gameDir, "r6", "scripts"));
++        NightCityModCompatibility.Validate(compatibility);
+     }
+     catch (Exception e)
+     {
+-- 
+2.54.0 (Apple Git-157)
+

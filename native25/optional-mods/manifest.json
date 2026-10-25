@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "game_version": "2.5.0",
+  "mods": [
+    {
+      "id": "equipment-ex",
+      "name": "Equipment-EX",
+      "version": "1.2.9",
+      "package": "equipment-ex-1.2.9.zip",
+      "license": "MIT",
+      "license_path": "licenses/EquipmentEx-MIT.txt",
+      "source_url": "https://github.com/psiberx/cp2077-equipment-ex",
+      "script_directory": "r6/scripts/EquipmentEx",
+      "sha256": "e253f5a4ceb963f26d9ff4350977903f2492e19410912a54a4d0fee484453b7b"
+    },
+    {
+      "id": "cyberware-ex",
+      "name": "Cyberware-EX",
+      "version": "1.5.6",
+      "package": "cyberware-ex-1.5.6.zip",
+      "license": "MIT",
+      "license_path": "licenses/CyberwareEx-MIT.txt",
+      "source_url": "https://github.com/psiberx/cp2077-cyberware-ex",
+      "script_directory": "r6/scripts/CyberwareEx",
+      "sha256": "ac72557fb7188dad0de4868d54a1c12a7c9c1f42d65104d4a83e71292c1c0ee0"
+    }
+  ]
+}

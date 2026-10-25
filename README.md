@@ -30,8 +30,11 @@ A native Apple Silicon in-game console, cheat menu, and item browser for Cyberpu
 
 ## Status
 
-macOS arm64 (Apple Silicon, M1/M2/M3/M4). Built and verified against Cyberpunk 2077 v2.3.1 (Steam). It also runs on v2.5 (Steam): the console, item spawning (the catalog includes the items new in 2.5), cheats, the overlay and loose `.archive` mods (2.5 loads `archive/Mac/mod` itself; the launcher removes the `._*` files macOS writes on exFAT drives, which the game would otherwise try to load and crash on). On 2.5 the launcher installs the native macOS RED4ext loader with 2.5 builds of TweakXL and ArchiveXL instead of the 2.3.1 ones; the loader only loads plugins whose game addresses are verified for 2.5, so other RED4ext plugins built for 2.3.1 (Codeware and the like) stay unloaded. ArchiveXL's resource bundle (its `ArchiveXL.archive` and `.xl` fixes for player customization) comes from the official ArchiveXL release of the same version. GOG support is in progress. The offsets and hashes are derived from the Steam macOS build, so other distributions are not supported yet.
+**1.7.0 adds Virtual Atelier, Cyberware-EX and Equipment-EX support on Cyberpunk 2077 2.5.0, native macOS Steam.** Store browsing and purchases, dual operating systems, wardrobe outfits, and save/relaunch persistence have passed local player testing together. The Iconic Weapon Creator, console commands and existing 2.3.1 compatibility remain part of the app.
 
+The 2.5 payload includes native macOS RED4ext, TweakXL, ArchiveXL and the Codeware features needed by these tested mods. Codeware support is scoped: this does not make every Codeware-dependent or Windows CET mod compatible. The launcher only stages native declarations for plugins whose game addresses pass its compatibility check.
+
+Equipment-EX and Cyberware-EX are included as optional installs, unchecked by default. Virtual Atelier and store packs are downloaded separately, with an official download link and import button in the launcher. See the [mod installation guide](docs/MOD-INSTALLATION.md) for the full walkthrough and folder locations. GOG and Intel builds are not supported.
 ## What it does
 
 - In-game ImGui console drawn on the live frame (Metal), keyboard-driven, with tabbed views (Cmd+1/2/3), command history, and clipboard support (Cmd+V/C/X/A).
@@ -43,7 +46,11 @@ macOS arm64 (Apple Silicon, M1/M2/M3/M4). Built and verified against Cyberpunk 2
 - Teleport with saved position bookmarks (save a spot, return to it later).
 - A generic `call <Class> <Method>` bridge that can invoke any observed RTTI method, plus quest-fact editing.
 - Action confirmations: every command reports exactly what it did at the bottom of the overlay.
+- Iconic Weapon Creator with custom names, descriptions and effects that persist after saving and reloading.
 - Native Mods tab that lists, enables, and disables loose `.archive` mods by renaming `.archive` to `.archive.off`.
+- Add Mod installs supported ZIPs or folders, including multiple selections, and prepares script mods for the selected game version.
+- Optional Mods offers Equipment-EX and Cyberware-EX, plus an official Virtual Atelier download link and import button. The built-in Mod Guide explains installation and file locations.
+- Export Diagnostics saves a local support ZIP with bounded logs, version information, installed mod inventory and performance telemetry.
 
 See [docs/COMMANDS.md](docs/COMMANDS.md) for the full command list and known limits.
 
@@ -51,7 +58,7 @@ See [docs/COMMANDS.md](docs/COMMANDS.md) for the full command list and known lim
 
 - Apple Silicon Mac (arm64). Intel is not supported.
 - macOS 26 or newer; tested on macOS 26 and 27.
-- Cyberpunk 2077 v2.3.1 or v2.5, macOS, Steam build (on 2.5, RED4ext plugins other than TweakXL/ArchiveXL are not supported yet).
+- Cyberpunk 2077 v2.3.1 or v2.5.0, native macOS Steam build. The new VA, Cyberware-EX and Equipment-EX support targets 2.5.0.
 - A legally-owned copy of the game. No CD PROJEKT RED files are distributed by this project.
 
 ## Install and usage (players)
@@ -68,6 +75,37 @@ Prefer a walkthrough? Watch the install and usage video:
 No Terminal, no file editing. The app finds your game, installs the runtime files (re-signing the game binary so the console can load), and launches it. Steam Cloud saves keep working.
 
 Updating from an older version: after replacing the app, click Install once (it reads "Reinstall NightCity Console"), then Play. No need to uninstall first.
+
+The 1.7.0 app and DMG are Developer ID signed and notarized by Apple, with stapled
+tickets. The ZIP also contains the stapled app.
+
+### Virtual Atelier, Cyberware-EX and Equipment-EX on 2.5
+
+The tested combination is:
+
+| Mod | Tested version | Verified features |
+| --- | --- | --- |
+| [Virtual Atelier](https://www.nexusmods.com/cyberpunk2077/mods/2987) | 1.6.0 package | Store cards, names/icons, search, cart purchases and purchased-item persistence; tested with PUBLICNET 1.2.1 |
+| [Cyberware-EX](https://github.com/psiberx/cp2077-cyberware-ex) | 1.5.6, default configuration | Second operating-system slot, abilities including Sandevistan, normal weapons/arms and save/relaunch persistence |
+| [Equipment-EX](https://github.com/psiberx/cp2077-equipment-ex) | 1.2.9 | Added clothing slots, wardrobe search, named outfits, appearance changes, outfit switching and save/relaunch persistence |
+
+1. Update NightCity Console and click **Install** / **Reinstall NightCity Console**.
+2. Open **Optional Mods…**, select **Equipment-EX 1.2.9** and/or **Cyberware-EX 1.5.6**, then click **Install Selected**. Both start unchecked. Existing installations are detected and kept; the Cyberware pack uses the tested default configuration without extra presets or add-ons.
+3. For VA, use **Download Virtual Atelier** in that sheet to open its official Nexus page, then **Import VA…** to select the downloaded ZIP or extracted folder. The tested package is **1.6.0**. Also import an Atelier store mod through **Add Mod**; VA alone does not provide stores. [PUBLICNET 1.2.1](https://www.nexusmods.com/cyberpunk2077/mods/10909) is the tested store pack (the page is now titled A.G.I.S.). VA and store packs are not bundled.
+4. Click **Play**. The launcher applies the supported 2.5 script adaptations and compiles the scripts before starting the game.
+5. Open VA on an in-game computer, visit a ripperdoc for Cyberware-EX, or open Inventory → Wardrobe for Equipment-EX. Cyberware-EX's extra slots retain the mod's normal unlock requirements.
+
+Quit the game before installing or removing mods. The launcher blocks these changes while Cyberpunk 2077 is running. For other mods, use **Add Mod** with a ZIP or extracted folder; see **Guide** in the app or the [full guide](docs/MOD-INSTALLATION.md) for folder locations, updates and removal.
+
+Use the bundled macOS framework dependencies. Windows `.dll` plugins cannot replace them. Unknown versions or edited compatibility targets may need separate adaptation; the launcher reports an error rather than guessing. Optional presets, add-ons and arbitrary combinations of other mods have not all been tested. Keep a separate manual save when adding gameplay mods.
+
+### Reporting a problem or performance drop
+
+Click **Export Diagnostics** in the launcher and choose where to save the ZIP. It collects recent launcher/runtime/plugin and compiler diagnostics, relevant crash excerpts, app/game/macOS versions, hardware and graphics settings, native file hashes, and a bounded installed-mod inventory. Collection runs only when requested; nothing is uploaded automatically.
+
+For a performance report, enable **Record performance on next launch**, relaunch the game, reproduce the slowdown and then export. Turn recording off when finished. The measurements are drawable intervals from the game, not GPU benchmark results.
+
+Save files, screenshots, mod source contents and console command history are excluded. Common personal paths and identifiers are redacted, but review the ZIP before sharing it. Include what happened, the steps to reproduce it, whether the in-game console was open or closed, and FPS before/after at the same location and graphics settings. This helps distinguish a console bottleneck from the cost of a particular mod or graphics setting.
 
 ### Using the console in-game
 
@@ -91,15 +129,29 @@ Game.AddToInventory("Items.MaxDOSE", 5)    # CET-style line, also works
 
 ## Build (from source)
 
+This repository contains the Console launcher, Metal overlay and command
+runtime source. The current macOS native framework adaptations are maintained
+separately; their implementation sources and build recipe are not included
+here, and publication in separate repositories is planned. The distributed app
+includes the prebuilt frameworks and their required runtime scripts/resources.
+
+To build the Console overlay on Apple Silicon with Xcode command line tools:
+
 ```bash
-git clone <this repo> && cd nightcity-console-mac
-./tools/fetch-deps.sh        # pulls FridaGadget + RED4ext into deps/ (copies from a local install if present)
-./dev/launch.sh              # builds the overlay, stages the payload into your game, and launches it
+git clone https://github.com/ysrdevs/nightcity-console-mac.git
+cd nightcity-console-mac
+./overlay/build.sh
 ```
 
-`dev/launch.sh` honors `CP2077_DIR` if your game is not at the default Steam path. The third-party runtime binaries (`RED4ext.dylib`, `FridaGadget.dylib`) are not committed (see `.gitignore`); they are fetched into `deps/` and bundled into the release `.dmg`.
+This builds `build/libcyberconsole_overlay.dylib` and does not install into or
+launch the game. It fetches pinned Dear ImGui and Lua inputs when needed.
 
-To build the signed, notarized app for distribution, run `tools/sign-notarize.sh` (needs an Apple Developer ID). It re-signs everything inside-out with a hardened runtime, notarizes the `.app` and the `.dmg` with `notarytool`, staples the tickets, and produces both a `.dmg` and a `.zip` in `dist/`.
+For a complete launcher build, follow [release assembly instructions](docs/RELEASE-BUILD.md).
+They require the pinned 2.3.1 baseline ZIP, an explicit prebuilt `NATIVE25_DIR`
+matching the accepted dependency hashes, and the installer helper publish
+directory. Signing and notarization use `tools/sign-notarize.sh` with an Apple
+Developer ID. These steps assemble the Console around its native dependencies;
+they do not rebuild those frameworks from this checkout.
 
 Key source files:
 
@@ -113,7 +165,7 @@ NightCity Console injects three dylibs into the arm64 game process with `DYLD_IN
 
 On Install, the launcher re-signs the game binary ad-hoc with the `allow-jit` and `allow-unsigned-executable-memory` entitlements. The stock Steam signature omits these, and without them macOS kills the game the moment the injected JIT engine generates code. Nothing is permanent: Steam's "Verify Integrity of Game Files" restores the original signature at any time.
 
-For the full reverse-engineering and architecture write-up (offsets, struct layouts, calling convention, the bugs found and how they were fixed), see [TECHNICAL.md](TECHNICAL.md). For the complete macOS modding platform (RED4ext, RED4ext.SDK, TweakXL, ArchiveXL, and the console runtime), see [docs/MACOS-MODDING-PLATFORM.md](docs/MACOS-MODDING-PLATFORM.md).
+For the Console's reverse-engineering and architecture write-up, see [TECHNICAL.md](TECHNICAL.md). The [macOS modding platform write-up](docs/MACOS-MODDING-PLATFORM.md) records the earlier 2.3.1 work; current 2.5 dependency scope is described in [native25/README.md](native25/README.md).
 
 ## Compatibility and caveats
 
@@ -125,7 +177,7 @@ For the full reverse-engineering and architecture write-up (offsets, struct layo
 
 ## Support
 
-This is free and open source. If it saved you some hassle and you want to support development, you can buy me a coffee. Completely optional, and very appreciated.
+NightCity Console is free, and its launcher, overlay and command runtime are open source. If it saved you some hassle and you want to support development, you can buy me a coffee. Completely optional, and very appreciated.
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/ysrdevs)
 
