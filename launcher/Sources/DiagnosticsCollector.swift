@@ -22,13 +22,14 @@ struct DiagnosticsSnapshot {
 
 struct DiagnosticsLimits {
     var textBytes = 128 * 1024
-    var totalBytes = 4 * 1024 * 1024
-    var files = 48
+    var totalBytes = 8 * 1024 * 1024
+    var threadSampleBytes = 1024 * 1024
+    var files = 80
     var directoryEntries = 4000
     var inventoryEntries = 1500
     var hashBytes = 64 * 1024 * 1024
-    var totalHashBytes = 128 * 1024 * 1024
-    var seconds: TimeInterval = 12
+    var totalHashBytes = 256 * 1024 * 1024
+    var seconds: TimeInterval = 24
     var recentDays: TimeInterval = 7
 }
 
@@ -39,6 +40,7 @@ struct DiagnosticsEntry {
 
 struct DiagnosticsReport {
     let entries: [DiagnosticsEntry]
+    var sampleStatus = "unavailable"
     // A simple stored ZIP needs no helper process, temporary copies or shell.
     func zipData() -> Data {
         var output = Data(), directory = Data()
@@ -102,7 +104,7 @@ struct DiagnosticsRedactor {
         }
         return value.split(separator: "\n", omittingEmptySubsequences: false).map { line in
             let s = String(line)
-            let sensitive = #"(?i)(?:\b(?:password|passwd|secret|client[_ -]?secret|private[_ -]?key|api[_ -]?key|license[_ -]?key|token|access[_ -]?token|refresh[_ -]?token|authorization|cookie|crashReporterKey|deviceIdentifierForVendor|serialNumber|machineUUID|userName|loginName)\b\"?\s*[:=]|\bbearer\s+|\b(?:queued|submitted|command[_ -]?line|environment|argv)\s*[:=]|^\s*(?:>>>|>\s))"#
+            let sensitive = #"(?i)(?:\b(?:password|passwd|secret|client[_ -]?secret|private[_ -]?key|api[_ -]?key|license[_ -]?key|token|access[_ -]?token|refresh[_ -]?token|authorization|cookie|crashReporterKey|deviceIdentifierForVendor|serialNumber|machineUUID|userName|loginName)\b\"?\s*(?:=(?!=)|:(?!:))|\bbearer\s+|\b(?:queued|submitted|command[_ -]?line|environment|argv)\s*[:=]|^\s*(?:>>>|>\s))"#
             if s.range(of: sensitive, options: .regularExpression) != nil { return "[private or command line omitted]" }
             return s
         }.joined(separator: "\n")
@@ -220,11 +222,20 @@ final class DiagnosticsCollector {
     private let limits: DiagnosticsLimits
     private let redactor: DiagnosticsRedactor
     private let deadline: TimeInterval
+    private let sampleProvider: (URL, TimeInterval, Int) -> DiagnosticsProcessSample
     private var report: [DiagnosticsEntry] = []
     private var used = 0
+    private var hashBytesRemaining: Int
+    private var sampleMetadata: [String: Any] = ["status": "unavailable"]
+    private var logIndex: [[String: Any]] = []
     private var omissions: [String] = []
-    init(snapshot: DiagnosticsSnapshot, limits: DiagnosticsLimits = DiagnosticsLimits()) {
+    init(snapshot: DiagnosticsSnapshot, limits: DiagnosticsLimits = DiagnosticsLimits(),
+         sampleProvider: @escaping (URL, TimeInterval, Int) -> DiagnosticsProcessSample = {
+             DiagnosticsProcessSampler.capture(gameRoot: $0, deadline: $1, maximumBytes: $2)
+         }) {
         self.snapshot = snapshot; self.limits = limits
+        self.sampleProvider = sampleProvider
+        hashBytesRemaining = max(0, limits.totalHashBytes)
         redactor = DiagnosticsRedactor(snapshot: snapshot)
         deadline = ProcessInfo.processInfo.systemUptime + max(0, limits.seconds)
     }
@@ -274,12 +285,15 @@ final class DiagnosticsCollector {
         NightCity Console local diagnostics. Nothing was uploaded.
         Recent log excerpts are bounded; older content may be omitted. Missing files are normal.
         Personal paths, common IDs, credential lines and console command history are excluded/redacted.
-        No saves, screenshots, source scripts, crash memory dumps or other process samples are included.
+        A short thread sample of the running game in the selected folder is attempted on export only.
+        process/game-process.json records the capture result, PID, times and any failure or truncation.
+        No saves, screenshots, source scripts, memory dumps or unrelated process samples are included.
+        Old logs and crashes may be included. Compare their dates and PIDs with the sampled process.
         Review this ZIP before sharing: mod names and text written by mods may still identify your setup.
         Signatures below are identity metadata, not a fresh Apple notarization or trust assessment.
         Frame intervals, when present, are a sample and are not a GPU benchmark.
         """)
-        var summary: [String: Any] = ["schema_version": 1, "created_utc": ISO8601DateFormatter().string(from: Date()),
+        var summary: [String: Any] = ["schema_version": 2, "created_utc": ISO8601DateFormatter().string(from: Date()),
             "launcher_version": snapshot.appVersion, "game_version": snapshot.gameVersion ?? "unknown",
             "game_folder": "<GAME>", "game_location": snapshot.gameRoot.path.contains("/steamapps/") ? "Steam library" : "custom library",
             "external_volume": snapshot.gameRoot.path.hasPrefix("/Volumes/"), "installed": snapshot.installed,
@@ -287,14 +301,31 @@ final class DiagnosticsCollector {
             "native_25": snapshot.native25, "separate_script_cache": snapshot.separateScriptCache,
             "performance_recording_requested": snapshot.performanceRecordingRequested,
             "limits": ["text_bytes_per_file": limits.textBytes, "total_text_bytes": limits.totalBytes,
+                       "thread_sample_bytes": limits.threadSampleBytes, "collection_seconds": limits.seconds,
                        "max_files": limits.files, "recent_days": limits.recentDays]]
         if snapshot.includeSystemInformation { summary["system"] = Self.systemInformation(); summary["launcher_signature"] = Self.signature(snapshot.appBundle) }
         json("summary.json", summary)
+        if hasTime {
+            let capture = sampleProvider(snapshot.gameRoot, deadline, max(0, min(limits.threadSampleBytes, limits.totalBytes - used)))
+            sampleMetadata = capture.metadata
+            if let text = capture.text {
+                let safe = Data(redactor.text(text).utf8)
+                let maximum = max(0, min(limits.threadSampleBytes, limits.totalBytes - used - 16 * 1024))
+                let clipped = safe.count > maximum
+                sampleMetadata["export_text_truncated"] = clipped
+                sampleMetadata["exported_text_bytes"] = min(safe.count, maximum)
+                if maximum > 0 {
+                    store("process/game-thread-sample.txt", Data(safe.prefix(maximum)), truncate: true)
+                }
+                let included = report.contains { $0.name == "process/game-thread-sample.txt" }
+                sampleMetadata["sample_included"] = included
+                if !included { sampleMetadata["status"] = "not_exported_budget" }
+            }
+        } else { sampleMetadata = ["status": "time_budget_exhausted"] }
+        json("process/game-process.json", sampleMetadata)
         if hasTime, let app = DiagnosticsDirectory(snapshot.appBundle) {
             for path in ["Contents/Resources/release-inputs.json", "Contents/Resources/native25/BUILD_INFO.json"] where hasTime {
-                if let data = app.read(path, maximum: limits.textBytes, tail: false) {
-                    add("metadata/bundled-" + URL(fileURLWithPath: path).lastPathComponent + ".txt", String(decoding: data, as: UTF8.self))
-                }
+                collectBuildMetadata(app, path: path, name: "metadata/bundled-" + URL(fileURLWithPath: path).lastPathComponent)
             }
         }
         if let game = DiagnosticsDirectory(snapshot.gameRoot) {
@@ -311,17 +342,27 @@ final class DiagnosticsCollector {
                 } else {
                     add("logs/" + URL(fileURLWithPath: path).lastPathComponent + ".txt", String(decoding: data, as: UTF8.self))
                 }
+                logIndex.append(fileDetails(info))
             }
-            for path in ["red4ext/nightcity-native25.txt", "red4ext/BUILD_INFO.json", "red4ext/sources.lock.json",
-                         "red4ext/nightcity-plugin-scripts.json"] where hasTime {
+            collectBuildMetadata(game, path: "red4ext/BUILD_INFO.json", name: "metadata/BUILD_INFO.json")
+            for path in ["red4ext/nightcity-native25.txt"] where hasTime {
                 if let data = game.read(path, maximum: limits.textBytes, tail: false) {
                     add("metadata/" + URL(fileURLWithPath: path).lastPathComponent + ".txt", String(decoding: data, as: UTF8.self))
                 }
             }
             collectBinaries(game)
+            collectRuntimeIdentity(game)
+            collectScriptIntegrity(game)
+            var caches: [[String: Any]] = []
+            for path in ["r6/cache/final.redscripts", "r6/cache/modded/final.redscripts", "r6/cache/final.redscripts.bk"] {
+                if let info = game.information(path) { caches.append(fileDetails(info)) }
+            }
+            json("script-caches.json", caches)
+            collectConfiguration(game)
             collectInventory(game)
         } else { omissions.append("Game folder is unavailable; game files were skipped.") }
         if hasTime, let temp = DiagnosticsDirectory(snapshot.temporaryRoot) {
+            collectRuntimeStatus(temp)
             let allowed = ["cp2077_overlay.log", "cp2077_fault.log", "cp2077_binderr.log", "cp2077_bindfail.log", "cp2077_perf.json"]
             let fresh = Set((allowed + ["cp2077_out.txt"]).filter { name in
                 temp.information(name).map(recent) == true
@@ -337,10 +378,12 @@ final class DiagnosticsCollector {
                 } else {
                     add("logs/" + name + ".txt", "File modified: \(ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: info.modified)))\n" + String(decoding: data, as: UTF8.self))
                 }
+                logIndex.append(fileDetails(info))
             }
             // The console output also contains arbitrary Lua print results and commands.
             // Export only counts and known operational messages, never that history.
             if hasTime, fresh.contains("cp2077_out.txt"), let data = temp.read("cp2077_out.txt", maximum: limits.textBytes) {
+                if let info = temp.information("cp2077_out.txt") { logIndex.append(fileDetails(info)) }
                 let lines = String(decoding: data, as: UTF8.self).split(separator: "\n")
                 let categories: [(String, String)] = [
                     ("TweakXL is not loaded", "tweakxl_unavailable"), ("TweakXL.Reload is not registered", "tweakxl_unavailable"),
@@ -358,12 +401,20 @@ final class DiagnosticsCollector {
             }
         }
         collectUserDiagnostics()
+        json("logs/log-index.json", logIndex)
         if !hasTime { omissions.append("Collection time budget reached; remaining optional checks skipped.") }
         add("collection.txt", "Collected \(report.count) files before this note, \(used) bytes. File, directory, age, byte and time limits apply.\n" + omissions.joined(separator: "\n"))
-        return DiagnosticsReport(entries: report)
+        return DiagnosticsReport(entries: report, sampleStatus: sampleMetadata["status"] as? String ?? "unavailable")
     }
     private func recent(_ entry: DiagnosticsDirectory.Entry) -> Bool {
         !entry.directory && entry.modified >= Date().timeIntervalSince1970 - limits.recentDays * 86400
+    }
+    private func fileDetails(_ entry: DiagnosticsDirectory.Entry) -> [String: Any] {
+        let start = (sampleMetadata["process_start_seconds"] as? NSNumber)?.doubleValue
+        return ["source": entry.relative, "original_bytes": entry.size,
+                "modified_utc": ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: entry.modified)),
+                "modified_unix": entry.modified,
+                "session_relation": start.map { entry.modified < $0 ? "predates_sampled_process" : "modified_since_process_start_not_proof_of_same_session" } ?? "unknown_no_sampled_process"]
     }
     private func collectLogs(_ root: DiagnosticsDirectory, directory: String, prefix: String, label: String) {
         guard hasTime else { return }
@@ -371,30 +422,191 @@ final class DiagnosticsCollector {
             .filter { recent($0) && URL(fileURLWithPath: $0.relative).lastPathComponent.hasPrefix(prefix) && $0.relative.hasSuffix(".log") }
             .sorted { $0.modified > $1.modified }.prefix(2)
         for (index, entry) in entries.enumerated() where hasTime {
-            if let data = root.read(entry.relative, maximum: limits.textBytes) {
-                add("logs/\(label)-\(index + 1).txt", "Source: <GAME>/\(entry.relative)\nOriginal bytes: \(entry.size); excerpt from end.\n" + String(decoding: data, as: UTF8.self))
+            let name = "logs/\(label)-\(index + 1).txt"
+            let split = entry.size > limits.textBytes
+            if let head = root.read(entry.relative, maximum: split ? limits.textBytes / 2 : limits.textBytes, tail: false) {
+                var body = String(decoding: head, as: UTF8.self)
+                if split, let tail = root.read(entry.relative, maximum: limits.textBytes / 2) {
+                    body += "\n[Middle of log omitted; final excerpt follows]\n" + String(decoding: tail, as: UTF8.self)
+                }
+                add(name, "Source: <GAME>/\(entry.relative)\nModified: \(ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: entry.modified)))\nOriginal bytes: \(entry.size); includes startup and final excerpts when truncated.\n" + body)
+                var metadata = fileDetails(entry)
+                metadata["export"] = name; metadata["truncated"] = split
+                logIndex.append(metadata)
             }
         }
     }
+    private func measuredHash(_ root: DiagnosticsDirectory, _ path: String) -> (String, Int64)? {
+        guard hasTime, hashBytesRemaining > 0,
+              let result = root.hash(path, maximum: min(limits.hashBytes, hashBytesRemaining), deadline: deadline) else { return nil }
+        hashBytesRemaining -= Int(result.1)
+        return result
+    }
+    private func comparedFile(_ root: DiagnosticsDirectory, _ path: String, bundledPath: String, app: DiagnosticsDirectory?) -> [String: Any] {
+        var entry: [String: Any] = ["path": "<GAME>/" + path]
+        if let info = root.information(path) { entry.merge(fileDetails(info)) { current, _ in current } }
+        let installed = measuredHash(root, path)
+        if let (hash, bytes) = installed { entry["sha256"] = hash; entry["bytes"] = bytes }
+        else { entry["sha256"] = "unavailable or size/time limit reached" }
+        if let app = app, let (hash, _) = measuredHash(app, "Contents/Resources/" + bundledPath) {
+            entry["bundled_sha256"] = hash
+            if let installed = installed { entry["matches_bundled"] = installed.0 == hash }
+        }
+        return entry
+    }
     private func collectBinaries(_ root: DiagnosticsDirectory) {
         guard hasTime else { return }
-        var entries: [[String: Any]] = [], remaining = limits.totalHashBytes
+        var entries: [[String: Any]] = []
+        let app = DiagnosticsDirectory(snapshot.appBundle)
         let paths = ["red4ext/RED4ext.dylib", "red4ext/plugins/Codeware/Codeware.dylib", "red4ext/plugins/ArchiveXL/ArchiveXL.dylib",
                      "red4ext/plugins/TweakXL/TweakXL.dylib", "red4ext/libcyberconsole_overlay.dylib", "red4ext/FridaGadget.dylib"]
         for path in paths where hasTime {
-            var entry: [String: Any] = ["path": "<GAME>/" + path]
-            if let (hash, bytes) = root.hash(path, maximum: min(limits.hashBytes, remaining), deadline: deadline) {
-                remaining -= Int(bytes); entry["sha256"] = hash; entry["bytes"] = bytes
-                if snapshot.includeSystemInformation { entry["signature"] = Self.signature(root.root.appendingPathComponent(path)) }
-            } else { entry["sha256"] = "unavailable or size/time limit reached" }
+            let native = path == "red4ext/RED4ext.dylib" || path.hasPrefix("red4ext/plugins/")
+            let bundled = (native && snapshot.native25 ? "native25/" : "") + String(path.dropFirst("red4ext/".count))
+            var entry = comparedFile(root, path, bundledPath: bundled, app: app)
+            if snapshot.includeSystemInformation { entry["signature"] = Self.signature(root.root.appendingPathComponent(path)) }
             entries.append(entry)
         }
         json("native-binaries.json", entries)
     }
+    private func collectRuntimeIdentity(_ root: DiagnosticsDirectory) {
+        let app = DiagnosticsDirectory(snapshot.appBundle)
+        let prefix = snapshot.native25 ? "native25/" : ""
+        let paths = [("red4ext/red4ext_hooks.js", "red4ext_hooks.js"),
+                     ("red4ext/FridaGadget.config", "FridaGadget.config"),
+                     ("red4ext/config.ini", prefix + "config.ini"),
+                     ("red4ext/" + (snapshot.native25 ? "bin/x64/" : "") + "cyberpunk2077_addresses.json", prefix + (snapshot.native25 ? "bin/x64/" : "") + "cyberpunk2077_addresses.json")]
+        var entries: [[String: Any]] = []
+        for (installed, bundled) in paths where hasTime {
+            entries.append(comparedFile(root, installed, bundledPath: bundled, app: app))
+        }
+        json("runtime-files.json", entries)
+    }
+    private func validHash(_ value: String) -> Bool {
+        value.range(of: #"^[a-fA-F0-9]{64}$"#, options: .regularExpression) != nil
+    }
+    private func safeRelative(_ value: String) -> Bool {
+        !value.isEmpty && value.count < 512 && !value.hasPrefix("/") &&
+            !value.contains("\\") && !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) &&
+            value.split(separator: "/", omittingEmptySubsequences: false).allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." }
+    }
+    private func collectBuildMetadata(_ root: DiagnosticsDirectory, path: String, name: String) {
+        guard hasTime, let data = root.read(path, maximum: limits.textBytes, tail: false),
+              let source = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        // Legacy BUILD_INFO files can contain private source paths and repository
+        // pins. Export only runtime identity, never the original metadata file.
+        var output: [String: Any] = ["source_provenance_omitted": true,
+            "hash_note": "Build metadata may describe unsigned inputs. Compare native-binaries.json with the actual bundled files instead."]
+        if let schema = source["schema"] as? Int { output["schema"] = schema }
+        if let version = source["game_version"] as? String,
+           version.range(of: #"^[0-9]+(?:\.[0-9]+){1,3}$"#, options: .regularExpression) != nil { output["game_version"] = version }
+        let enums: [String: Set<String>] = ["assembly_mode": ["verified-runtime-inputs"],
+            "file_hash_stage": ["before-final-release-signing"], "profile": ["ui-with-verified-wardrobe", "ui-only"]]
+        for (key, allowed) in enums { if let value = source[key] as? String, allowed.contains(value) { output[key] = value } }
+        if let value = source["runtime_input_manifest_sha256"] as? String, validHash(value) { output["runtime_input_manifest_sha256"] = value }
+        for key in ["baseline", "archivexl_bundle"] {
+            if let item = source[key] as? [String: String], let hash = item["sha256"], validHash(hash),
+               let version = item["version"], version.range(of: #"^[0-9]+(?:\.[0-9]+){1,3}$"#, options: .regularExpression) != nil {
+                output[key] = ["version": version, "sha256": hash]
+            }
+        }
+        var files: [String: String] = [:]
+        for (path, value) in (source["files"] as? [String: String] ?? [:]).sorted(by: { $0.key < $1.key }).prefix(1000) {
+            guard safeRelative(path), validHash(value),
+                  ["dylib", "archive", "reds", "xl", "ini", "config", "js", "dat"].contains(URL(fileURLWithPath: path).pathExtension) ||
+                    (safeRelative(path) && validHash(value) && path.hasSuffix("cyberpunk2077_addresses.json")) else { continue }
+            files[path] = value
+        }
+        output["files"] = files
+        json(name, output)
+    }
+    private func collectScriptIntegrity(_ root: DiagnosticsDirectory) {
+        let manifest = "red4ext/nightcity-plugin-scripts.json"
+        guard hasTime else { return }
+        guard let info = root.information(manifest), info.size <= limits.textBytes,
+              let data = root.read(manifest, maximum: limits.textBytes, tail: false),
+              let hashes = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
+            json("script-integrity.json", ["status": "manifest_missing_or_invalid", "files": []]); return
+        }
+        var files: [[String: Any]] = [], rejected = 0
+        for (path, expected) in hashes.sorted(by: { $0.key < $1.key }).prefix(limits.inventoryEntries) {
+            guard safeRelative(path), path.hasSuffix(".reds"), validHash(expected) else { rejected += 1; continue }
+            let target = "r6/scripts/zz_nightcity_plugins/" + path
+            var entry: [String: Any] = ["path": target, "expected_sha256": expected]
+            if root.information(target) == nil { entry["status"] = "missing_or_not_regular" }
+            else if let (actual, _) = measuredHash(root, target) {
+                entry["actual_sha256"] = actual
+                entry["status"] = actual.lowercased() == expected.lowercased() ? "matches" : "mismatch"
+            } else { entry["status"] = "size_or_time_budget" }
+            files.append(entry)
+        }
+        json("script-integrity.json", ["status": "checked", "files": files, "rejected_entries": rejected,
+             "manifest_entries": hashes.count, "bounded_listing": true,
+             "note": "Checks managed plugin scripts against their install manifest. No script contents are included."])
+    }
+    private func collectConfiguration(_ root: DiagnosticsDirectory) {
+        guard hasTime else { return }
+        var output: [String: Any] = [:]
+        if let data = root.read("red4ext/config.ini", maximum: 32 * 1024, tail: false) {
+            var section = "", values: [String: Any] = [:]
+            let booleanKeys: Set<String> = ["dev.console", "dev.wait_for_debugger", "dev.strict_version_check", "plugins.enabled"]
+            let numberKeys: Set<String> = ["version", "logging.max_file_size", "logging.max_files"]
+            let levelKeys: Set<String> = ["logging.level", "logging.flush_on"]
+            for raw in String(decoding: data, as: UTF8.self).split(separator: "\n") {
+                let line = raw.split(separator: "#", maxSplits: 1).first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
+                if line.hasPrefix("["), line.hasSuffix("]") { section = String(line.dropFirst().dropLast()); continue }
+                let pair = line.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+                guard pair.count == 2 else { continue }
+                let key = (section.isEmpty ? "" : section + ".") + pair[0], value = pair[1]
+                if booleanKeys.contains(key), value == "true" || value == "false" { values[key] = value == "true" }
+                else if numberKeys.contains(key), let number = Int(value), (0...1_000_000).contains(number) { values[key] = number }
+                else if levelKeys.contains(key), ["trace", "debug", "info", "warn", "error", "critical", "off"].contains(value.trimmingCharacters(in: CharacterSet(charactersIn: "\""))) {
+                    values[key] = value.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                } else if key == "plugins.ignored" || key == "hooking.core_hooks",
+                          let bytes = value.data(using: .utf8), let items = try? JSONSerialization.jsonObject(with: bytes) as? [String] {
+                    values[key + "_count"] = items.count
+                    if key == "hooking.core_hooks" { values["hooking.includes_application_state"] = items.contains("CGameApplication_AddState") }
+                }
+            }
+            output["loader"] = values
+        }
+        if let data = root.read("red4ext/FridaGadget.config", maximum: 32 * 1024, tail: false),
+           let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let interaction = config["interaction"] as? [String: Any] {
+            var safe: [String: Any] = ["expected_script_path": interaction["path"] as? String == "./red4ext_hooks.js"]
+            for (key, allowed) in ["type": ["script", "listen", "connect", "script-directory"], "on_load": ["resume", "wait"]] {
+                if let value = interaction[key] as? String, allowed.contains(value) { safe[key] = value }
+            }
+            output["frida"] = safe
+        }
+        json("runtime-config.json", output)
+    }
+    private func collectRuntimeStatus(_ temp: DiagnosticsDirectory) {
+        let path = "cp2077_runtime_diagnostics.json"
+        guard let info = temp.information(path), let data = temp.read(path, maximum: 8192, tail: false),
+              let source = try? JSONSerialization.jsonObject(with: data) as? [String: Any], source["schema_version"] as? Int == 1,
+              let pid = source["process_id"] as? Int, pid > 0,
+              let loaded = source["script_loaded_at_unix"] as? Double, loaded.isFinite, loaded > 0,
+              let updated = source["updated_at_unix"] as? Double, updated.isFinite, updated >= loaded else {
+            json("logs/runtime-status.json", ["status": "missing_or_invalid"]); return
+        }
+        var safe: [String: Any] = ["status": "available", "schema_version": 1, "process_id": pid,
+            "script_loaded_at_unix": loaded, "updated_at_unix": updated, "file": fileDetails(info)]
+        let allowed: [String: [String]] = ["executor_filter": ["initializing", "native", "compatibility", "unavailable"],
+            "localization_filter": ["initializing", "native", "compatibility", "unavailable"], "game_support": ["unknown", "supported", "unsupported"]]
+        for (key, values) in allowed { if let value = source[key] as? String, values.contains(value) { safe[key] = value } }
+        if sampleMetadata["identity_checked_before"] as? Bool == true,
+           sampleMetadata["identity_checked_after"] as? Bool == true,
+           let samplePID = (sampleMetadata["pid"] as? NSNumber)?.intValue,
+           let start = (sampleMetadata["process_start_seconds"] as? NSNumber)?.doubleValue {
+            let microseconds = (sampleMetadata["process_start_microseconds"] as? NSNumber)?.doubleValue ?? 0
+            safe["session_relation"] = pid == samplePID && loaded >= start + microseconds / 1_000_000 && updated <= Date().timeIntervalSince1970 + 1 ? "matches_sampled_process" : "different_or_stale_process"
+        } else { safe["session_relation"] = "unknown_identity_unconfirmed" }
+        json("logs/runtime-status.json", safe)
+    }
     private func collectInventory(_ root: DiagnosticsDirectory) {
         guard hasTime else { return }
         var inventory: [[String: Any]] = [], visited = 0
-        let roots = ["archive/Mac/mod", "r6/scripts", "r6/tweaks", "red4ext/plugins"]
+        let roots = ["archive/Mac/mod", "archive/pc/mod", "r6/scripts", "r6/tweaks", "red4ext/plugins"]
         var queue = roots.map { ($0, 0) }
         while !queue.isEmpty && hasTime && visited < limits.directoryEntries && inventory.count < limits.inventoryEntries {
             let (folder, depth) = queue.removeFirst()
@@ -420,11 +632,17 @@ final class DiagnosticsCollector {
             return recent($0) && (name.hasPrefix("Cyberpunk2077-") || name.hasPrefix("NightCityConsole-")) &&
                 (name.hasSuffix(".ips") || name.hasSuffix(".crash"))
         }.sorted { $0.modified > $1.modified }.prefix(3)
+        var crashIndex: [[String: Any]] = []
         for (index, crash) in crashes.enumerated() where hasTime {
             if let data = home.read(crash.relative, maximum: limits.textBytes, tail: false) {
-                add("crashes/report-\(index + 1).txt", "Recent app crash report excerpt; original bytes: \(crash.size).\n" + String(decoding: data, as: UTF8.self))
+                let name = "crashes/report-\(index + 1).txt"
+                add(name, "Recent app crash report excerpt; original bytes: \(crash.size).\nThis may be an older crash. Check its report date and PID before relating it to the current session.\n" + String(decoding: data, as: UTF8.self))
+                var metadata = fileDetails(crash)
+                metadata["export"] = name; metadata["truncated"] = crash.size > limits.textBytes
+                crashIndex.append(metadata)
             }
         }
+        json("crashes/index.json", crashIndex)
         let settings = "Library/Application Support/CD Projekt Red/Cyberpunk 2077/UserSettings.json"
         if hasTime, let data = home.read(settings, maximum: 512 * 1024, tail: false),
            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],

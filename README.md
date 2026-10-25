@@ -101,11 +101,13 @@ Use the bundled macOS framework dependencies. Windows `.dll` plugins cannot repl
 
 ### Reporting a problem or performance drop
 
-Click **Export Diagnostics** in the launcher and choose where to save the ZIP. It collects recent launcher/runtime/plugin and compiler diagnostics, relevant crash excerpts, app/game/macOS versions, hardware and graphics settings, native file hashes, and a bounded installed-mod inventory. Collection runs only when requested; nothing is uploaded automatically.
+Click **Export Diagnostics** in the launcher and choose where to save the ZIP. It collects recent launcher/runtime/plugin and compiler diagnostics, relevant crash excerpts, app/game/macOS versions, hardware and graphics settings, installed-versus-bundled runtime hashes, managed script integrity and a bounded installed-mod inventory. Collection runs only when requested; nothing is uploaded automatically.
+
+**For a freeze or loading hang, leave the game open and export before force-quitting it.** The launcher attempts a 3-second thread sample of the game running from the selected folder. This includes thread stacks and loaded binary identities to help locate a blocked operation. The ZIP records the selected process, capture times, any failure or truncation, and dates for older logs and crashes. A closed game cannot be sampled. If macOS prevents sampling, the other diagnostics still export and the launcher tells you; Activity Monitor → select Cyberpunk 2077 → Sample Process is a manual fallback.
 
 For a performance report, enable **Record performance on next launch**, relaunch the game, reproduce the slowdown and then export. Turn recording off when finished. The measurements are drawable intervals from the game, not GPU benchmark results.
 
-Save files, screenshots, mod source contents and console command history are excluded. Common personal paths and identifiers are redacted, but review the ZIP before sharing it. Include what happened, the steps to reproduce it, whether the in-game console was open or closed, and FPS before/after at the same location and graphics settings. This helps distinguish a console bottleneck from the cost of a particular mod or graphics setting.
+Save files, screenshots, mod source contents, memory dumps, unrelated process samples and console command history are excluded. Common personal paths and identifiers are redacted, but review the ZIP before sharing it. Include what happened, the steps to reproduce it, whether the in-game console was open or closed, and FPS before/after at the same location and graphics settings. This helps distinguish a console bottleneck from the cost of a particular mod or graphics setting. File, size and time limits keep collection bounded; some issues may still need a focused follow-up capture.
 
 ### Using the console in-game
 

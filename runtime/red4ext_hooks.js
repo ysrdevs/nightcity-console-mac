@@ -10,6 +10,61 @@
 
 'use strict';
 
+// BEGIN RUNTIME DIAGNOSTICS
+// Startup/installation transitions only. No commands, names, paths or per-frame work enter this snapshot.
+var nccRuntimeDiagnostics = (function () {
+    let state = null, io = null;
+    return function (update) {
+        try {
+            const now = Date.now() / 1000;
+            if (!Number.isFinite(now) || !Number.isSafeInteger(Process.id) || Process.id <= 0) return;
+            let changed = !state;
+            if (!state) state = { schema_version: 1, process_id: Process.id,
+                script_loaded_at_unix: now, updated_at_unix: now,
+                executor_filter: 'initializing', localization_filter: 'initializing', game_support: 'unknown' };
+            for (const key of ['executor_filter', 'localization_filter', 'game_support']) {
+                const allowed = key === 'game_support' ? ['unknown', 'supported', 'unsupported']
+                    : ['initializing', 'native', 'compatibility', 'unavailable'];
+                if (update && Object.prototype.hasOwnProperty.call(update, key) &&
+                    allowed.indexOf(update[key]) >= 0 && state[key] !== update[key]) {
+                    state[key] = update[key]; changed = true;
+                }
+            }
+            if (!changed) return;
+            state.updated_at_unix = now;
+            if (!io) {
+                const fn = (name, result, args) => {
+                    const address = Module.findGlobalExportByName(name);
+                    if (!address) throw new Error('Diagnostic file I/O unavailable');
+                    return new NativeFunction(address, result, args, { scheduling: 'exclusive' });
+                };
+                io = { create: fn('mkstemp', 'int', ['pointer']), write: fn('write', 'long', ['int', 'pointer', 'ulong']),
+                    close: fn('close', 'int', ['int']), rename: fn('rename', 'int', ['pointer', 'pointer']),
+                    unlink: fn('unlink', 'int', ['pointer']) };
+            }
+            const bytes = JSON.stringify(state) + '\n';
+            if (bytes.length > 1024) return;
+            const temporary = Memory.allocUtf8String('/tmp/.cp2077_runtime_diagnostics.XXXXXX');
+            let fd = -1, created = false;
+            try {
+                fd = io.create(temporary); // Exclusive creation, mode 0600; never follow a predictable /tmp symlink.
+                if (fd < 0) return;
+                created = true;
+                const count = Number(io.write(fd, Memory.allocUtf8String(bytes), bytes.length));
+                const closed = io.close(fd); fd = -1;
+                if (count !== bytes.length || closed !== 0) return;
+                if (io.rename(temporary, Memory.allocUtf8String('/tmp/cp2077_runtime_diagnostics.json')) === 0)
+                    created = false; // Atomic replacement also replaces, rather than follows, a destination symlink.
+            } finally {
+                if (fd >= 0) { try { io.close(fd); } catch (_) {} }
+                if (created) { try { io.unlink(temporary); } catch (_) {} }
+            }
+        } catch (_) {} // Diagnostic failure must not change startup, hooks, gameplay or logging volume.
+    };
+})();
+nccRuntimeDiagnostics();
+// END RUNTIME DIAGNOSTICS
+
 // ============================================================================
 // Configuration
 // ============================================================================
@@ -214,6 +269,8 @@ function getGameVersion() {
     }
     if (gameVersion) logInfo(`Game version: ${gameVersion}`);
     else logError('Unsupported game build: no known code fingerprint matched; NightCity Console stays inactive.');
+    nccRuntimeDiagnostics(gameVersion ? { game_support: 'supported' }
+        : { game_support: 'unsupported', executor_filter: 'unavailable', localization_filter: 'unavailable' });
     return gameVersion;
 }
 function gameOffsets() { const v = getGameVersion(); return v ? GAME_OFFSETS[v] : null; }
@@ -1682,6 +1739,7 @@ function createLocalizationGate(names,fill) {
             log('executor: using compatibility callbacks; native idle filter unavailable: '+e);
         }
         // END EXECUTOR LISTENER
+        nccRuntimeDiagnostics({ executor_filter: executorGate ? 'native' : 'compatibility' });
 
         // ---- AUTO-LOAD: apply installed mods on launch, no console needed (NightCity Console increment 4).
         // Queue `tweakload` then `archiveload` into pendingQ so they run on the ENGINE thread (drained by the
@@ -1707,7 +1765,7 @@ function createLocalizationGate(names,fill) {
                 log('[AUTOLOAD] disabled (/tmp/cp2077_no_autoload present)');
             }
         } catch (e) { log('[AUTOLOAD] arm err ' + e); }
-    }catch(e){ log('MINI-CET v3 FAILED: '+e); }
+    }catch(e){ nccRuntimeDiagnostics({ executor_filter: 'unavailable' }); log('MINI-CET v3 FAILED: '+e); }
 
 // ===== cybermodman cmn loc-hook (re-merged after CET update) =====
 var cmnB = getModuleBase();
@@ -1795,9 +1853,9 @@ function cmnPutStr(b, s){
 function cmnInstall(){
     if (cmnAttached) return;
     const off=gameOffsets();
-    if (!off || !off.locLookup || !off.poolCString) { cmnLog('loc-hook skipped: unsupported build'); return; }
+    if (!off || !off.locLookup || !off.poolCString) { nccRuntimeDiagnostics({ localization_filter: 'unavailable' }); cmnLog('loc-hook skipped: unsupported build'); return; }
     var cmnB = getModuleBase();
-    if (!cmnB) { cmnLog('module cmnB not found; cannot install'); return; }
+    if (!cmnB) { nccRuntimeDiagnostics({ localization_filter: 'unavailable' }); cmnLog('module cmnB not found; cannot install'); return; }
     cmnBase = cmnB;
     var addr = cmnB.add(off.locLookup); // 2.3.1 + 2.5: out=x8, key=x1, &found=x3
     try {
@@ -1830,10 +1888,11 @@ function cmnInstall(){
             cmnLog('using compatibility callbacks; native key filter unavailable: '+e);
         }
         cmnAttached = true;
+        nccRuntimeDiagnostics({ localization_filter: cmnNativeGate ? 'native' : 'compatibility' });
         cmnLog('interceptor attached at '+addr+' (game '+getGameVersion()+', RVA 0x'+off.locLookup.toString(16)+')');
-    } catch (e) { cmnLog('attach error: '+e); }
+    } catch (e) { nccRuntimeDiagnostics({ localization_filter: 'unavailable' }); cmnLog('attach error: '+e); }
 }
-try { cmnLog('=== cybermodman custom-names init ==='); cmnLoad(); cmnInstall(); } catch (e) { try { console.log('[CMN] init err '+e); } catch (_) {} }
+try { cmnLog('=== cybermodman custom-names init ==='); cmnLoad(); cmnInstall(); } catch (e) { nccRuntimeDiagnostics({ localization_filter: 'unavailable' }); try { console.log('[CMN] init err '+e); } catch (_) {} }
 
 // ============================================================================
 // TASK 2 -- installModFolderLoader: register a Mod-scope(4) ArchiveSet for

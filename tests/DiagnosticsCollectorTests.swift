@@ -18,6 +18,21 @@ struct DiagnosticsCollectorTests {
         var snapshot = DiagnosticsSnapshot(gameRoot: game, appBundle: fixture.appendingPathComponent("NightCity.app"), appVersion: "1.7.0.0",
             gameVersion: "2.5.0", installed: true, status: "Ready\npassword=STATUS_PRIVATE", operationInProgress: false, native25: true, separateScriptCache: true)
         snapshot.home = home; snapshot.temporaryRoot = temp; snapshot.includeSystemInformation = false
+        // Never inspect the real process table or sample a game from this fixture.
+        func collect(_ limits: DiagnosticsLimits = DiagnosticsLimits(),
+                     sample: DiagnosticsProcessSample = DiagnosticsProcessSample(metadata: ["status": "not_running"], text: nil)) -> DiagnosticsReport {
+            DiagnosticsCollector(snapshot: snapshot, limits: limits, sampleProvider: { _, _, _ in sample }).collect()
+        }
+        func object(_ report: DiagnosticsReport, _ name: String) throws -> [String: Any] {
+            let data = report.entries.first { $0.name == name }!.data
+            return try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        }
+        func array(_ report: DiagnosticsReport, _ name: String) throws -> [[String: Any]] {
+            try JSONSerialization.jsonObject(with: report.entries.first { $0.name == name }!.data) as! [[String: Any]]
+        }
+        func writeJSON(_ root: URL, _ path: String, _ value: Any) throws {
+            try write(root, path, String(decoding: JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]), as: UTF8.self))
+        }
         precondition(DiagnosticsDirectory(URL(fileURLWithPath: "/private/tmp", isDirectory: true)) != nil,
                      "macOS /private/tmp must not be rewritten to a symlink rejected by O_NOFOLLOW")
         let redactor = DiagnosticsRedactor(snapshot: snapshot)
@@ -81,7 +96,43 @@ struct DiagnosticsCollectorTests {
         precondition(scope.read("red4ext/logs/red4ext-pipe.log", maximum: 100) == nil)
         print("PASS descendant symlinks, path traversal and FIFOs are rejected without reading outside the scope")
 
-        let report = DiagnosticsCollector(snapshot: snapshot).collect()
+        let abcHash = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        try write(game, "archive/pc/mod/WindowsLayout.archive", "PC_ARCHIVE_CONTENT_PRIVATE")
+        try write(game, "red4ext/red4ext_hooks.js", "RUNTIME_JS_SOURCE_PRIVATE")
+        try write(snapshot.appBundle, "Contents/Resources/red4ext_hooks.js", "RUNTIME_JS_SOURCE_PRIVATE")
+        try write(game, "red4ext/sources.lock.json", "PRIVATE_SOURCE_LOCK_MUST_NOT_EXPORT")
+        try writeJSON(game, "red4ext/BUILD_INFO.json", ["schema": 3, "game_version": "2.5.0", "profile": "ui-with-verified-wardrobe",
+            "repository": "PRIVATE_REPOSITORY_PROVENANCE", "files": ["private-implementation.cpp": abcHash, "plugins/Codeware/Scripts/Good.reds": abcHash]])
+        try write(game, "red4ext/config.ini", """
+        version = 0
+        [dev]
+        strict_version_check = true # CONFIG_COMMENT_PRIVATE
+        secret = "CONFIG_UNKNOWN_PRIVATE"
+        [plugins]
+        enabled = true
+        ignored = ["CONFIG_MOD_NAME_PRIVATE"]
+        [logging]
+        level = "debug"
+        max_files = 5
+        [hooking]
+        core_hooks = ["CGameApplication_AddState", "CONFIG_HOOK_NAME_PRIVATE"]
+        [private]
+        value = "CONFIG_SECTION_PRIVATE"
+        """)
+        try writeJSON(game, "red4ext/FridaGadget.config", ["interaction": ["type": "script", "path": "./red4ext_hooks.js", "on_load": "wait", "unknown": "FRIDA_PRIVATE"]])
+        try writeJSON(snapshot.appBundle, "Contents/Resources/FridaGadget.config", ["interaction": ["type": "script", "path": "./red4ext_hooks.js", "on_load": "resume"]])
+        let scriptPrefix = "r6/scripts/zz_nightcity_plugins/Codeware/"
+        try write(game, scriptPrefix + "Good.reds", "abc")
+        try write(game, scriptPrefix + "Changed.reds", "def")
+        try fm.createDirectory(at: game.appendingPathComponent(scriptPrefix + "Directory.reds"), withIntermediateDirectories: true)
+        try fm.createSymbolicLink(atPath: game.appendingPathComponent(scriptPrefix + "Link.reds").path, withDestinationPath: outside.path)
+        precondition(mkfifo(game.appendingPathComponent(scriptPrefix + "Pipe.reds").path, 0o600) == 0)
+        let scriptManifest = ["Codeware/Good.reds": abcHash, "Codeware/Changed.reds": abcHash,
+            "Codeware/Missing.reds": abcHash, "Codeware/Directory.reds": abcHash, "Codeware/Link.reds": abcHash, "Codeware/Pipe.reds": abcHash,
+            "../outside-secret.txt": abcHash, "Codeware/Bad.reds": "invalid-hash"]
+        try writeJSON(game, "red4ext/nightcity-plugin-scripts.json", scriptManifest)
+
+        let report = collect()
         let all = report.entries.map { String(decoding: $0.data, as: UTF8.self) }.joined(separator: "\n")
         for secret in ["OLD_LOG_SECRET", "UNRELATED_LOG_SECRET", "SOURCE_MUST_NOT_BE_READ", "ARCHIVE_MUST_NOT_BE_READ", "SAVE_MUST_NOT_BE_READ", "DOCUMENT_MUST_NOT_BE_READ", "OTHER_APP_CRASH_PRIVATE", "SYMLINK_ESCAPE_PRIVATE", "COMMAND_PRIVATE", "USER_PRINT_PRIVATE", "COMMAND_INPUT_PRIVATE", "GALLERY_PRIVATE", "IGNORED_DEFAULT", "STATUS_PRIVATE", "FILENAME_PRIVATE", "KEY_PRIVATE", "JSON_PRIVATE_TOKEN", "JSON_PRIVATE_COMMAND"] {
             precondition(!all.contains(secret), "Collector included \(secret)")
@@ -91,6 +142,29 @@ struct DiagnosticsCollectorTests {
         let summary = try JSONSerialization.jsonObject(with: report.entries.first { $0.name == "summary.json" }!.data) as! [String: Any]
         precondition(summary["launcher_version"] as? String == "1.7.0.0", "Four-component version fields are not IP addresses")
         precondition(all.contains("Example/main.reds") && all.contains("Example.archive"), "Inventory lists names without reading content")
+        precondition(all.contains("archive/pc/mod/WindowsLayout.archive"), "Windows-style archive placement must remain visible in inventory")
+        for secret in ["PC_ARCHIVE_CONTENT_PRIVATE", "RUNTIME_JS_SOURCE_PRIVATE", "PRIVATE_SOURCE_LOCK_MUST_NOT_EXPORT", "PRIVATE_REPOSITORY_PROVENANCE",
+                       "private-implementation.cpp", "CONFIG_COMMENT_PRIVATE", "CONFIG_UNKNOWN_PRIVATE", "CONFIG_MOD_NAME_PRIVATE", "CONFIG_HOOK_NAME_PRIVATE", "CONFIG_SECTION_PRIVATE", "FRIDA_PRIVATE"] {
+            precondition(!all.contains(secret), "New diagnostic collection leaked \(secret)")
+        }
+        precondition(!report.entries.contains { $0.name.contains("sources.lock") })
+        let runtime = try array(report, "runtime-files.json")
+        precondition(runtime.first { ($0["path"] as? String)?.hasSuffix("red4ext_hooks.js") == true }?["matches_bundled"] as? Bool == true)
+        precondition(runtime.first { ($0["path"] as? String)?.hasSuffix("FridaGadget.config") == true }?["matches_bundled"] as? Bool == false)
+        let config = try object(report, "runtime-config.json")
+        let loaderConfig = config["loader"] as! [String: Any], fridaConfig = config["frida"] as! [String: Any]
+        precondition(loaderConfig["dev.strict_version_check"] as? Bool == true && loaderConfig["plugins.enabled"] as? Bool == true)
+        precondition(loaderConfig["logging.level"] as? String == "debug" && loaderConfig["logging.max_files"] as? Int == 5)
+        precondition(loaderConfig["plugins.ignored_count"] as? Int == 1 && loaderConfig["hooking.core_hooks_count"] as? Int == 2)
+        precondition(loaderConfig["hooking.includes_application_state"] as? Bool == true)
+        precondition(fridaConfig["type"] as? String == "script" && fridaConfig["on_load"] as? String == "wait" && fridaConfig["expected_script_path"] as? Bool == true)
+        let integrity = try object(report, "script-integrity.json")
+        let integrityFiles = integrity["files"] as! [[String: Any]]
+        precondition(integrity["manifest_entries"] as? Int == scriptManifest.count && integrity["rejected_entries"] as? Int == 2)
+        for (file, status) in [("Good.reds", "matches"), ("Changed.reds", "mismatch"), ("Missing.reds", "missing_or_not_regular"),
+                               ("Directory.reds", "missing_or_not_regular"), ("Link.reds", "missing_or_not_regular"), ("Pipe.reds", "missing_or_not_regular")] {
+            precondition(integrityFiles.first { $0["path"] as? String == scriptPrefix + file }?["status"] as? String == status, "Wrong integrity result for \(file)")
+        }
         precondition(all.contains("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"), "SHA-256 of abc matches known digest")
         let graphics = report.entries.first { $0.name == "graphics-settings.json" }!
         precondition(String(decoding: graphics.data, as: UTF8.self).contains("1920x1080"))
@@ -98,26 +172,135 @@ struct DiagnosticsCollectorTests {
             precondition((try? JSONSerialization.jsonObject(with: entry.data)) != nil, "Structured metadata must remain valid JSON")
         }
         print("PASS recent scoped logs, native hash, metadata-only mod inventory and selected graphics settings; excluded saves, sources, unrelated apps and console history")
+        print("PASS runtime digests, typed config allowlist, source-provenance exclusion and actual staged-script integrity")
 
         try write(game, "red4ext/logs/red4ext-large.log", String(repeating: "x", count: 100_000) + "TAIL_MARKER")
         let tail = scope.read("red4ext/logs/red4ext-large.log", maximum: 128)!
         precondition(tail.count == 128 && String(decoding: tail, as: UTF8.self).hasSuffix("TAIL_MARKER"))
         precondition(scope.hash("red4ext/logs/red4ext-large.log", maximum: 100, deadline: .greatestFiniteMagnitude) == nil)
         var tiny = DiagnosticsLimits(); tiny.totalBytes = 512; tiny.files = 2; tiny.textBytes = 64; tiny.inventoryEntries = 1
-        let bounded = DiagnosticsCollector(snapshot: snapshot, limits: tiny).collect()
+        let bounded = collect(tiny)
         precondition(bounded.entries.count <= 2 && bounded.entries.reduce(0) { $0 + $1.data.count } <= 512)
         var narrow = DiagnosticsLimits(); narrow.inventoryEntries = 1
-        let inventoryData = DiagnosticsCollector(snapshot: snapshot, limits: narrow).collect().entries.first { $0.name == "mod-inventory.json" }!.data
+        let inventoryData = collect(narrow).entries.first { $0.name == "mod-inventory.json" }!.data
         let inventoryObject = try JSONSerialization.jsonObject(with: inventoryData) as! [String: Any]
         precondition((inventoryObject["files"] as! [[String: Any]]).count <= 1)
         var limitedJSON = DiagnosticsLimits(); limitedJSON.totalBytes = 1800
-        for entry in DiagnosticsCollector(snapshot: snapshot, limits: limitedJSON).collect().entries where entry.name.hasSuffix(".json") {
+        for entry in collect(limitedJSON).entries where entry.name.hasSuffix(".json") {
             precondition((try? JSONSerialization.jsonObject(with: entry.data)) != nil, "A byte cap must omit rather than corrupt structured metadata")
         }
         var expired = DiagnosticsLimits(); expired.seconds = 0
-        let fast = DiagnosticsCollector(snapshot: snapshot, limits: expired).collect()
-        precondition(!fast.entries.contains { $0.name.hasPrefix("logs/") || $0.name == "native-binaries.json" })
+        let fast = DiagnosticsCollector(snapshot: snapshot, limits: expired, sampleProvider: { _, _, _ in
+            preconditionFailure("An exhausted deadline must not start a process sample")
+        }).collect()
+        precondition(!fast.entries.contains { ($0.name.hasPrefix("logs/") && $0.name != "logs/log-index.json") || $0.name == "native-binaries.json" })
+        precondition(fast.sampleStatus == "time_budget_exhausted")
         print("PASS log tail, hashing, total-byte, file-count and expired time-budget limits")
+
+        let decisiveStack = "GarmentWrapper::OnAppearanceSuffix / SharedMutex::LockShared [0x10001234]"
+        let sampleText = privateText + "\n" + String(repeating: "    100 EngineWorker::Wait [0x10001000]\n", count: 6000) + decisiveStack
+        var sampled = false
+        let withSample = DiagnosticsCollector(snapshot: snapshot, sampleProvider: { selectedGame, deadline, maximum in
+            precondition(selectedGame == game, "Sampling must receive the selected installation")
+            precondition(deadline > ProcessInfo.processInfo.systemUptime && maximum == 1024 * 1024)
+            sampled = true
+            return DiagnosticsProcessSample(metadata: ["status": "captured", "pid": pid_t(12345),
+                "process_started_utc": "2026-10-25T18:50:00Z", "token": "SAMPLE_METADATA_PRIVATE"], text: sampleText)
+        }).collect()
+        let sampleEntry = withSample.entries.first { $0.name == "process/game-thread-sample.txt" }!
+        let exportedSample = String(decoding: sampleEntry.data, as: UTF8.self)
+        precondition(sampled && withSample.sampleStatus == "captured")
+        precondition(sampleEntry.data.count > DiagnosticsLimits().textBytes && exportedSample.hasSuffix(decisiveStack),
+                     "Thread samples need their own budget: retain the decisive stack beyond the old 128 KiB log limit")
+        precondition(withSample.entries.firstIndex { $0.name == sampleEntry.name }! < withSample.entries.firstIndex { $0.name.hasPrefix("logs/loader-") }!,
+                     "Capture and store the sample before optional log/hash collection")
+        let sampleMetadata = try object(withSample, "process/game-process.json")
+        precondition(sampleMetadata["export_text_truncated"] as? Bool == false)
+        precondition(sampleMetadata["exported_text_bytes"] as? Int == sampleEntry.data.count)
+        let sampleReportText = withSample.entries.map { String(decoding: $0.data, as: UTF8.self) }.joined(separator: "\n")
+        for secret in ["SAMPLE_METADATA_PRIVATE", "PRIVATE_PASSWORD", "PRIVATE_TOKEN", "PRIVATE_COMMAND", "person@example.com", "My Private Disk", home.path] {
+            precondition(!sampleReportText.contains(secret), "Sample export leaked \(secret)")
+        }
+        for status in ["not_running", "permission_denied", "process_exited", "identity_changed", "timed_out", "ambiguous", "unavailable"] {
+            let failedSample = collect(sample: DiagnosticsProcessSample(metadata: ["status": status], text: nil))
+            let failureMetadata = try object(failedSample, "process/game-process.json")
+            precondition(failedSample.sampleStatus == status)
+            precondition(failureMetadata["status"] as? String == status)
+            precondition(failedSample.entries.contains { $0.name.hasPrefix("logs/loader-") }, "Sampling failure must not suppress other diagnostics")
+            precondition(!failedSample.entries.contains { $0.name == "process/game-thread-sample.txt" })
+        }
+        let oversized = collect(sample: DiagnosticsProcessSample(metadata: ["status": "captured"],
+            text: String(repeating: "s", count: 1024 * 1024 + 400) + "BEYOND_SAMPLE_LIMIT"))
+        let clipped = oversized.entries.first { $0.name == "process/game-thread-sample.txt" }!
+        let clippedMetadata = try object(oversized, "process/game-process.json")
+        precondition(clipped.data.count == 1024 * 1024)
+        precondition(clippedMetadata["export_text_truncated"] as? Bool == true)
+        var constrained = DiagnosticsLimits(); constrained.totalBytes = 64 * 1024
+        let sampleBounded = collect(constrained, sample: DiagnosticsProcessSample(metadata: ["status": "captured"], text: sampleText))
+        let boundedSampleMetadata = try object(sampleBounded, "process/game-process.json")
+        precondition(sampleBounded.entries.reduce(0) { $0 + $1.data.count } <= constrained.totalBytes)
+        precondition(boundedSampleMetadata["export_text_truncated"] as? Bool == true,
+                     "Reserve valid status metadata even when the remaining export budget clips the sample")
+        print("PASS injected sampling, complete large stacks, redaction, explicit failure states and bounded sample exports")
+
+        // Real source dates, not export order, must distinguish an earlier crash
+        // and a reused process ID from this sampled session.
+        let now = Date().timeIntervalSince1970, processStart = Int(now) - 60
+        let liveMetadata: [String: Any] = ["status": "captured", "pid": pid_t(12345),
+            "process_start_seconds": processStart, "process_start_microseconds": 0,
+            "identity_checked_before": true, "identity_checked_after": true]
+        let liveSample = DiagnosticsProcessSample(metadata: liveMetadata, text: "fixture call graph")
+        try fm.setAttributes([.modificationDate: Date(timeIntervalSince1970: Double(processStart - 60))],
+                             ofItemAtPath: home.appendingPathComponent("Library/Logs/DiagnosticReports/Cyberpunk2077-test.ips").path)
+        try write(game, "red4ext/logs/red4ext-head-tail.log", "STARTUP_IDENTITY_MARKER\n" + String(repeating: "m", count: 400_000) + "\nFINAL_RESULT_MARKER")
+        try writeJSON(temp, "cp2077_runtime_diagnostics.json", ["schema_version": 1, "process_id": 12345,
+            "script_loaded_at_unix": Double(processStart + 2), "updated_at_unix": now,
+            "executor_filter": "native", "localization_filter": "native", "game_support": "supported",
+            "unknown": "RUNTIME_STATUS_PRIVATE"])
+        let dated = collect(sample: liveSample)
+        let logIndex = try array(dated, "logs/log-index.json")
+        let indexed = logIndex.first { ($0["source"] as? String)?.hasSuffix("red4ext-head-tail.log") == true }!
+        let excerpt = String(decoding: dated.entries.first { $0.name == indexed["export"] as? String }!.data, as: UTF8.self)
+        precondition(excerpt.contains("STARTUP_IDENTITY_MARKER") && excerpt.contains("FINAL_RESULT_MARKER") && excerpt.contains("Middle of log omitted"))
+        precondition(indexed["truncated"] as? Bool == true && indexed["modified_unix"] is NSNumber && indexed["modified_utc"] is String)
+        let crashIndex = try array(dated, "crashes/index.json")
+        precondition(crashIndex.count == 1 && crashIndex[0]["session_relation"] as? String == "predates_sampled_process")
+        var runtimeStatus = try object(dated, "logs/runtime-status.json")
+        precondition(runtimeStatus["session_relation"] as? String == "matches_sampled_process")
+        precondition(!dated.entries.map { String(decoding: $0.data, as: UTF8.self) }.joined().contains("RUNTIME_STATUS_PRIVATE"))
+        var rejectedIdentity = liveMetadata
+        rejectedIdentity["status"] = "identity_changed"; rejectedIdentity["identity_checked_after"] = false
+        let unverifiedRuntime = try object(collect(sample: DiagnosticsProcessSample(metadata: rejectedIdentity, text: nil)), "logs/runtime-status.json")
+        precondition(unverifiedRuntime["session_relation"] as? String != "matches_sampled_process",
+                     "A failed process identity check must not certify a runtime sidecar as current")
+        try writeJSON(temp, "cp2077_runtime_diagnostics.json", ["schema_version": 1, "process_id": 12345,
+            "script_loaded_at_unix": Double(processStart - 600), "updated_at_unix": now])
+        runtimeStatus = try object(collect(sample: liveSample), "logs/runtime-status.json")
+        precondition(runtimeStatus["session_relation"] as? String == "different_or_stale_process", "PID equality cannot make an old runtime file current")
+        print("PASS startup/final log excerpts, source timestamps, stale crash index and runtime process-birth matching")
+
+        try write(game, "red4ext/nightcity-plugin-scripts.json", "{malformed")
+        let malformedIntegrity = try object(collect(), "script-integrity.json")
+        precondition(malformedIntegrity["status"] as? String == "manifest_missing_or_invalid")
+        try writeJSON(game, "red4ext/nightcity-plugin-scripts.json", scriptManifest)
+        var noHashBudget = DiagnosticsLimits(); noHashBudget.hashBytes = 2
+        let limitedIntegrity = try object(collect(noHashBudget), "script-integrity.json")
+        let limitedFiles = limitedIntegrity["files"] as! [[String: Any]]
+        precondition(limitedFiles.first { $0["path"] as? String == scriptPrefix + "Good.reds" }?["status"] as? String == "size_or_time_budget")
+
+        // Legacy 2.3.1 keeps its database next to the loader; the 2.5 bin/x64
+        // location must not be accidentally used for the older supported path.
+        try write(game, "red4ext/cyberpunk2077_addresses.json", "LEGACY_DB_CONTENT_PRIVATE")
+        try write(snapshot.appBundle, "Contents/Resources/cyberpunk2077_addresses.json", "LEGACY_DB_CONTENT_PRIVATE")
+        var legacy = DiagnosticsSnapshot(gameRoot: game, appBundle: snapshot.appBundle, appVersion: "1.7.1", gameVersion: "2.3.1",
+            installed: true, status: "Ready", operationInProgress: false, native25: false, separateScriptCache: false)
+        legacy.home = home; legacy.temporaryRoot = temp; legacy.includeSystemInformation = false
+        let legacyReport = DiagnosticsCollector(snapshot: legacy, sampleProvider: { _, _, _ in DiagnosticsProcessSample(metadata: ["status": "not_running"], text: nil) }).collect()
+        let legacyFiles = try array(legacyReport, "runtime-files.json")
+        let legacyDB = legacyFiles.first { $0["path"] as? String == "<GAME>/red4ext/cyberpunk2077_addresses.json" }!
+        precondition(legacyDB["matches_bundled"] as? Bool == true)
+        precondition(!legacyReport.entries.map { String(decoding: $0.data, as: UTF8.self) }.joined().contains("LEGACY_DB_CONTENT_PRIVATE"))
+        print("PASS malformed/bounded script integrity and legacy 2.3.1 database identity")
 
         let zip = fixture.appendingPathComponent("report.zip")
         try report.zipData().write(to: zip)
