@@ -1286,6 +1286,12 @@ static void drawExplorationTab() {
     ImGui::SameLine();
     if (ImGui::Button("Return to start")) runLabeled("flight return", "Return and collision restoration requested.");
     ImGui::TextWrapped("Close F1 to move: WASD, Space up, Control down, Shift boost. Hold Alt (Option) for slow, precise movement.");
+    int speedPreset = static_cast<int>(g_explorationInput.preset());
+    ImGui::SetNextItemWidth(180);
+    if (ImGui::Combo("Flight speed", &speedPreset, "Normal: 4 m/s\0Slow: 2 m/s\0Fast: 6 m/s\0Faster: 8 m/s\0"))
+        g_explorationInput.setPreset(static_cast<uint32_t>(speedPreset));
+    ImGui::TextDisabled("Shift: 12 m/s. Alt (Option): 0.75 m/s.");
+    ImGui::TextWrapped("Switching away from the game cancels flight. Opening F1 pauses movement so you can use Return to start.");
     ImGui::Separator();
     if (ImGui::Button("Validate flight")) runLabeled("flight validate", "Read-only flight validation requested. Check flight status for results.");
     ImGui::SameLine();
@@ -2312,12 +2318,13 @@ static void installInputHook() {
     if (!m) { olog("FATAL: no sendEvent: on %s", class_getName(appClass)); return; }
     g_origSendEvent = method_getImplementation(m);
     method_setImplementation(m, (IMP)my_sendEvent);
-    g_explorationInput.setBlocked(g_show.load() || !NSApp.isActive);
+    if (NSApp.isActive) g_explorationInput.focusGained(g_show.load());
+    else g_explorationInput.blockAndCancel();
     [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationDidResignActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification*) {
-        g_explorationInput.setBlocked(true);
+        g_explorationInput.blockAndCancel();
     }];
     [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationDidBecomeActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification*) {
-        g_explorationInput.setBlocked(g_show.load());
+        g_explorationInput.focusGained(g_show.load());
     }];
     olog("hooked sendEvent: on %s", class_getName(appClass));
 }

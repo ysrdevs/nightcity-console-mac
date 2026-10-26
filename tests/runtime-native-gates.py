@@ -155,11 +155,19 @@ try {
  setPacket(512|1|16); flightCall(0xf100,0x2000,0,guarded.add(8));
  checkResult(guarded,256,'unconfigured stub remains blocked');assert(readCount()===reads,'unconfigured has no getter reads');
  gate.flightInput(ptr(0xf100));
- for(const packet of [256,512,512|256,512|1|16,512|2|4|8|32|64|128]) {
+ const packets=[256,512,512|256,512|1|16,512|2|4|8|32|64|128];
+ // Settings and non-consuming cancellation epochs share the same UInt32.
+ // Cover the signed boundary and saturation without changing the old ABI.
+ for(const epoch of [0,1,0x7fff,0x8000,0xfffe,0xffff]) for(let preset=0;preset<4;++preset) {
+   packets.push((epoch*65536 | preset*1024 | 512 | 1 | 64)>>>0);
+   packets.push((epoch*65536 | preset*1024 | 512 | 256 | 4096 | (epoch===0xffff?32768:0))>>>0);
+ }
+ for(const packet of packets) {
    setPacket(packet);guarded=resultBuffer();n=captures;reads=readCount();
    flightCall(0xf100,0x2000,0,guarded.add(8));
    checkResult(guarded,packet,'exact Uint32 packet '+packet);
    assert(captures===n,'flight path never enters JavaScript');assert(readCount()===reads+1,'one getter read per matching result');
+   assert(gate.flightInputPacket()===packet && gate.flightInputPacket()===packet,'direct reads preserve all fields without consuming the packet');
  }
  guarded=resultBuffer();reads=readCount();flightCall(0xf101,0x2000,0,guarded.add(8));
  checkResult(guarded,0x13579bdf,'nearby function unchanged');assert(readCount()===reads,'nonmatch does not read getter');
@@ -168,8 +176,8 @@ try {
  flightCall(0xf100,0x2000,0,guarded.add(8));checkResult(guarded,512|16,'busy commands preserve flight input');assert(captures===n,'busy flight still has no JavaScript');gate.busy(false);
  gate.observers(true);guarded=resultBuffer();n=captures;
  flightCall(0xf100,0x2000,0,guarded.add(8));checkResult(guarded,512|16,'internal input with observers');assert(captures===n,'internal flight method stays native with observers');gate.observers(false);
- guarded=resultBuffer();setPacket(512|1|64);assert(flightCall(0xf100,0x2000,3,guarded.add(8)).toNumber()===4,'nested executor return retained');
- checkResult(guarded,512|1|64,'outer nested result');
+ guarded=resultBuffer();setPacket(0x80000e41);assert(flightCall(0xf100,0x2000,3,guarded.add(8)).toNumber()===4,'nested executor return retained');
+ checkResult(guarded,0x80000e41,'outer nested result including cancellation epoch and preset');
  assert(flightWorkers(250)===0,'four-thread nested and interleaved result buffers stay isolated');
  gate.pending(true);drains=[];guarded=resultBuffer();flightCall(0xf100,0x2000,0,guarded.add(8));
  assert(drains.join(',')==='0','flight return preserves outermost depth accounting');gate.pending(false);
@@ -304,7 +312,8 @@ def main():
                          'busy reentry', 'player changes', 'localization signed-range keys', 'ARM64 x8 output',
                          'found flag', 'nonmatching keys', 'key-table reload', 'empty key map',
                          'flight exact method and fourth-argument Uint32 result', 'flight output guard bytes',
-                         'flight blocked and ready packets', 'flight unconfigured and removed binding',
+                         'flight blocked and ready packets', 'all speed presets and full-width cancellation epochs',
+                         'non-consuming repeated direct input snapshots', 'flight unconfigured and removed binding',
                          'flight null output', 'flight busy reentry', 'flight nested and four-thread result isolation',
                          'flight outermost depth accounting', 'flight internal method with observers',
                          'flight missing-export native blocked fallback',

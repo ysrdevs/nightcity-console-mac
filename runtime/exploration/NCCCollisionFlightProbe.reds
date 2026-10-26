@@ -200,6 +200,14 @@ class NCCCollisionFlightProbeState extends IScriptable {
   public let machineName: CName;
   public let interfaceRef: wref<StateGameScriptInterface>;
   public let status: String;
+  public let stopRequested: Bool;
+  public let stopReason: String;
+  public let restoreUnconfirmed: Bool;
+  public let menuOpen: Bool;
+  public let menuBlackboard: wref<IBlackboard>;
+  public let menuListener: ref<CallbackHandle>;
+  public let focusEpochValid: Bool;
+  public let focusEpoch: Uint32;
   public let cameraBaseline: ref<NCCFlightCameraWindow>;
   public let cameraActive: ref<NCCFlightCameraWindow>;
   public let cameraCurrent: ref<NCCFlightCameraWindow>;
@@ -259,6 +267,85 @@ public final func NCCFlightInput() -> Uint32 {
 }
 
 @addMethod(PlayerPuppet)
+private final func NCCFlightProbeEnsureMenuListener() -> Bool {
+  let probe = this.nccCollisionFlightProbe;
+  if !IsDefined(probe) {
+    return false;
+  }
+  if IsDefined(probe.menuBlackboard) && IsDefined(probe.menuListener) {
+    return true;
+  }
+  probe.menuBlackboard = GameInstance.GetBlackboardSystem(this.GetGame()).Get(GetAllBlackboardDefs().UI_System);
+  if !IsDefined(probe.menuBlackboard) {
+    return false;
+  }
+  probe.menuListener = probe.menuBlackboard.RegisterListenerBool(GetAllBlackboardDefs().UI_System.IsInMenu,
+    this, n"NCCFlightProbeMenuChanged", true);
+  if !IsDefined(probe.menuListener) {
+    probe.menuBlackboard = null;
+    return false;
+  }
+  probe.menuOpen = probe.menuBlackboard.GetBool(GetAllBlackboardDefs().UI_System.IsInMenu);
+  return true;
+}
+
+@addMethod(PlayerPuppet)
+private final func NCCFlightProbeRequestStop(reason: String) {
+  let probe = this.nccCollisionFlightProbe;
+  if IsDefined(probe) && (probe.active || probe.requested || probe.transitionPending || probe.restoreUnconfirmed) {
+    if !probe.stopRequested {
+      probe.stopReason = reason;
+    }
+    probe.stopRequested = true;
+    probe.requested = false;
+    probe.transitionPending = false;
+    probe.transitionSerial += 1u;
+  }
+}
+
+@addMethod(PlayerPuppet)
+protected cb func NCCFlightProbeMenuChanged(value: Bool) -> Bool {
+  let probe = this.nccCollisionFlightProbe;
+  if IsDefined(probe) {
+    probe.menuOpen = value;
+    if value {
+      // Blackboard notifications only cancel intent. The owned locomotion
+      // callback performs restoration, including after a paused menu closes.
+      this.NCCFlightProbeRequestStop("Stopped for game menu; start again after closing it");
+    }
+  }
+  return true;
+}
+
+@addMethod(PlayerPuppet)
+private final func NCCFlightProbeObserveInput(packet: Uint32) {
+  let probe = this.nccCollisionFlightProbe;
+  let epoch: Uint32;
+  let changed: Bool;
+  probe.lastInputPacket = packet;
+  probe.inputChecks += 1;
+  if (packet & 512u) == 0u {
+    this.NCCFlightProbeRequestStop("Stopped: native input is unavailable");
+    return;
+  }
+  epoch = packet / 65536u;
+  changed = !probe.focusEpochValid || epoch != probe.focusEpoch;
+  probe.focusEpoch = epoch;
+  probe.focusEpochValid = (packet & 32768u) == 0u;
+  if !probe.focusEpochValid {
+    this.NCCFlightProbeRequestStop("Stopped: focus cancellation counter exhausted; restart the game");
+  } else {
+    if changed {
+      this.NCCFlightProbeRequestStop("Stopped after focus changed; return to the game and start again");
+    } else {
+      if (packet & 4096u) != 0u {
+        this.NCCFlightProbeRequestStop("Stopped: game is not focused; return and start again");
+      }
+    }
+  }
+}
+
+@addMethod(PlayerPuppet)
 public final func NCCFlightProbeToggle() -> String {
   let probe = this.nccCollisionFlightProbe;
   if !IsDefined(probe) {
@@ -268,6 +355,18 @@ public final func NCCFlightProbeToggle() -> String {
     probe.requested = false;
     probe.status = "Requested: return and restore";
     return probe.status;
+  }
+  if probe.restoreUnconfirmed {
+    return "Flight refused: collision restoration is unconfirmed; crouch and stand to capture a fresh normal filter";
+  }
+  if !this.NCCFlightProbeEnsureMenuListener() {
+    return "Flight refused: game-menu cancellation listener is unavailable";
+  }
+  if probe.menuOpen {
+    return "Flight refused: close the game menu first";
+  }
+  if !probe.focusEpochValid {
+    return "Flight refused: validate native input before starting; restart if the focus counter is exhausted";
   }
   if probe.validationRequested {
     return "Flight refused: read-only validation is still pending";
@@ -280,6 +379,8 @@ public final func NCCFlightProbeToggle() -> String {
   }
   // The next ordinary update still verifies READY, current-interface identity,
   // grounded stand/crouch, and all setter Variants before enabling movement.
+  probe.stopRequested = false;
+  probe.stopReason = "";
   probe.positionWritesIssued = 0;
   probe.positionReadbacks = 0;
   probe.positionRefusals = 0;
@@ -310,6 +411,9 @@ public final func NCCFlightProbeValidate() -> String {
   let probe = this.nccCollisionFlightProbe;
   if probe.active || probe.requested || probe.transitionPending {
     return "Validation refused: first stop the flight probe";
+  }
+  if !this.NCCFlightProbeEnsureMenuListener() {
+    return "Validation refused: game-menu cancellation listener is unavailable";
   }
   probe.validationRequested = true;
   probe.status = "Read-only validation queued for the next locomotion update";
@@ -503,6 +607,9 @@ public final func NCCFlightProbeCaptureFilter(scriptInterface: ref<StateGameScri
   probe.capturedFilter = value;
   probe.capturedInterface = scriptInterface;
   probe.captureWrites += 1;
+  // This callback is reached only after the scoped ORIGINAL engine setter
+  // succeeded. Owned ZERO writes are excluded by both native and script guards.
+  probe.restoreUnconfirmed = false;
   if probe.active && probe.interfaceRef == scriptInterface {
     probe.baselineFilter = value;
     probe.filterType = VariantTypeName(value);
@@ -562,6 +669,10 @@ private final func NCCFlightProbeRunValidation(scriptInterface: ref<StateGameScr
   probe.machineName = machineName;
   probe.lastInputPacket = this.NCCFlightInput();
   probe.inputChecks += 1;
+  probe.focusEpochValid = (probe.lastInputPacket & 512u) != 0u && (probe.lastInputPacket & 32768u) == 0u;
+  if probe.focusEpochValid {
+    probe.focusEpoch = probe.lastInputPacket / 65536u;
+  }
   // Native 2.5 getter switch maps SimulationFilter to its empty return path.
   // Inspecting it is safe; sending that empty Variant back to the setter is not.
   baseline = scriptInterface.GetStateVectorParameter(physicsStateValue.SimulationFilter);
@@ -614,6 +725,13 @@ public final func NCCFlightProbeStatus() -> String {
     + "; positionOriginDivergence=" + FloatToStringPrec(probe.positionOriginDivergence, 4)
     + "; positionRefusals=" + ToString(probe.positionRefusals)
     + "; positionLastRefusal=" + probe.positionLastRefusal
+    + "; stopRequested=" + ToString(probe.stopRequested)
+    + "; stopReason=" + probe.stopReason
+    + "; restoreUnconfirmed=" + ToString(probe.restoreUnconfirmed)
+    + "; menuListener=" + ToString(IsDefined(probe.menuBlackboard) && IsDefined(probe.menuListener))
+    + "; menuOpen=" + ToString(probe.menuOpen)
+    + "; focusEpoch=" + ToString(probe.focusEpoch)
+    + "; focusEpochValid=" + ToString(probe.focusEpochValid)
     + "; filterType=" + NameToString(probe.filterType)
     + "; velocityType=" + NameToString(probe.velocityType)
     + "; state=" + NameToString(probe.stateName)
@@ -642,15 +760,20 @@ public final func NCCFlightProbeRestore(scriptInterface: ref<StateGameScriptInte
     // An ordinary exit has already returned to the safe start and restored
     // collision. Do not overwrite a new state's filter through an old context.
     probe.transitionPending = false;
+    if !probe.restoreUnconfirmed {
+      probe.stopRequested = false;
+    }
     probe.status = reason;
     return;
   }
   if !IsDefined(scriptInterface) || scriptInterface.owner != this || probe.interfaceRef != scriptInterface {
+    probe.restoreUnconfirmed = true;
     probe.status = "Restore refused: owner changed";
     return;
   }
   zeroVelocity = this.NCCFlightProbeZeroVelocity();
   if !this.NCCFlightProbeIsFilter(probe.baselineFilter) || !this.NCCFlightProbeIsVelocity(zeroVelocity) {
+    probe.restoreUnconfirmed = true;
     probe.status = "Restore refused: invalid collision or velocity Variant; no physics writes";
     return;
   }
@@ -659,11 +782,14 @@ public final func NCCFlightProbeRestore(scriptInterface: ref<StateGameScriptInte
   }
   scriptInterface.SetStateVectorParameter(physicsStateValue.LinearVelocity, zeroVelocity);
   if this.NCCFlightProbeWriteFilter(scriptInterface, probe.baselineFilter) {
+    probe.restoreUnconfirmed = false;
+    probe.stopRequested = false;
     probe.active = false;
     probe.transitionPending = false;
     probe.status = reason + "; filter restored";
     probe.interfaceRef = null;
   } else {
+    probe.restoreUnconfirmed = true;
     probe.status = "Restore failed: awaiting next locomotion update";
   }
 }
@@ -721,8 +847,12 @@ public final func NCCFlightProbeObserveStateFilter(scriptInterface: ref<StateGam
   if !capturedFresh || !IsDefined(probe.capturedInterface) || probe.capturedInterface != scriptInterface
     || !this.NCCFlightProbeIsFilter(chosenFilter) || !this.NCCFlightProbeIsFilter(zeroFilter)
     || !this.NCCFlightProbeIsVelocity(zeroVelocity) {
-    // The original method has selected the next state's filter. Never replace
-    // that value with ZERO if its actual restoration value cannot be read.
+    // A failed capture is not proof that the original filter write succeeded.
+    // Never reapply ZERO or permit another activation until cleanup is known.
+    if probe.active {
+      probe.restoreUnconfirmed = true;
+    }
+    this.NCCFlightProbeRequestStop("Stopped: fresh collision capture failed; restoration may be unconfirmed");
     probe.status = "Stopped: fresh collision capture failed; native filter retained";
     if probe.active && IsDefined(scriptInterface) && scriptInterface.owner == this
       && !this.IsDead() && !scriptInterface.IsMountedToObject() {
@@ -740,9 +870,17 @@ public final func NCCFlightProbeObserveStateFilter(scriptInterface: ref<StateGam
   probe.stateName = stateName;
   probe.machineName = machineName;
   probe.interfaceRef = scriptInterface;
+  this.NCCFlightProbeObserveInput(this.NCCFlightInput());
+  if probe.menuOpen || !IsDefined(probe.menuBlackboard) || !IsDefined(probe.menuListener) {
+    this.NCCFlightProbeRequestStop("Stopped for game menu or unavailable menu listener");
+  }
+  if probe.stopRequested {
+    this.NCCFlightProbeRestore(scriptInterface, probe.stopReason, true);
+    return;
+  }
   if !probe.requested || !this.NCCFlightProbeAllowed(stateName, machineName)
     || this.IsDead() || scriptInterface.IsMountedToObject() || scriptInterface.IsPlayerInBraindance()
-    || scriptInterface.IsSceneAnimationActive() || (this.NCCFlightInput() & 512u) == 0u
+    || scriptInterface.IsSceneAnimationActive()
     || (probe.transitionPending && EngineTime.ToFloat(GameInstance.GetSimTime(this.GetGame())) > probe.transitionDeadline) {
     this.NCCFlightProbeRestore(scriptInterface, "Stopped for locomotion transition", true);
     return;
@@ -783,6 +921,7 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
   let forward: Float;
   let vertical: Float;
   let blocked: Bool;
+  let speedPreset: Uint32;
   let zeroFilter: Variant;
   let zeroVelocity: Variant;
   if !IsDefined(probe) {
@@ -792,6 +931,8 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
     || probe.interfaceRef != scriptInterface) {
     // Never apply an old state's baseline or ZERO through a different context.
     // Only request the safe return when the current context still owns us.
+    probe.restoreUnconfirmed = true;
+    this.NCCFlightProbeRequestStop("Stopped: locomotion context changed; collision restoration is unconfirmed");
     probe.status = "Stopped: locomotion context changed; new state filter untouched";
     if IsDefined(scriptInterface) && scriptInterface.owner == this
       && !this.IsDead() && !scriptInterface.IsMountedToObject() {
@@ -809,6 +950,12 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
     return;
   }
   if !probe.requested && !probe.active {
+    // A completed stop has no idle polling. An unconfirmed cleanup remains
+    // blocked until an original filter capture establishes a safe new state.
+    if probe.stopRequested && !probe.restoreUnconfirmed {
+      probe.stopRequested = false;
+      probe.status = probe.stopReason + "; inactive with normal collision confirmed";
+    }
     return;
   }
   if !IsDefined(scriptInterface) || scriptInterface.owner != this {
@@ -818,6 +965,10 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
     probe.status = probe.positionLastRefusal;
     return;
   }
+  if probe.stopRequested {
+    this.NCCFlightProbeRestore(scriptInterface, probe.stopReason, true);
+    return;
+  }
   if probe.transitionPending {
     this.NCCFlightProbeExpireTransition(probe, probe.transitionSerial);
     return;
@@ -825,14 +976,20 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
   probe.stateName = stateName;
   probe.machineName = machineName;
   packet = this.NCCFlightInput();
-  probe.lastInputPacket = packet;
-  probe.inputChecks += 1;
-  if (packet & 512u) == 0u {
-    this.NCCFlightProbeRestore(scriptInterface, "Input bridge is not ready", true);
+  this.NCCFlightProbeObserveInput(packet);
+  if !IsDefined(probe.menuBlackboard) || !IsDefined(probe.menuListener) {
+    this.NCCFlightProbeRequestStop("Stopped: game-menu cancellation listener is unavailable");
+  } else {
+    probe.menuOpen = probe.menuBlackboard.GetBool(GetAllBlackboardDefs().UI_System.IsInMenu);
+    if probe.menuOpen {
+      this.NCCFlightProbeRequestStop("Stopped for game menu; start again after closing it");
+    }
+  }
+  if probe.stopRequested {
+    this.NCCFlightProbeRestore(scriptInterface, probe.stopReason, true);
     return;
   }
-  blocked = (packet & 256u) != 0u
-    || GameInstance.GetBlackboardSystem(this.GetGame()).Get(GetAllBlackboardDefs().UI_System).GetBool(GetAllBlackboardDefs().UI_System.IsInMenu);
+  blocked = (packet & 256u) != 0u;
   if this.IsDead() || scriptInterface.IsMountedToObject() || scriptInterface.IsPlayerInBraindance()
     || scriptInterface.IsSceneAnimationActive() || !this.NCCFlightProbeAllowed(stateName, machineName) {
     this.NCCFlightProbeRestore(scriptInterface, "Stopped for unsupported player state", true);
@@ -840,6 +997,10 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
   }
   if !probe.requested {
     this.NCCFlightProbeRestore(scriptInterface, "Returned to activation point", true);
+    return;
+  }
+  if !probe.active && blocked {
+    probe.status = "Waiting for F1 to close before activation";
     return;
   }
   if !(timeDelta >= 0.0 && timeDelta <= 1.0) {
@@ -951,7 +1112,12 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
   if Vector4.Length(movement) > 1.0 {
     movement = Vector4.Normalize(movement);
   }
-  speed = (packet & 64u) != 0u ? 12.0 : 4.0;
+  speedPreset = (packet & 3072u) / 1024u;
+  speed = 4.0;
+  if speedPreset == 1u { speed = 2.0; }
+  if speedPreset == 2u { speed = 6.0; }
+  if speedPreset == 3u { speed = 8.0; }
+  if (packet & 64u) != 0u { speed = 12.0; }
   if (packet & 128u) != 0u { speed = 0.75; }
   step = movement * (speed * dt);
   if !this.NCCFlightProbeBoundedVector(step, 0.60001) || !(Vector4.Length(step) <= 0.60001) {
@@ -1063,6 +1229,13 @@ public func OnForcedExit(stateContext: ref<StateContext>, scriptInterface: ref<S
 protected cb func OnDetach() -> Bool {
   // No attempt to teleport or operate through an old interface during teardown.
   if IsDefined(this.nccCollisionFlightProbe) {
+    if IsDefined(this.nccCollisionFlightProbe.menuBlackboard) && IsDefined(this.nccCollisionFlightProbe.menuListener) {
+      this.nccCollisionFlightProbe.menuBlackboard.UnregisterListenerBool(GetAllBlackboardDefs().UI_System.IsInMenu,
+        this.nccCollisionFlightProbe.menuListener);
+    }
+    this.nccCollisionFlightProbe.menuBlackboard = null;
+    this.nccCollisionFlightProbe.menuListener = null;
+    this.nccCollisionFlightProbe.transitionSerial += 1u;
     this.nccCollisionFlightProbe.capturedInterface = null;
     this.nccCollisionFlightProbe.interfaceRef = null;
   }
