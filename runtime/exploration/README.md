@@ -18,15 +18,20 @@ While active, the script uses the locomotion update context, camera-relative mov
 
 Controls: WASD to move, Space to rise, Control to descend, Shift to boost and Alt (Option on an Apple keyboard) for precision. Start on clear ground, close F1 to move, and do not save while the probe is active.
 
-The movement test exposed a horizontal camera lock while vertical look remained available. With F1 closed the overlay forwards both mouse axes unchanged. Using current camera world yaw for the active teleport and transition resume did not resolve it in the next live test. Flight movement and automatic return still worked, and status reported the filter restored. The cause remains unresolved; repeated teleport may reset rotation later in the engine update.
+The movement test exposed a horizontal camera lock while vertical look remained available. With F1 closed the overlay forwards both mouse axes unchanged. Using current camera world yaw for the active teleport and transition resume did not resolve it in the next live test. The subsequent recordings confirmed horizontal input in both normal movement and flight, but almost no camera yaw response during flight. Rotation did not change inside either sampled callback interval, so these recordings locate the lost response outside that interval without proving which engine operation causes it. Activation snapshots also showed matching physics and entity positions to the printed millimetre precision.
 
-The temporary **Record camera input** diagnostic compares a short normal-look baseline with the next flight. It samples input and rotation around the original locomotion update and flight update, so the report can also compare a later frame with the previous frame's result. Collection is bounded and emits no per-frame text or file output; **Check flight status** retrieves the report manually. This is diagnostic instrumentation, not a further camera fix. It also records a guarded physics-position versus player-position comparison to inform future movement work. No new physics setter or native movement bridge is enabled.
+The temporary **Record camera input** diagnostic compares a short normal-look baseline with the next flight. It samples input and rotation around the original locomotion update and flight update, so the report can also compare a later frame with the previous frame's result. Collection is bounded and emits no per-frame text or file output; **Check flight status** retrieves the report manually. It also records a guarded physics-position versus player-position comparison.
+
+The current private build replaces only the active per-frame teleport with a guarded native position-only write. It leaves facing direction to the engine. The original 2.5 state setter rejects Position; the supplemental bridge can run only within the exact `StateGameScriptInterface.NCCFlightWritePosition` method, after the original setter returns false. Setup verifies the method signature, Vector3 layout, enum value and six native helper instruction fingerprints. The raw position getter uses a verified hidden x8 output adapter, not a float-vector return convention. No framework plugin is modified.
+
+Each native write copies a finite Vector3, validates the current physics handle and permits at most one attempt within that invocation. Its target must be within one metre of the current physics position. Nested writer scopes, stale candidates, changed handles and incompatible setup fail closed. The script separately bounds frame time, movement steps, activation-origin agreement, origin divergence and distance from the starting point. A refused write uses the existing restoration and return path, without falling back to per-frame teleport. Status distinguishes issued writes from subsequent readbacks; a readback within one metre is a proximity check, not proof of movement or exact arrival. One-shot return and locomotion-transition resume still use the existing teleports. The native bridge has passed isolated integration tests; actual movement and horizontal camera behavior in this build remain unverified.
 
 ## Validation at this checkpoint
 
 - Native executor fixtures cover exact function matching, four-byte result writes, nested and concurrent calls, observer coexistence and a missing overlay export.
 - Command fixtures cover version and signature checks, current-player context, native snapshot failure cleanup and the command return buffer. They forbid trying the scripted input round trip inside a command callback.
 - Input fixtures cover coherent snapshots, blocked input and clearing held keys.
+- Position fixtures cover exact method and context scope, the raw x8 getter convention and output boundaries, original arguments and results, single-use native writes, finite and distance bounds, helper failures, nested calls and concurrent threads. An intentionally incorrect writer binding refuses all supplemental writes.
 - The combined script set compiles with VA, Equipment-EX, Cyberware-EX and the existing plugin scripts.
 - The overlay output reader now runs on a worker with a bounded 128 KiB tail and 400 lines. The render path only consumes completed snapshots; clear operations invalidate older pending output. Sanitizer fixtures cover partial lines, replacement, truncation, special files and concurrent reads.
 
@@ -40,14 +45,16 @@ Before production use, complete player lifecycle and menu/transition testing, ex
 node --check runtime/red4ext_hooks.js
 node tests/runtime-flight-commands.mjs
 node tests/runtime-flight-capture-setup.mjs
+node tests/runtime-flight-position-setup.mjs
 node tests/runtime-native-fallback.mjs
 node tests/runtime-diagnostics.mjs
 node tests/creator-transaction.mjs
 node tests/creator-catalog.mjs
 bash tools/test-output-snapshot.sh
 bash tools/test-flight-capture.sh
+bash tools/test-flight-position.sh
 clang++ -std=c++17 -O2 -pthread tests/exploration-input.cpp -o /tmp/nightcity-exploration-input-test
 /tmp/nightcity-exploration-input-test
 ```
 
-The native executor fixture in `tests/runtime-native-gates.py` additionally requires its documented local Frida host setup. Compile all installed redscripts into the separate modded cache before launching. Keep the original game copy, vanilla script cache, existing mod hashes and Creator name map intact.
+The native executor fixture in `tests/runtime-native-gates.py` and position integration fixture in `tests/runtime-flight-position.py` additionally require their documented local Frida host setup. Compile all installed redscripts into the separate modded cache before launching. Keep the original game copy, vanilla script cache, existing mod hashes and Creator name map intact.

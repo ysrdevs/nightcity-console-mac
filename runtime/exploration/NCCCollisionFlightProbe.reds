@@ -177,6 +177,15 @@ class NCCCollisionFlightProbeState extends IScriptable {
   public let inputChecks: Int32;
   public let filterWrites: Int32;
   public let velocityWrites: Int32;
+  public let positionWritesIssued: Int32;
+  public let positionReadbacks: Int32;
+  public let positionRefusals: Int32;
+  public let positionReadbackPending: Bool;
+  public let positionReadbackDistance: Float;
+  public let positionOriginDivergence: Float;
+  public let positionOriginDelta: Vector4;
+  public let positionLastTarget: Vector4;
+  public let positionLastRefusal: String;
   public let capturedFilter: Variant;
   public let capturedInterface: wref<StateGameScriptInterface>;
   public let captureWrites: Int32;
@@ -225,6 +234,23 @@ public final func NCCFlightCaptureEnd() -> Variant {
   return empty;
 }
 
+@addMethod(StateGameScriptInterface)
+public final func NCCFlightWritePosition(position: Vector3) -> Bool {
+  let player = this.owner as PlayerPuppet;
+  let typedPosition: Vector3 = position;
+  let value: Variant;
+  if !IsDefined(player) {
+    return false;
+  }
+  value = ToVariant(typedPosition);
+  if !IsDefined(value) || NotEquals(VariantTypeName(value), n"Vector3") {
+    return false;
+  }
+  // The original 2.5 setter rejects Position. Only the exact scoped native
+  // bridge may issue a position-only write; true means issued, not observed.
+  return this.SetStateVectorParameter(physicsStateValue.Position, value);
+}
+
 @addMethod(PlayerPuppet)
 public final func NCCFlightInput() -> Uint32 {
   // Native exact-function result bridge replaces only this return value.
@@ -254,6 +280,13 @@ public final func NCCFlightProbeToggle() -> String {
   }
   // The next ordinary update still verifies READY, current-interface identity,
   // grounded stand/crouch, and all setter Variants before enabling movement.
+  probe.positionWritesIssued = 0;
+  probe.positionReadbacks = 0;
+  probe.positionRefusals = 0;
+  probe.positionReadbackPending = false;
+  probe.positionReadbackDistance = 0.0;
+  probe.positionOriginDivergence = 0.0;
+  probe.positionLastRefusal = "";
   probe.requested = true;
   probe.status = "Requested: waiting for grounded locomotion";
   return probe.status;
@@ -413,6 +446,23 @@ private final func NCCFlightProbeIsVelocity(value: Variant) -> Bool {
 }
 
 @addMethod(PlayerPuppet)
+private final func NCCFlightProbeBoundedVector(value: Vector4, limit: Float) -> Bool {
+  // Ordered bounds also reject NaN and infinities without assuming an API.
+  return value.X >= -limit && value.X <= limit && value.Y >= -limit && value.Y <= limit
+    && value.Z >= -limit && value.Z <= limit && value.W >= -limit && value.W <= limit;
+}
+
+@addMethod(PlayerPuppet)
+private final func NCCFlightProbePositionRefused(scriptInterface: ref<StateGameScriptInterface>, reason: String) {
+  let probe = this.nccCollisionFlightProbe;
+  if IsDefined(probe) {
+    probe.positionRefusals += 1;
+    probe.positionLastRefusal = reason;
+    this.NCCFlightProbeRestore(scriptInterface, reason, true);
+  }
+}
+
+@addMethod(PlayerPuppet)
 private final func NCCFlightProbeZeroFilter() -> Variant {
   let filter: SimulationFilter = SimulationFilter.ZERO();
   return ToVariant(filter);
@@ -557,6 +607,13 @@ public final func NCCFlightProbeStatus() -> String {
     + "; captureWrites=" + ToString(probe.captureWrites)
     + "; filterWrites=" + ToString(probe.filterWrites)
     + "; velocityWrites=" + ToString(probe.velocityWrites)
+    + "; positionWritesIssued=" + ToString(probe.positionWritesIssued)
+    + "; positionReadbacks=" + ToString(probe.positionReadbacks)
+    + "; positionReadbackPending=" + ToString(probe.positionReadbackPending)
+    + "; positionReadbackDistance=" + FloatToStringPrec(probe.positionReadbackDistance, 4)
+    + "; positionOriginDivergence=" + FloatToStringPrec(probe.positionOriginDivergence, 4)
+    + "; positionRefusals=" + ToString(probe.positionRefusals)
+    + "; positionLastRefusal=" + probe.positionLastRefusal
     + "; filterType=" + NameToString(probe.filterType)
     + "; velocityType=" + NameToString(probe.velocityType)
     + "; state=" + NameToString(probe.stateName)
@@ -580,6 +637,7 @@ public final func NCCFlightProbeRestore(scriptInterface: ref<StateGameScriptInte
     return;
   }
   probe.requested = false;
+  probe.positionReadbackPending = false;
   if !probe.active {
     // An ordinary exit has already returned to the safe start and restored
     // collision. Do not overwrite a new state's filter through an old context.
@@ -709,6 +767,15 @@ public final func NCCFlightProbeObserveStateFilter(scriptInterface: ref<StateGam
 public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<StateContext>, scriptInterface: ref<StateGameScriptInterface>, stateName: CName, machineName: CName) {
   let probe = this.nccCollisionFlightProbe;
   let movement: Vector4;
+  let cameraRight: Vector4;
+  let cameraForward: Vector4;
+  let step: Vector4;
+  let nextTarget: Vector4;
+  let physicsTarget: Vector4;
+  let positionValue: Variant;
+  let physicsPosition: Vector4;
+  let entityPosition: Vector4;
+  let originDelta: Vector4;
   let speed: Float;
   let dt: Float;
   let packet: Uint32;
@@ -744,6 +811,13 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
   if !probe.requested && !probe.active {
     return;
   }
+  if !IsDefined(scriptInterface) || scriptInterface.owner != this {
+    probe.requested = false;
+    probe.positionRefusals += 1;
+    probe.positionLastRefusal = "Position refused: locomotion owner changed";
+    probe.status = probe.positionLastRefusal;
+    return;
+  }
   if probe.transitionPending {
     this.NCCFlightProbeExpireTransition(probe, probe.transitionSerial);
     return;
@@ -768,6 +842,48 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
     this.NCCFlightProbeRestore(scriptInterface, "Returned to activation point", true);
     return;
   }
+  if !(timeDelta >= 0.0 && timeDelta <= 1.0) {
+    this.NCCFlightProbePositionRefused(scriptInterface, "Position refused: invalid frame delta");
+    return;
+  }
+  positionValue = scriptInterface.GetStateVectorParameter(physicsStateValue.Position);
+  if !IsDefined(positionValue) || NotEquals(VariantTypeName(positionValue), n"Vector4") {
+    this.NCCFlightProbePositionRefused(scriptInterface, "Position refused: physics Position is not a defined Vector4");
+    return;
+  }
+  physicsPosition = FromVariant<Vector4>(positionValue);
+  entityPosition = this.GetWorldPosition();
+  if !this.NCCFlightProbeBoundedVector(physicsPosition, 100000.0)
+    || !this.NCCFlightProbeBoundedVector(entityPosition, 100000.0)
+    || AbsF(physicsPosition.W - 1.0) > 0.001 || AbsF(entityPosition.W - 1.0) > 0.001 {
+    this.NCCFlightProbePositionRefused(scriptInterface, "Position refused: invalid or out-of-bounds current position");
+    return;
+  }
+  originDelta = physicsPosition - entityPosition;
+  originDelta.W = 0.0;
+  if probe.active {
+    probe.positionOriginDivergence = Vector4.Length(originDelta - probe.positionOriginDelta);
+    if !(probe.positionOriginDivergence <= 0.25) {
+      this.NCCFlightProbePositionRefused(scriptInterface, "Position refused: physics/entity origins diverged by more than 0.25m");
+      return;
+    }
+    if probe.positionReadbackPending {
+      probe.positionReadbackDistance = Vector4.Distance(physicsPosition, probe.positionLastTarget);
+      if !(probe.positionReadbackDistance <= 1.0) {
+        this.NCCFlightProbePositionRefused(scriptInterface, "Position refused: prior target is more than 1m from physics readback");
+        return;
+      }
+      // This records a bounded next-callback observation, not exact arrival.
+      probe.positionReadbacks += 1;
+      probe.positionReadbackPending = false;
+    }
+  } else {
+    if !(Vector4.Length(originDelta) <= 0.01) {
+      this.NCCFlightProbePositionRefused(scriptInterface, "Position refused: activation physics/entity origin delta exceeds 0.01m");
+      return;
+    }
+    probe.positionOriginDelta = originDelta;
+  }
   zeroFilter = this.NCCFlightProbeZeroFilter();
   zeroVelocity = this.NCCFlightProbeZeroVelocity();
   if !this.NCCFlightProbeIsFilter(zeroFilter) || !this.NCCFlightProbeIsVelocity(zeroVelocity) {
@@ -788,7 +904,7 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
       return;
     }
     probe.velocityType = VariantTypeName(scriptInterface.GetStateVectorParameter(physicsStateValue.LinearVelocity));
-    probe.start = this.GetWorldPosition();
+    probe.start = entityPosition;
     probe.target = probe.start;
     probe.startFacing = Quaternion.ToEulerAngles(this.GetWorldOrientation());
     probe.elapsed = 0.0;
@@ -804,7 +920,7 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
     }
     probe.active = true;
   }
-  probe.elapsed += MaxF(timeDelta, 0.0);
+  probe.elapsed += timeDelta;
   if probe.elapsed >= 10.0 {
     this.NCCFlightProbeRestore(scriptInterface, "10-second probe complete", true);
     return;
@@ -818,17 +934,44 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
     if (packet & 16u) != 0u { vertical += 1.0; }
     if (packet & 32u) != 0u { vertical -= 1.0; }
   }
-  movement = scriptInterface.GetCameraSystem().GetActiveCameraRight() * horizontal
-    + scriptInterface.GetCameraSystem().GetActiveCameraForward() * forward
+  cameraRight = scriptInterface.GetCameraSystem().GetActiveCameraRight();
+  cameraForward = scriptInterface.GetCameraSystem().GetActiveCameraForward();
+  if !this.NCCFlightProbeBoundedVector(cameraRight, 2.0) || !this.NCCFlightProbeBoundedVector(cameraForward, 2.0) {
+    this.NCCFlightProbePositionRefused(scriptInterface, "Position refused: invalid camera movement vectors");
+    return;
+  }
+  movement = cameraRight * horizontal
+    + cameraForward * forward
     + new Vector4(0.0, 0.0, vertical, 0.0);
   movement.W = 0.0;
+  if !this.NCCFlightProbeBoundedVector(movement, 5.0) {
+    this.NCCFlightProbePositionRefused(scriptInterface, "Position refused: invalid movement vector");
+    return;
+  }
   if Vector4.Length(movement) > 1.0 {
     movement = Vector4.Normalize(movement);
   }
   speed = (packet & 64u) != 0u ? 12.0 : 4.0;
   if (packet & 128u) != 0u { speed = 0.75; }
-  probe.target += movement * (speed * dt);
-  probe.target.W = 1.0;
+  step = movement * (speed * dt);
+  if !this.NCCFlightProbeBoundedVector(step, 0.60001) || !(Vector4.Length(step) <= 0.60001) {
+    this.NCCFlightProbePositionRefused(scriptInterface, "Position refused: movement step exceeds 0.6m");
+    return;
+  }
+  nextTarget = probe.target + step;
+  nextTarget.W = 1.0;
+  physicsTarget = nextTarget + probe.positionOriginDelta;
+  physicsTarget.W = 1.0;
+  if !this.NCCFlightProbeBoundedVector(nextTarget, 100000.0)
+    || !this.NCCFlightProbeBoundedVector(physicsTarget, 100000.0)
+    || !(Vector4.Distance(nextTarget, probe.start) <= 128.0) {
+    this.NCCFlightProbePositionRefused(scriptInterface, "Position refused: target exceeds the bounded probe area");
+    return;
+  }
+  if probe.interfaceRef != scriptInterface || scriptInterface.owner != this {
+    this.NCCFlightProbePositionRefused(scriptInterface, "Position refused: current interface changed before write");
+    return;
+  }
   if !this.NCCFlightProbeIsFilter(probe.baselineFilter) {
     this.NCCFlightProbeRestore(scriptInterface, "Stopped: collision baseline became invalid", true);
     return;
@@ -838,7 +981,14 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
     return;
   }
   probe.filterWrites += 1;
-  GameInstance.GetTeleportationFacility(this.GetGame()).Teleport(this, probe.target, this.NCCFlightProbeCameraFacing(scriptInterface));
+  if !scriptInterface.NCCFlightWritePosition(new Vector3(physicsTarget.X, physicsTarget.Y, physicsTarget.Z)) {
+    this.NCCFlightProbePositionRefused(scriptInterface, "Position refused: guarded native bridge did not issue the write");
+    return;
+  }
+  probe.target = nextTarget;
+  probe.positionLastTarget = physicsTarget;
+  probe.positionReadbackPending = true;
+  probe.positionWritesIssued += 1;
   if scriptInterface.SetStateVectorParameter(physicsStateValue.LinearVelocity, zeroVelocity) {
     probe.velocityWrites += 1;
   } else {
@@ -846,7 +996,7 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
     return;
   }
   probe.ticks += 1;
-  probe.status = "Active collision/velocity probe";
+  probe.status = "Active position-only probe; native acceptance means issued, readback recorded separately";
 }
 
 @wrapMethod(LocomotionEventsTransition)

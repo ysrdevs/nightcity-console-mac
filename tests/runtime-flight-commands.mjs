@@ -49,6 +49,7 @@ function harness(options = {}) {
   };
   const context = vm.createContext({
     ensureFlightCapture() { if(state.fault === 'capture-setup') throw Error('CAPTURE_SETUP_FAILED'); state.reads.push('capture-setup'); },
+    ensureFlightPosition() { if(state.fault === 'position-setup') throw Error('POSITION_SETUP_FAILED'); state.reads.push('position-setup'); },
     getGameVersion: () => state.version,
     executorGate: options.missingGate ? null : gate,
     T_U32: UINT32,
@@ -148,6 +149,14 @@ for (const [action, expected] of [[undefined, 'NCCFlightProbeStatus'], ['status'
   assert.equal(h.state.snapshotReads, 1);
   assert.equal(h.state.logs.at(-1), `[Flight] result:${expected}`);
   assert.equal(h.gate.binding, h.methods.get('NCCFlightInput').fn);
+}
+{
+  const h = harness({ fault: 'position-setup' });
+  assert.throws(() => h.run('toggle'), /POSITION_SETUP_FAILED/);
+  assert.equal(h.state.calls.length, 0, 'position preflight must pass before requesting activation');
+  h.run('return'); h.run('status');
+  assert.deepEqual(h.state.calls.map(call => call.name), ['NCCFlightProbeReturn', 'NCCFlightProbeStatus'],
+    'return and status remain available when position setup fails');
 }
 {
   const h = harness();

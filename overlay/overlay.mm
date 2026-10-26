@@ -25,6 +25,7 @@
 #include "exploration_input.h"
 #include "output_snapshot.h"
 #include "flight_capture.h"
+#include "flight_position.h"
 #include <thread>
 #include <chrono>
 #include <unistd.h>
@@ -107,6 +108,50 @@ __attribute__((visibility("default"))) uint32_t nightcity_flight_capture_finish(
 }
 }
 // END FLIGHT CAPTURE EXPORTS
+
+// BEGIN FLIGHT POSITION EXPORTS
+static_assert(sizeof(nightcity::flight_position::Candidate) <= 128, "Native position scratch bound");
+static_assert(alignof(nightcity::flight_position::Candidate) <= 8, "Native position scratch alignment");
+static std::atomic<void*> g_flightPositionGetter{nullptr};
+extern "C" __attribute__((naked, noinline)) void nightcity_flight_position_get_raw(void*, uint32_t, uint32_t, float*) {
+#if defined(__aarch64__)
+    // The engine getter returns XYZ through hidden x8, not the C float3 HFA ABI.
+    __asm__ volatile("mov x9, x0\nmov w0, w1\nmov w1, w2\nmov x8, x3\nbr x9");
+#else
+#error "The verified flight position getter adapter requires ARM64"
+#endif
+}
+static void flightPositionRead(uint32_t handle, uint32_t selector, float* output) {
+    nightcity_flight_position_get_raw(g_flightPositionGetter.load(std::memory_order_acquire), handle, selector, output);
+}
+extern "C" {
+__attribute__((visibility("default"))) uint32_t nightcity_flight_position_configure(void* type, uint32_t size, uint32_t alignment,
+        void* valid, void* init, void* writePosition, void* commit, void* destroy, void* getter) {
+    if (!type || (reinterpret_cast<uintptr_t>(type) & 7) || size != 12 || alignment != 4 ||
+            !valid || !init || !writePosition || !commit || !destroy || !getter) return 0;
+    void* expected = nullptr;
+    if (!g_flightPositionGetter.compare_exchange_strong(expected, getter, std::memory_order_acq_rel) && expected != getter) return 0;
+    using namespace nightcity::flight_position;
+    const Helpers helpers{reinterpret_cast<Valid>(valid), reinterpret_cast<Init>(init),
+        reinterpret_cast<WritePosition>(writePosition), reinterpret_cast<Commit>(commit),
+        reinterpret_cast<Destroy>(destroy), flightPositionRead};
+    return configure(reinterpret_cast<uintptr_t>(type), size, alignment, helpers);
+}
+__attribute__((visibility("default"))) uint32_t nightcity_flight_position_begin(void* context, uint32_t depth) {
+    return nightcity::flight_position::begin(reinterpret_cast<uintptr_t>(context), depth);
+}
+__attribute__((visibility("default"))) uint32_t nightcity_flight_position_end(void* context, uint32_t depth, uint32_t token) {
+    return nightcity::flight_position::end(reinterpret_cast<uintptr_t>(context), depth, token);
+}
+__attribute__((visibility("default"))) uint32_t nightcity_flight_position_prepare(void* context, uint32_t value, const void* variant, void* candidate) {
+    return nightcity::flight_position::prepare(reinterpret_cast<uintptr_t>(context), value, variant,
+        static_cast<nightcity::flight_position::Candidate*>(candidate));
+}
+__attribute__((visibility("default"))) uint32_t nightcity_flight_position_finish(void* candidate, uint32_t accepted) {
+    return nightcity::flight_position::finish(static_cast<nightcity::flight_position::Candidate*>(candidate), accepted != 0);
+}
+}
+// END FLIGHT POSITION EXPORTS
 
 // ---- state ----
 // presentDrawable: is implemented per-GPU-family command-buffer class (AGXG13X/G14/G15/G16F/...). The class
