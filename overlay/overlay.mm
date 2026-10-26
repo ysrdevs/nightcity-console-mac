@@ -1240,7 +1240,7 @@ static void drawExplorationTab() {
     if (ImGui::Button("Start / stop flight")) runLabeled("flight toggle", "Flight toggle requested. Check Console for status.");
     ImGui::SameLine();
     if (ImGui::Button("Return to start")) runLabeled("flight return", "Return and collision restoration requested.");
-    ImGui::TextWrapped("Close F1 to move: WASD, Space up, Control down, Shift boost, Option precision.");
+    ImGui::TextWrapped("Close F1 to move: WASD, Space up, Control down, Shift boost. Hold Alt (Option) for slow, precise movement.");
     ImGui::Separator();
     if (ImGui::Button("Validate flight")) runLabeled("flight validate", "Read-only flight validation requested. Check flight status for results.");
     ImGui::SameLine();

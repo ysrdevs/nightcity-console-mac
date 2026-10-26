@@ -138,6 +138,17 @@ private final func NCCFlightProbeZeroVelocity() -> Variant {
 }
 
 @addMethod(PlayerPuppet)
+private final func NCCFlightProbeCameraFacing(scriptInterface: ref<StateGameScriptInterface>) -> EulerAngles {
+  let facing = Quaternion.ToEulerAngles(this.GetWorldOrientation());
+  // Follow live world-camera yaw instead of feeding the body's previous yaw
+  // back into every teleport. Keep body pitch/roll separate from camera look.
+  if IsDefined(scriptInterface) && scriptInterface.owner == this {
+    facing.Yaw = Transform.GetYaw(scriptInterface.GetCameraWorldTransform());
+  }
+  return facing;
+}
+
+@addMethod(PlayerPuppet)
 public final func NCCFlightProbeCaptureFilter(scriptInterface: ref<StateGameScriptInterface>, value: Variant) {
   let probe: ref<NCCCollisionFlightProbeState>;
   if !IsDefined(scriptInterface) || scriptInterface.owner != this || !this.NCCFlightProbeIsFilter(value) {
@@ -324,7 +335,7 @@ public final func NCCFlightProbeSuspendForTransition(scriptInterface: ref<StateG
     return;
   }
   resume = probe.requested;
-  probe.transitionFacing = Quaternion.ToEulerAngles(this.GetWorldOrientation());
+  probe.transitionFacing = this.NCCFlightProbeCameraFacing(scriptInterface);
   this.NCCFlightProbeRestore(scriptInterface, "Returned and restored for locomotion exit", true);
   if !probe.active && resume {
     probe.requested = true;
@@ -531,7 +542,7 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
     return;
   }
   probe.filterWrites += 1;
-  GameInstance.GetTeleportationFacility(this.GetGame()).Teleport(this, probe.target, Quaternion.ToEulerAngles(this.GetWorldOrientation()));
+  GameInstance.GetTeleportationFacility(this.GetGame()).Teleport(this, probe.target, this.NCCFlightProbeCameraFacing(scriptInterface));
   if scriptInterface.SetStateVectorParameter(physicsStateValue.LinearVelocity, zeroVelocity) {
     probe.velocityWrites += 1;
   } else {
