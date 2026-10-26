@@ -1280,9 +1280,13 @@ static void drawQuickTab() {
 }
 
 static void drawExplorationTab() {
-    ImGui::TextUnformatted("Experimental flight");
-    ImGui::TextWrapped("This private test returns you after 60 seconds of game time, or sooner at the 128 m range limit. Stay near your starting point for the full-minute test. Start on clear ground and do not save during flight.");
-    if (ImGui::Button("Start / stop flight")) runLabeled("flight toggle", "Flight requested. Close F1 to prepare and start on clear ground.");
+    ImGui::TextUnformatted("Noclip flight");
+    ImGui::TextWrapped("Start on clear ground. Stop here restores collision and gravity at your destination when there is enough open space. Do not save during flight.");
+    if (ImGui::Button("Start")) runLabeled("flight start", "Flight requested. Close F1 to prepare and start on clear ground.");
+    ImGui::SameLine();
+    if (ImGui::Button("Stop here")) runLabeled("flight stop", "Stop at this destination requested. Check Console for the result.");
+    ImGui::SameLine();
+    if (ImGui::Button("Resume")) runLabeled("flight resume", "Resume requested. Close F1 and release movement keys to continue.");
     ImGui::SameLine();
     if (ImGui::Button("Return to start")) runLabeled("flight return", "Return and collision restoration requested.");
     ImGui::TextWrapped("Click Start and close F1 while standing or crouching on clear ground. Flight prepares automatically. Move with WASD, Space up, Control down, and Shift boost. Hold Alt (Option) for precise movement.");
@@ -1291,7 +1295,8 @@ static void drawExplorationTab() {
     if (ImGui::Combo("Flight speed", &speedPreset, "Normal: 4 m/s\0Slow: 2 m/s\0Fast: 6 m/s\0Faster: 8 m/s\0"))
         g_explorationInput.setPreset(static_cast<uint32_t>(speedPreset));
     ImGui::TextDisabled("Shift: 12 m/s. Alt (Option): 0.75 m/s.");
-    ImGui::TextWrapped("Switching away from the game cancels flight. Opening F1 pauses movement so you can use Return to start.");
+    ImGui::TextWrapped("Opening Inventory or switching apps pauses flight in place. Close menus and choose Resume to continue. Opening F1 holds movement while you use these controls.");
+    ImGui::TextWrapped("If Stop here is blocked, flight stays paused. Resume to move into open space, or use Return to start to go back to where this flight began.");
     if (ImGui::Button("Check flight status")) runLabeled("flight status", "Flight status requested in Console.");
     if (ImGui::CollapsingHeader("Flight diagnostics")) {
         if (ImGui::Button("Validate flight")) runLabeled("flight validate", "Read-only flight validation requested. Check flight status for results.");

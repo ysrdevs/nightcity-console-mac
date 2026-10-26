@@ -1732,29 +1732,35 @@ function createLocalizationGate(names,fill) {
         }
         function doFlight(action) {
             if (getGameVersion()!=='2.5') throw new Error('Flight prototype requires game 2.5.0.');
-            if (!executorGate || !executorGate.flightInputAvailable)
-                throw new Error('Flight input bridge is unavailable; flight stays disabled.');
-            const verbs={validate:'NCCFlightProbeValidate',camera:'NCCFlightProbeCameraTrace',toggle:'NCCFlightProbePrepare',return:'NCCFlightProbeReturn',off:'NCCFlightProbeReturn',status:'NCCFlightProbeStatus'};
             action=action||'status';
+            // Legacy aliases remain explicit: toggle never changes an active session.
+            if(action==='toggle') action='start';
+            if(action==='off') action='stop';
+            const verbs={start:'NCCFlightProbePrepare',resume:'NCCFlightProbeResume',stop:'NCCFlightProbeStopHere',return:'NCCFlightProbeReturn',status:'NCCFlightProbeStatus',validate:'NCCFlightProbeValidate',camera:'NCCFlightProbeCameraTrace'};
             if (!Object.prototype.hasOwnProperty.call(verbs,action))
-                throw new Error('Use flight validate, flight camera, flight toggle, flight return, or flight status.');
-            const method=verbs[action];
+                throw new Error('Use flight start, flight stop, flight resume, flight return, flight status, flight validate, or flight camera.');
+            const arming=action==='start'||action==='resume';
+            const needsInput=arming||action==='validate'||action==='camera';
             const names=['gamePlayerPuppet','PlayerPuppet'];
-            const input=resolveAny(names,'NCCFlightInput');
-            if (!input || input.isStatic || input.fn.add(0x30).readU32()!==0 ||
-                    input.retType.isNull() || nameOf(input.retType)!==T_U32) {
-                executorGate.flightInput(ptr(0));
-                throw new Error('Flight prototype scripts are missing or their input signature differs.');
+            let input;
+            if(needsInput) {
+                if (!executorGate || !executorGate.flightInputAvailable)
+                    throw new Error('Flight input bridge is unavailable; flight stays disabled.');
+                input=resolveAny(names,'NCCFlightInput');
+                if (!input || input.isStatic || input.fn.add(0x30).readU32()!==0 ||
+                        input.retType.isNull() || nameOf(input.retType)!==T_U32) {
+                    executorGate.flightInput(ptr(0));
+                    throw new Error('Flight prototype scripts are missing or their input signature differs.');
+                }
             }
             const game=getGI();
             const current=game?getPlayerViaSystem(game):null;
             if (!current || current.isNull()) throw new Error('Load a save before using flight.');
-            const target=resolveAny(names,method);
-            const preparing=action==='toggle';
-            if (!target || target.isStatic || target.fn.add(0x30).readU32()!==(preparing?1:0) || target.retType.isNull() ||
+            const target=resolveAny(names,verbs[action]);
+            if (!target || target.isStatic || target.fn.add(0x30).readU32()!==(arming?1:0) || target.retType.isNull() ||
                     nameOf(target.retType)!=='0x'+fnv('String').toString(16))
                 throw new Error('Flight command has an unsupported signature.');
-            if(preparing) {
+            if(arming) {
                 const parameters=target.fn.add(0x28).readPointer();
                 if(parameters.isNull()) throw new Error('Flight preparation requires one Uint32 input packet.');
                 const parameter=parameters.readPointer();
@@ -1763,25 +1769,27 @@ function createLocalizationGate(names,fill) {
                 if(type.isNull() || nameOf(type)!==T_U32)
                     throw new Error('Flight preparation requires one Uint32 input packet.');
             }
-            executorGate.flightInput(input.fn);
             let packet;
-            try {
-                packet=executorGate.flightInputPacket()>>>0;
-                if ((packet&512)===0) throw new Error('Flight native input is not ready.');
-            } catch (e) { executorGate.flightInput(ptr(0)); throw e; }
-            if(preparing && (packet&32768)!==0)
-                throw new Error('Focus cancellation counter exhausted; restart the game before starting flight.');
-            if(preparing && (packet&4096)!==0)
-                throw new Error('Return to the game before starting flight.');
-            ensureFlightCapture();
-            if(preparing) ensureFlightPosition();
-            // Pass this non-consuming native snapshot to seed first-use focus
-            // cancellation. Preparation only queues work: the next natural
-            // update must independently obtain READY, validate the current
-            // owner/state, and capture the original filter before activation.
+            if(needsInput) {
+                executorGate.flightInput(input.fn);
+                try {
+                    packet=executorGate.flightInputPacket()>>>0;
+                    if ((packet&512)===0) throw new Error('Flight native input is not ready.');
+                } catch (e) { executorGate.flightInput(ptr(0)); throw e; }
+                if(arming && (packet&32768)!==0)
+                    throw new Error('Focus cancellation counter exhausted; restart the game before starting or resuming flight.');
+                if(arming && (packet&4096)!==0)
+                    throw new Error('Return to the game before starting or resuming flight.');
+                ensureFlightCapture();
+                if(arming) ensureFlightPosition();
+            }
+            // Start and Resume carry the original, non-consuming native snapshot
+            // for this explicit request. Natural updates must independently check
+            // READY, owner/state and focus epoch before movement can resume.
+            // Stop, Return and Status must remain callable without input/setup.
             // Never invoke the filter method from this JS callback: Frida
             // suppresses the same executor listener during callback reentry.
-            log('[Flight] '+readRedString(callFunc(target.fn,current,target.retType,preparing?[String(packet)]:[],0x20)));
+            log('[Flight] '+readRedString(callFunc(target.fn,current,target.retType,arming?[String(packet)]:[],0x20)));
         }
         function resolveGlobal(names){ ensureReg(); const rv=reg.readPointer();
             const GetFunction=new NativeFunction(rv.add(0x30).readPointer(),'pointer',['pointer','uint64']);

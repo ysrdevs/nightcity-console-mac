@@ -1,10 +1,29 @@
 # Exploration prototype for 1.8
 
-This is an experimental, local test checkpoint based on released 1.7.1. It is not a completed noclip feature or a release build. The launcher does not install this script automatically; it is staged explicitly into `r6/scripts/NightCityExploration/` in an isolated game copy. The existing native framework payload is unchanged.
+This is an experimental, local test checkpoint based on released 1.7.1. It is not a release build. The launcher does not install these scripts automatically; they are staged explicitly into `r6/scripts/NightCityExploration/` in an isolated game copy. The existing native framework payload is unchanged.
 
-The current private stage extends the flight limit from the accepted 10-second tests to 60 seconds of simulation time. It retains the 128m radius from activation and adds an independent limit of 32,768 issued position updates, including callbacks with zero time delta. Either limit uses the same return/restoration path. Full-minute testing must stay near the starting point: straight-line travel reaches the radius earlier. The user has accepted the full-minute test described below.
+## Current travel stage
 
-The **Exploration** tab sends `flight validate`, `flight camera`, `flight toggle`, `flight return` and `flight status`. Requests require game 2.5, an authoritative player lookup, matching script signatures and an available native input snapshot. Activation separately requires the script to receive the native READY bit on its next engine movement update, before it changes collision or position. The default script input result refuses activation when the bridge is unavailable.
+The travel build removes the prototype's 60-second, 128m and 32,768-update lifetime limits. The native movement bridge retains its finite-coordinate, per-step, current-context, physics/entity agreement and subsequent-readback checks. Diagnostic counters saturate instead of overflowing. Gameplay acceptance of this travel stage is still pending.
+
+| Control | Behavior |
+| --- | --- |
+| Start | Prepare from grounded standing/crouching and begin a new flight. An existing session is not toggled off. |
+| Stop here | Restore collision and gravity at the current destination if the standing capsule is clear. A blocked stop stays paused. |
+| Resume | Explicitly resume a paused session after closing menus/F1 and releasing movement keys. |
+| Return to start | Request a return to this active flight's original position, if that position is still clear, then restore collision. |
+
+Opening Inventory or losing application focus pauses an active session in place. Closing the menu or returning focus does not resume it automatically. Paused flight still performs the owned physics work needed to hover. Ordinary stopped sessions retain the idle path. Return to start is an explicit choice; normal stopping does not rewind the trip. Stopping in clear air resumes ordinary gravity, so stop over open ground when a fall is unwanted. Do not save during this private test.
+
+`NCCFlightClearance.reds` uses the engine's canonical `LocomotionOverlapTest` with a standing capsule envelope and the current owned interface. Native 2.5 analysis confirms this query constructs its own `PlayerBlocker` mask instead of reading the active simulation filter. A clear standing control and a lowered capsule that must hit supporting geometry run before activation, then repeat immediately after ZERO is applied and before the first movement write. A failed control restores normal collision without beginning travel. Query results describe the currently available player-blocking geometry; they do not prove that every distant object has finished streaming.
+
+The latest clear recovery position comes from a verified observed position, never an issued target alone. Sampling is limited to four times per second after at least one metre of movement. Exit and return requests recheck their destination. An unavoidable engine state exit restores collision before leaving the owned callback: normally in place, or at a rechecked recovery position when current space is blocked. The next supported state can retain the trip through the existing short handoff without a backward/forward teleport. Recovery leaves movement paused. If no clear recovery position is available, emergency cleanup restores the normal filter at the current position and explicitly reports unconfirmed clearance; that is not reported as a successful clear exit. The transition watchdog does bookkeeping only.
+
+The **Exploration** tab sends `flight start`, `flight stop`, `flight resume`, `flight return` and `flight status`; validation and camera recording remain optional diagnostics. Legacy `toggle` means Start and `off` means Stop here. Every command requires game 2.5, an authoritative player lookup and its exact script signature. Start and Resume additionally require a native input snapshot and validated movement bridges. The next ordinary engine update independently checks READY and the request's focus generation. Stop, Return and Status remain callable without input readiness or new movement setup. No automatic JavaScript status polling is added.
+
+## Accepted prototype checkpoints and implementation background
+
+The earlier bounded stage extended flight from 10 to 60 seconds of simulation time, with a 128m radius and independent 32,768-update limit. Either limit returned to the activation point. The user accepted the full-minute test described below; those lifetime limits are removed in the current travel stage.
 
 The command runs inside the executor hook's return callback. Frida suppresses recursive invocation of that same listener, so calling the input script method there returns its blocked default rather than proving the bridge. The native fixture reproduces this case. Commands now read only the overlay's atomic snapshot; the engine update performs the actual script input check. Status reports the last script input packet and check count for that live validation.
 
@@ -57,14 +76,15 @@ Preparation permits only one normal setter attempt per request and is bounded by
 - Native executor fixtures cover exact function matching, four-byte result writes, nested and concurrent calls, observer coexistence and a missing overlay export.
 - Command fixtures cover version and signature checks, current-player context, native snapshot failure cleanup and the command return buffer. They forbid trying the scripted input round trip inside a command callback.
 - Input fixtures cover coherent snapshots, blocked input, clearing held keys, masked speed changes, focus loss followed by regain before a read, concurrent settings/input/focus updates and generation saturation. The actual native executor fixture preserves every preset and full-width generation, including the signed boundary, without consuming repeated snapshots.
-- A focused lifecycle fixture executes extracted script method bodies against mocked engine boundaries. It covers menu latch retention, failed listener registration, focus changes before activation, failed and successful restoration, and original-filter versus owned-write cleanup. It does not simulate engine callback scheduling; gameplay acceptance remains required.
+- Focused lifecycle fixtures execute extracted script method bodies against mocked engine boundaries. They cover startup, pause/resume with fresh input, blocked destination exits, explicit return, observed-position checks, cleanup retries, context uncertainty and recovery through state transitions. They also check that exceeding the former time, range and update limits does not force a return. They do not simulate engine callback scheduling; gameplay acceptance remains required.
+- Clearance fixtures cover capsule dimensions, finite coordinates, current ownership, clear/blocked controls before and after ZERO, hit/result consistency, failed calibration, explicit destination rechecks and saturating counters. Engine overlap results remain mocked; actual geometry coverage must be checked in game.
 - Position fixtures cover exact method and context scope, the raw x8 getter convention and output boundaries, original arguments and results, single-use native writes, finite and distance bounds, helper failures, nested calls and concurrent threads. An intentionally incorrect writer binding refuses all supplemental writes.
 - The combined script set compiles with VA, Equipment-EX, Cyberware-EX and the existing plugin scripts.
 - The overlay output reader now runs on a worker with a bounded 128 KiB tail and 400 lines. The render path only consumes completed snapshots; clear operations invalidate older pending output. Sanitizer fixtures cover partial lines, replacement, truncation, special files and concurrent reads.
 
 Static and native fixture checks do not establish gameplay behavior or an FPS improvement. The user has confirmed the narrow camera, movement, barrier, automatic-return, manual-return, restored-collision, speed, menu/focus, main-menu loading and baseline-mod flows above. Camera behavior during other locomotion transitions, broader player lifecycle behavior and new save/relaunch persistence still need acceptance before release.
 
-Before production use, complete player lifecycle and menu/transition testing, explicit safe exit behavior, configurable controls and speed, persistent places and performance comparisons. Manual diagnostic commands currently return script Strings using the existing runtime convention; add explicit native String ownership handling or replace these with primitive results before frequent polling. Do not turn this status command into a frame loop.
+Before production use, validate travel beyond the former range/time limits, destination exits, blocked exits, pause/resume, optional return, player lifecycle, mod compatibility and performance. Configurable bindings and persistent places remain separate work. Manual diagnostic commands currently return script Strings using the existing runtime convention; add explicit native String ownership handling or replace these with primitive results before frequent polling. Do not turn this status command into a frame loop.
 
 ## Focused checks
 
@@ -74,6 +94,7 @@ node tests/runtime-flight-commands.mjs
 node tests/runtime-flight-capture-setup.mjs
 node tests/runtime-flight-position-setup.mjs
 node tests/exploration-lifecycle.mjs
+node tests/exploration-clearance.mjs
 node tests/runtime-native-fallback.mjs
 node tests/runtime-diagnostics.mjs
 node tests/creator-transaction.mjs
