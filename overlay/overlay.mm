@@ -1246,6 +1246,9 @@ static void drawExplorationTab() {
     ImGui::SameLine();
     if (ImGui::Button("Check flight status")) runLabeled("flight status", "Flight status requested in Console.");
     ImGui::TextWrapped("Before the first flight: Validate flight, close F1, then crouch and stand to capture the normal collision filter. Validate again and check status. Results appear in the Console tab.");
+    ImGui::Separator();
+    if (ImGui::Button("Record camera input")) runLabeled("flight camera", "Camera trace requested. Close F1 and look left/right for 5 seconds, then start one flight and repeat.");
+    ImGui::TextWrapped("Camera diagnostic: records one normal-look baseline and the next flight. Use Check flight status afterward to collect results.");
 }
 
 // ---- Creator: build a custom iconic weapon IN-PROCESS (ported from makeweapon.py). No Python, no

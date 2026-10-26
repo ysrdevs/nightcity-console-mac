@@ -31,7 +31,7 @@ function method(name, overrides = {}) {
 
 function harness(options = {}) {
   const methods = new Map(['NCCFlightInput', 'NCCFlightProbeToggle', 'NCCFlightProbeValidate',
-    'NCCFlightProbeReturn', 'NCCFlightProbeStatus'].map(name => [name, method(name)]));
+    'NCCFlightProbeReturn', 'NCCFlightProbeStatus', 'NCCFlightProbeCameraTrace'].map(name => [name, method(name)]));
   const state = { version: '2.5', packet: 512 | 256, player: pointer(0xabc0),
     calls: [], lookups: [], bindings: [], reads: [], logs: [], snapshotReads: 0, fault: null, ...options };
   const game = pointer(0xdef0);
@@ -116,7 +116,7 @@ for (const action of ['enable', 'constructor', 'toString', '__proto__', 'hasOwnP
   assert.equal(h.state.reads.length, 0, 'invalid verbs must not enter the engine for player lookup');
   assert.equal(h.state.bindings.length, 0, 'invalid verbs must preserve any active binding');
 }
-for (const [action, name] of [['toggle', 'NCCFlightProbeToggle'], ['validate', 'NCCFlightProbeValidate']]) {
+for (const [action, name] of [['toggle', 'NCCFlightProbeToggle'], ['validate', 'NCCFlightProbeValidate'], ['camera', 'NCCFlightProbeCameraTrace']]) {
   for (const invalid of [null, { params: 1 }, { hash: UINT32 }, { isStatic: true }, { nullReturn: true }]) {
     const h = harness();
     if (invalid === null) h.methods.delete(name);
@@ -140,7 +140,7 @@ for (const fault of ['input-snapshot']) {
   assert(h.gate.binding.isNull(), 'a throwing native snapshot must disable input binding');
 }
 for (const [action, expected] of [[undefined, 'NCCFlightProbeStatus'], ['status', 'NCCFlightProbeStatus'],
-  ['validate', 'NCCFlightProbeValidate'], ['toggle', 'NCCFlightProbeToggle'],
+  ['validate', 'NCCFlightProbeValidate'], ['camera', 'NCCFlightProbeCameraTrace'], ['toggle', 'NCCFlightProbeToggle'],
   ['return', 'NCCFlightProbeReturn'], ['off', 'NCCFlightProbeReturn']]) {
   const h = harness();
   h.run(action);

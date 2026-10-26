@@ -2,7 +2,7 @@
 
 This is an experimental, local test checkpoint based on released 1.7.1. It is not a completed noclip feature or a release build. The launcher does not install this script automatically; it is staged explicitly into `r6/scripts/NightCityExploration/` in an isolated game copy. The existing native framework payload is unchanged.
 
-The **Exploration** tab sends `flight validate`, `flight toggle`, `flight return` and `flight status`. Requests require game 2.5, an authoritative player lookup, matching script signatures and an available native input snapshot. Activation separately requires the script to receive the native READY bit on its next engine movement update, before it changes collision or position. The default script input result refuses activation when the bridge is unavailable.
+The **Exploration** tab sends `flight validate`, `flight camera`, `flight toggle`, `flight return` and `flight status`. Requests require game 2.5, an authoritative player lookup, matching script signatures and an available native input snapshot. Activation separately requires the script to receive the native READY bit on its next engine movement update, before it changes collision or position. The default script input result refuses activation when the bridge is unavailable.
 
 The command runs inside the executor hook's return callback. Frida suppresses recursive invocation of that same listener, so calling the input script method there returns its blocked default rather than proving the bridge. The native fixture reproduces this case. Commands now read only the overlay's atomic snapshot; the engine update performs the actual script input check. Status reports the last script input packet and check count for that live validation.
 
@@ -18,7 +18,9 @@ While active, the script uses the locomotion update context, camera-relative mov
 
 Controls: WASD to move, Space to rise, Control to descend, Shift to boost and Alt (Option on an Apple keyboard) for precision. Start on clear ground, close F1 to move, and do not save while the probe is active.
 
-The movement test exposed a horizontal camera lock while vertical look remained available. With F1 closed the overlay forwards both mouse axes unchanged. The active teleport now uses the current camera world yaw while retaining body pitch/roll; transition resume uses the same heading. Vanilla locomotion uses this camera-yaw accessor for dash heading. The saved activation orientation remains the return destination. This correction still needs a live camera test; it is not a verified fix yet.
+The movement test exposed a horizontal camera lock while vertical look remained available. With F1 closed the overlay forwards both mouse axes unchanged. Using current camera world yaw for the active teleport and transition resume did not resolve it in the next live test. Flight movement and automatic return still worked, and status reported the filter restored. The cause remains unresolved; repeated teleport may reset rotation later in the engine update.
+
+The temporary **Record camera input** diagnostic compares a short normal-look baseline with the next flight. It samples input and rotation around the original locomotion update and flight update, so the report can also compare a later frame with the previous frame's result. Collection is bounded and emits no per-frame text or file output; **Check flight status** retrieves the report manually. This is diagnostic instrumentation, not a further camera fix. It also records a guarded physics-position versus player-position comparison to inform future movement work. No new physics setter or native movement bridge is enabled.
 
 ## Validation at this checkpoint
 

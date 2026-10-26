@@ -2,6 +2,167 @@
 // No gravity changes. A 10-second limit and every normal stop return to start.
 // Native state setters returning true do not prove actual collision passage.
 
+// Temporary, explicitly armed camera diagnostics. Objects are allocated once
+// when requested; ordinary frames do not allocate samples or format/log text.
+class NCCFlightCameraSample extends IScriptable {
+  public let frame: Int32;
+  public let time: Float;
+  public let dt: Float;
+  public let packet: Uint32;
+  public let previousC: Vector4;
+  public let inputA: Vector4;
+  public let inputB: Vector4;
+  public let inputC: Vector4;
+  public let anglesA: Vector4;
+  public let anglesB: Vector4;
+  public let anglesC: Vector4;
+}
+
+class NCCFlightCameraWindow extends IScriptable {
+  public let samples: array<ref<NCCFlightCameraSample>>;
+  public let count: Int32;
+  public let frames: Int32;
+  public let running: Bool;
+  public let frameOpen: Bool;
+  public let originRead: Bool;
+  public let positionDefined: Bool;
+  public let positionType: CName;
+  public let physicsPosition: Vector4;
+  public let entityPosition: Vector4;
+  public let elapsed: Float;
+  public let duration: Float;
+  public let nextSample: Float;
+  public let dt: Float;
+  public let packet: Uint32;
+  public let horizontalFrames: Int32;
+  public let verticalFrames: Int32;
+  public let yawTravelAB: Float;
+  public let yawTravelBC: Float;
+  public let yawTravelNextA: Float;
+  public let previousC: Vector4;
+  public let inputA: Vector4;
+  public let inputB: Vector4;
+  public let inputC: Vector4;
+  public let anglesA: Vector4;
+  public let anglesB: Vector4;
+  public let anglesC: Vector4;
+
+  public final func Initialize(capacity: Int32, seconds: Float) {
+    let i = 0;
+    this.duration = seconds;
+    while i < capacity {
+      ArrayPush(this.samples, new NCCFlightCameraSample());
+      i += 1;
+    }
+  }
+
+  public final func ReadOrigin(player: ref<PlayerPuppet>, scriptInterface: ref<StateGameScriptInterface>) {
+    let value = scriptInterface.GetStateVectorParameter(physicsStateValue.Position);
+    this.positionType = VariantTypeName(value);
+    this.positionDefined = IsDefined(value) && Equals(this.positionType, n"Vector4");
+    if this.positionDefined {
+      this.physicsPosition = FromVariant<Vector4>(value);
+    }
+    this.entityPosition = player.GetWorldPosition();
+    this.originRead = true;
+  }
+
+  public final func Capture(player: ref<PlayerPuppet>, scriptInterface: ref<StateGameScriptInterface>, phase: Int32) {
+    let camera = scriptInterface.GetCameraWorldTransform();
+    let angles = new Vector4(player.GetWorldYaw(), Transform.GetYaw(camera), Transform.GetPitch(camera), 0.0);
+    let input = new Vector4(scriptInterface.GetActionValue(n"CameraMouseX"), scriptInterface.GetActionValue(n"CameraX"),
+      scriptInterface.GetActionValue(n"CameraMouseY"), scriptInterface.GetActionValue(n"CameraY"));
+    if phase == 0 {
+      this.anglesA = angles;
+      this.inputA = input;
+    } else {
+      if phase == 1 {
+        this.anglesB = angles;
+        this.inputB = input;
+      } else {
+        this.anglesC = angles;
+        this.inputC = input;
+      }
+    }
+  }
+
+  public final func Finish() {
+    let sample: ref<NCCFlightCameraSample>;
+    if !this.frameOpen {
+      return;
+    }
+    this.frameOpen = false;
+    if this.inputA.X != 0.0 || this.inputA.Y != 0.0 || this.inputB.X != 0.0 || this.inputB.Y != 0.0
+      || this.inputC.X != 0.0 || this.inputC.Y != 0.0 {
+      this.horizontalFrames += 1;
+    }
+    if this.inputA.Z != 0.0 || this.inputA.W != 0.0 || this.inputB.Z != 0.0 || this.inputB.W != 0.0
+      || this.inputC.Z != 0.0 || this.inputC.W != 0.0 {
+      this.verticalFrames += 1;
+    }
+    this.yawTravelAB += AbsF(AngleNormalize180(this.anglesB.Y - this.anglesA.Y));
+    this.yawTravelBC += AbsF(AngleNormalize180(this.anglesC.Y - this.anglesB.Y));
+    if this.frames > 0 {
+      this.yawTravelNextA += AbsF(AngleNormalize180(this.anglesA.Y - this.previousC.Y));
+    }
+    if this.count < ArraySize(this.samples) && this.elapsed >= this.nextSample {
+      sample = this.samples[this.count];
+      sample.frame = this.frames;
+      sample.time = this.elapsed;
+      sample.dt = this.dt;
+      sample.packet = this.packet;
+      sample.previousC = this.previousC;
+      sample.inputA = this.inputA;
+      sample.inputB = this.inputB;
+      sample.inputC = this.inputC;
+      sample.anglesA = this.anglesA;
+      sample.anglesB = this.anglesB;
+      sample.anglesC = this.anglesC;
+      this.count += 1;
+      this.nextSample = Cast<Float>(this.count) * this.duration / Cast<Float>(ArraySize(this.samples));
+    }
+    this.previousC = this.anglesC;
+    this.frames += 1;
+    this.elapsed += this.dt;
+    // Simulation time may stop advancing. Also bound the number of callbacks.
+    if this.elapsed >= this.duration || this.frames >= 4096 {
+      this.running = false;
+    }
+  }
+
+  private final func FormatVector(value: Vector4) -> String {
+    return FloatToStringPrec(value.X, 3) + "," + FloatToStringPrec(value.Y, 3)
+      + "," + FloatToStringPrec(value.Z, 3) + "," + FloatToStringPrec(value.W, 3);
+  }
+
+  public final func Report(label: String) -> String {
+    let i = 0;
+    let sample: ref<NCCFlightCameraSample>;
+    let report = "\nCamera " + label + ": running=" + ToString(this.running)
+      + " frames=" + ToString(this.frames) + " seconds=" + FloatToStringPrec(this.elapsed, 3)
+      + " rows=" + ToString(this.count) + " horizontalFrames=" + ToString(this.horizontalFrames)
+      + " verticalFrames=" + ToString(this.verticalFrames)
+      + " cameraYawTravel[AB,BC,nextA]=" + FloatToStringPrec(this.yawTravelAB, 3)
+      + "," + FloatToStringPrec(this.yawTravelBC, 3) + "," + FloatToStringPrec(this.yawTravelNextA, 3)
+      + "\noriginRead=" + ToString(this.originRead) + " physicsPosition=" + NameToString(this.positionType)
+      + "/validVector4=" + ToString(this.positionDefined) + ":" + this.FormatVector(this.physicsPosition)
+      + " entityPosition=" + this.FormatVector(this.entityPosition)
+      + "\nrow frame t dt packet previousC; Ainput Aangles; Binput Bangles; Cinput Cangles"
+      + " (input=MouseX,CameraX,MouseY,CameraY; angles=bodyYaw,cameraYaw,cameraPitch,0; previousC=immediately prior frame)";
+    while i < this.count {
+      sample = this.samples[i];
+      report += "\n" + ToString(sample.frame) + " " + FloatToStringPrec(sample.time, 3)
+        + " " + FloatToStringPrec(sample.dt, 3) + " " + ToString(sample.packet)
+        + " " + this.FormatVector(sample.previousC)
+        + "; " + this.FormatVector(sample.inputA) + " " + this.FormatVector(sample.anglesA)
+        + "; " + this.FormatVector(sample.inputB) + " " + this.FormatVector(sample.anglesB)
+        + "; " + this.FormatVector(sample.inputC) + " " + this.FormatVector(sample.anglesC);
+      i += 1;
+    }
+    return report;
+  }
+}
+
 class NCCCollisionFlightProbeState extends IScriptable {
   public let validationRequested: Bool;
   public let requested: Bool;
@@ -30,6 +191,10 @@ class NCCCollisionFlightProbeState extends IScriptable {
   public let machineName: CName;
   public let interfaceRef: wref<StateGameScriptInterface>;
   public let status: String;
+  public let cameraBaseline: ref<NCCFlightCameraWindow>;
+  public let cameraActive: ref<NCCFlightCameraWindow>;
+  public let cameraCurrent: ref<NCCFlightCameraWindow>;
+  public let cameraActiveArmed: Bool;
 }
 
 class NCCCollisionFlightTransitionWatchdog extends DelayCallback {
@@ -81,6 +246,9 @@ public final func NCCFlightProbeToggle() -> String {
   if probe.validationRequested {
     return "Flight refused: read-only validation is still pending";
   }
+  if IsDefined(probe.cameraBaseline) && probe.cameraBaseline.running {
+    return "Flight refused: close F1 and finish the 5-second camera baseline first";
+  }
   if !IsDefined(probe.capturedInterface) || !this.NCCFlightProbeIsFilter(probe.capturedFilter) {
     return "Flight refused: no valid normal collision filter has been captured";
   }
@@ -113,6 +281,125 @@ public final func NCCFlightProbeValidate() -> String {
   probe.validationRequested = true;
   probe.status = "Read-only validation queued for the next locomotion update";
   return probe.status;
+}
+
+@addMethod(PlayerPuppet)
+public final func NCCFlightProbeCameraTrace() -> String {
+  if !IsDefined(this.nccCollisionFlightProbe) {
+    this.nccCollisionFlightProbe = new NCCCollisionFlightProbeState();
+  }
+  let probe = this.nccCollisionFlightProbe;
+  if probe.active || probe.requested || probe.transitionPending {
+    return "Camera recording refused: first stop the flight probe";
+  }
+  probe.cameraBaseline = new NCCFlightCameraWindow();
+  probe.cameraBaseline.Initialize(32, 5.0);
+  probe.cameraBaseline.running = true;
+  probe.cameraActive = new NCCFlightCameraWindow();
+  probe.cameraActive.Initialize(64, 10.0);
+  probe.cameraActiveArmed = true;
+  probe.cameraCurrent = null;
+  return "Camera baseline armed: close F1, look left/right for 5 seconds, then start one flight probe and repeat; Status prints both recordings";
+}
+
+@addMethod(PlayerPuppet)
+private final func NCCFlightCameraStartActive(scriptInterface: ref<StateGameScriptInterface>) {
+  let probe = this.nccCollisionFlightProbe;
+  if probe.cameraActiveArmed && IsDefined(probe.cameraBaseline) && !probe.cameraBaseline.running
+    && probe.cameraBaseline.frames > 0 && IsDefined(probe.cameraActive) {
+    probe.cameraActiveArmed = false;
+    probe.cameraActive.ReadOrigin(this, scriptInterface);
+    probe.cameraActive.running = true;
+  }
+}
+
+@addMethod(PlayerPuppet)
+public final func NCCFlightCameraStop() {
+  let probe = this.nccCollisionFlightProbe;
+  if !IsDefined(probe) {
+    return;
+  }
+  if IsDefined(probe.cameraBaseline) {
+    probe.cameraBaseline.running = false;
+    probe.cameraBaseline.frameOpen = false;
+  }
+  if IsDefined(probe.cameraActive) {
+    probe.cameraActive.running = false;
+    probe.cameraActive.frameOpen = false;
+  }
+  probe.cameraActiveArmed = false;
+  probe.cameraCurrent = null;
+}
+
+@addMethod(PlayerPuppet)
+public final func NCCFlightCameraBefore(timeDelta: Float, scriptInterface: ref<StateGameScriptInterface>) -> Bool {
+  let probe = this.nccCollisionFlightProbe;
+  let window: ref<NCCFlightCameraWindow>;
+  let packet: Uint32;
+  if !IsDefined(probe) {
+    return false;
+  }
+  probe.cameraCurrent = null;
+  if !IsDefined(scriptInterface) || scriptInterface.owner != this {
+    this.NCCFlightCameraStop();
+    return false;
+  }
+  if IsDefined(probe.cameraBaseline) && probe.cameraBaseline.running {
+    // The button is pressed with F1 open. Start/pause the read-only baseline
+    // until gameplay actually receives input, without consuming its duration.
+    packet = this.NCCFlightInput();
+    if (packet & 512u) == 0u || (packet & 256u) != 0u
+      || GameInstance.GetBlackboardSystem(this.GetGame()).Get(GetAllBlackboardDefs().UI_System).GetBool(GetAllBlackboardDefs().UI_System.IsInMenu) {
+      return false;
+    }
+    window = probe.cameraBaseline;
+  } else {
+    if IsDefined(probe.cameraActive) && probe.cameraActive.running {
+      if !probe.active && !probe.requested && !probe.transitionPending {
+        probe.cameraActive.running = false;
+        return false;
+      }
+      window = probe.cameraActive;
+      packet = this.NCCFlightInput();
+    }
+  }
+  if !IsDefined(window) {
+    return false;
+  }
+  if !window.originRead {
+    window.ReadOrigin(this, scriptInterface);
+  }
+  window.dt = MaxF(timeDelta, 0.0);
+  window.packet = packet;
+  window.frameOpen = true;
+  window.Capture(this, scriptInterface, 0);
+  probe.cameraCurrent = window;
+  return true;
+}
+
+@addMethod(PlayerPuppet)
+public final func NCCFlightCameraPhase(scriptInterface: ref<StateGameScriptInterface>, phase: Int32) {
+  let probe = this.nccCollisionFlightProbe;
+  let window: ref<NCCFlightCameraWindow>;
+  if !IsDefined(probe) {
+    return;
+  }
+  if !IsDefined(scriptInterface) || scriptInterface.owner != this {
+    this.NCCFlightCameraStop();
+    return;
+  }
+  window = probe.cameraCurrent;
+  if !IsDefined(window) || !window.frameOpen {
+    return;
+  }
+  window.Capture(this, scriptInterface, phase);
+  if phase == 2 {
+    window.Finish();
+    if window == probe.cameraActive && !probe.active && !probe.requested && !probe.transitionPending {
+      window.running = false;
+    }
+    probe.cameraCurrent = null;
+  }
 }
 
 @addMethod(PlayerPuppet)
@@ -249,8 +536,16 @@ private final func NCCFlightProbeRunValidation(scriptInterface: ref<StateGameScr
 @addMethod(PlayerPuppet)
 public final func NCCFlightProbeStatus() -> String {
   let probe = this.nccCollisionFlightProbe;
+  let cameraReport: String;
   if !IsDefined(probe) {
     return "Probe has not been requested";
+  }
+  // Formatting happens only in this manually requested status command.
+  if IsDefined(probe.cameraBaseline) {
+    cameraReport = probe.cameraBaseline.Report("baseline");
+  }
+  if IsDefined(probe.cameraActive) {
+    cameraReport += probe.cameraActive.Report("active");
   }
   return probe.status + "; active=" + ToString(probe.active)
     + "; validationRequested=" + ToString(probe.validationRequested)
@@ -265,7 +560,7 @@ public final func NCCFlightProbeStatus() -> String {
     + "; filterType=" + NameToString(probe.filterType)
     + "; velocityType=" + NameToString(probe.velocityType)
     + "; state=" + NameToString(probe.stateName)
-    + "; machine=" + NameToString(probe.machineName);
+    + "; machine=" + NameToString(probe.machineName) + cameraReport;
 }
 
 @addMethod(PlayerPuppet)
@@ -501,6 +796,7 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
     probe.filterWrites = 0;
     probe.velocityWrites = 0;
     probe.interfaceRef = scriptInterface;
+    this.NCCFlightCameraStartActive(scriptInterface);
     if !this.NCCFlightProbeWriteFilter(scriptInterface, zeroFilter) {
       probe.requested = false;
       probe.status = "Collision setter rejected activation";
@@ -555,10 +851,25 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
 
 @wrapMethod(LocomotionEventsTransition)
 public func OnUpdate(timeDelta: Float, stateContext: ref<StateContext>, scriptInterface: ref<StateGameScriptInterface>) {
+  let beforePlayer = scriptInterface.owner as PlayerPuppet;
+  let cameraFrame: Bool;
+  if IsDefined(beforePlayer) {
+    cameraFrame = beforePlayer.NCCFlightCameraBefore(timeDelta, scriptInterface);
+  }
   wrappedMethod(timeDelta, stateContext, scriptInterface);
   let player = scriptInterface.owner as PlayerPuppet;
+  if IsDefined(beforePlayer) && player != beforePlayer {
+    beforePlayer.NCCFlightCameraStop();
+    cameraFrame = false;
+  }
   if IsDefined(player) {
+    if cameraFrame {
+      player.NCCFlightCameraPhase(scriptInterface, 1);
+    }
     player.NCCFlightProbeUpdate(timeDelta, stateContext, scriptInterface, this.GetStateName(), this.GetStateMachineName());
+    if cameraFrame {
+      player.NCCFlightCameraPhase(scriptInterface, 2);
+    }
   }
 }
 
