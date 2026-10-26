@@ -1206,17 +1206,12 @@ static void drawQuickTab() {
 }
 
 static void drawExplorationTab() {
-    ImGui::TextUnformatted("Flight prototype");
-    ImGui::TextWrapped("Start while standing on clear ground. Close F1 after starting. This first test returns you to the start after 30 seconds.");
-    if (ImGui::Button("Start / stop flight")) runLabeled("flight toggle", "Flight toggle requested. See Console for status.");
-    ImGui::SameLine();
-    if (ImGui::Button("Return to start")) runLabeled("flight return", "Return requested. See Console for status.");
+    ImGui::TextUnformatted("Flight validation");
+    ImGui::TextWrapped("Flight is disabled in this diagnostic build while collision restoration is being corrected. Validate checks input and physics value types without changing collision or moving your character.");
+    if (ImGui::Button("Validate flight")) runLabeled("flight validate", "Read-only flight validation requested. Check flight status for results.");
     ImGui::SameLine();
     if (ImGui::Button("Check flight status")) runLabeled("flight status", "Flight status requested in Console.");
-    ImGui::Separator();
-    ImGui::TextUnformatted("WASD: move with camera    Space: up    Control: down");
-    ImGui::TextUnformatted("Shift: boost    Option: precision");
-    ImGui::TextWrapped("Opening F1 or switching away pauses flight input. Release movement keys before resuming. This is an isolated collision test; do not save while flight is active.");
+    ImGui::TextWrapped("Load a save, stand on clear ground, click Validate flight, then Check flight status. Results appear in the Console tab.");
 }
 
 // ---- Creator: build a custom iconic weapon IN-PROCESS (ported from makeweapon.py). No Python, no

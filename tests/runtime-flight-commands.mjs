@@ -30,7 +30,7 @@ function method(name, overrides = {}) {
 }
 
 function harness(options = {}) {
-  const methods = new Map(['NCCFlightInput', 'NCCFlightProbeToggle',
+  const methods = new Map(['NCCFlightInput', 'NCCFlightProbeToggle', 'NCCFlightProbeValidate',
     'NCCFlightProbeReturn', 'NCCFlightProbeStatus'].map(name => [name, method(name)]));
   const state = { version: '2.5', packet: 512 | 256, player: pointer(0xabc0),
     calls: [], lookups: [], bindings: [], reads: [], logs: [], snapshotReads: 0, fault: null, ...options };
@@ -115,13 +115,15 @@ for (const action of ['enable', 'constructor', 'toString', '__proto__', 'hasOwnP
   assert.equal(h.state.reads.length, 0, 'invalid verbs must not enter the engine for player lookup');
   assert.equal(h.state.bindings.length, 0, 'invalid verbs must preserve any active binding');
 }
-for (const invalid of [null, { params: 1 }, { hash: UINT32 }, { isStatic: true }, { nullReturn: true }]) {
-  const h = harness();
-  if (invalid === null) h.methods.delete('NCCFlightProbeToggle');
-  else h.methods.set('NCCFlightProbeToggle', method('NCCFlightProbeToggle', invalid));
-  assert.throws(() => h.run('toggle'), /unsupported signature/);
-  assert.equal(h.state.calls.length, 0);
-  assert.equal(h.state.bindings.length, 0);
+for (const [action, name] of [['toggle', 'NCCFlightProbeToggle'], ['validate', 'NCCFlightProbeValidate']]) {
+  for (const invalid of [null, { params: 1 }, { hash: UINT32 }, { isStatic: true }, { nullReturn: true }]) {
+    const h = harness();
+    if (invalid === null) h.methods.delete(name);
+    else h.methods.set(name, method(name, invalid));
+    assert.throws(() => h.run(action), /unsupported signature/);
+    assert.equal(h.state.calls.length, 0);
+    assert.equal(h.state.bindings.length, 0);
+  }
 }
 for (const packet of [0, 1, 256, 256 | 1]) {
   const h = harness({ packet });
@@ -137,7 +139,8 @@ for (const fault of ['input-snapshot']) {
   assert(h.gate.binding.isNull(), 'a throwing native snapshot must disable input binding');
 }
 for (const [action, expected] of [[undefined, 'NCCFlightProbeStatus'], ['status', 'NCCFlightProbeStatus'],
-  ['toggle', 'NCCFlightProbeToggle'], ['return', 'NCCFlightProbeReturn'], ['off', 'NCCFlightProbeReturn']]) {
+  ['validate', 'NCCFlightProbeValidate'], ['toggle', 'NCCFlightProbeToggle'],
+  ['return', 'NCCFlightProbeReturn'], ['off', 'NCCFlightProbeReturn']]) {
   const h = harness();
   h.run(action);
   assert.deepEqual(h.state.calls.map(call => call.name), [expected]);

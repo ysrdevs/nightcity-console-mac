@@ -3,6 +3,7 @@
 // Native state setters returning true do not prove actual collision passage.
 
 class NCCCollisionFlightProbeState extends IScriptable {
+  public let validationRequested: Bool;
   public let requested: Bool;
   public let active: Bool;
   public let transitionPending: Bool;
@@ -15,6 +16,10 @@ class NCCCollisionFlightProbeState extends IScriptable {
   public let inputChecks: Int32;
   public let filterWrites: Int32;
   public let velocityWrites: Int32;
+  public let capturedFilter: Variant;
+  public let capturedInterface: wref<StateGameScriptInterface>;
+  public let captureWrites: Int32;
+  public let ownFilterWrite: Bool;
   public let baselineFilter: Variant;
   public let filterType: CName;
   public let velocityType: CName;
@@ -70,17 +75,139 @@ public final func NCCFlightProbeReturn() -> String {
 }
 
 @addMethod(PlayerPuppet)
+public final func NCCFlightProbeValidate() -> String {
+  if !IsDefined(this.nccCollisionFlightProbe) {
+    this.nccCollisionFlightProbe = new NCCCollisionFlightProbeState();
+  }
+  let probe = this.nccCollisionFlightProbe;
+  if probe.active || probe.requested || probe.transitionPending {
+    return "Validation refused: first stop the flight probe";
+  }
+  probe.validationRequested = true;
+  probe.status = "Read-only validation queued for the next locomotion update";
+  return probe.status;
+}
+
+@addMethod(PlayerPuppet)
+private final func NCCFlightProbeIsFilter(value: Variant) -> Bool {
+  return IsDefined(value) && Equals(VariantTypeName(value), n"physicsSimulationFilter");
+}
+
+@addMethod(PlayerPuppet)
+private final func NCCFlightProbeIsVelocity(value: Variant) -> Bool {
+  return IsDefined(value) && Equals(VariantTypeName(value), n"Vector3");
+}
+
+@addMethod(PlayerPuppet)
+private final func NCCFlightProbeZeroFilter() -> Variant {
+  let filter: SimulationFilter = SimulationFilter.ZERO();
+  return ToVariant(filter);
+}
+
+@addMethod(PlayerPuppet)
+private final func NCCFlightProbeZeroVelocity() -> Variant {
+  let velocity: Vector3 = new Vector3(0.0, 0.0, 0.0);
+  return ToVariant(velocity);
+}
+
+@addMethod(PlayerPuppet)
+public final func NCCFlightProbeCaptureFilter(scriptInterface: ref<StateGameScriptInterface>, value: Variant) {
+  let probe: ref<NCCCollisionFlightProbeState>;
+  if !IsDefined(scriptInterface) || scriptInterface.owner != this || !this.NCCFlightProbeIsFilter(value) {
+    return;
+  }
+  if !IsDefined(this.nccCollisionFlightProbe) {
+    this.nccCollisionFlightProbe = new NCCCollisionFlightProbeState();
+  }
+  probe = this.nccCollisionFlightProbe;
+  if probe.ownFilterWrite {
+    return;
+  }
+  // The native setter has accepted the original caller's actual filter. Keep a
+  // Variant copy and a weak association with the interface that submitted it.
+  probe.capturedFilter = value;
+  probe.capturedInterface = scriptInterface;
+  probe.captureWrites += 1;
+  if probe.active && probe.interfaceRef == scriptInterface {
+    probe.baselineFilter = value;
+    probe.filterType = VariantTypeName(value);
+  }
+}
+
+@addMethod(PlayerPuppet)
+private final func NCCFlightProbeWriteFilter(scriptInterface: ref<StateGameScriptInterface>, value: Variant) -> Bool {
+  let probe = this.nccCollisionFlightProbe;
+  let previousOwnWrite: Bool;
+  let accepted: Bool;
+  if !IsDefined(probe) || !IsDefined(scriptInterface) || scriptInterface.owner != this
+    || !this.NCCFlightProbeIsFilter(value) {
+    return false;
+  }
+  previousOwnWrite = probe.ownFilterWrite;
+  probe.ownFilterWrite = true;
+  accepted = scriptInterface.SetStateVectorParameter(physicsStateValue.SimulationFilter, value);
+  probe.ownFilterWrite = previousOwnWrite;
+  return accepted;
+}
+
+@addMethod(PlayerPuppet)
+private final func NCCFlightProbeRunValidation(scriptInterface: ref<StateGameScriptInterface>, stateName: CName, machineName: CName) {
+  let probe = this.nccCollisionFlightProbe;
+  let baseline: Variant;
+  let zeroFilter: Variant;
+  let velocityRead: Variant;
+  let zeroVelocity: Variant;
+  if !IsDefined(probe) || !probe.validationRequested {
+    return;
+  }
+  probe.validationRequested = false;
+  if probe.active || probe.requested || probe.transitionPending {
+    probe.status = "Validation refused: flight is no longer idle";
+    return;
+  }
+  if !IsDefined(scriptInterface) || scriptInterface.owner != this {
+    probe.status = "Validation refused: locomotion owner changed";
+    return;
+  }
+  probe.stateName = stateName;
+  probe.machineName = machineName;
+  probe.lastInputPacket = this.NCCFlightInput();
+  probe.inputChecks += 1;
+  // Native 2.5 getter switch maps SimulationFilter to its empty return path.
+  // Inspecting it is safe; sending that empty Variant back to the setter is not.
+  baseline = scriptInterface.GetStateVectorParameter(physicsStateValue.SimulationFilter);
+  zeroFilter = this.NCCFlightProbeZeroFilter();
+  velocityRead = scriptInterface.GetStateVectorParameter(physicsStateValue.LinearVelocity);
+  zeroVelocity = this.NCCFlightProbeZeroVelocity();
+  probe.filterType = VariantTypeName(probe.capturedFilter);
+  probe.velocityType = VariantTypeName(velocityRead);
+  probe.status = "Read-only validation: ready=" + ToString((probe.lastInputPacket & 512u) != 0u)
+    + "; unsupportedGetter=" + NameToString(VariantTypeName(baseline)) + "/defined=" + ToString(IsDefined(baseline))
+    + "; capturedFilter=" + NameToString(VariantTypeName(probe.capturedFilter)) + "/defined=" + ToString(IsDefined(probe.capturedFilter))
+    + "; captureValid=" + ToString(this.NCCFlightProbeIsFilter(probe.capturedFilter))
+    + "; captureCurrent=" + ToString(IsDefined(probe.capturedInterface) && probe.capturedInterface == scriptInterface)
+    + "; zeroFilter=" + NameToString(VariantTypeName(zeroFilter)) + "/defined=" + ToString(IsDefined(zeroFilter))
+    + "; velocityRead=" + NameToString(VariantTypeName(velocityRead)) + "/defined=" + ToString(IsDefined(velocityRead))
+    + "; zeroVelocity=" + NameToString(VariantTypeName(zeroVelocity)) + "/defined=" + ToString(IsDefined(zeroVelocity))
+    + "; validFilters=" + ToString(this.NCCFlightProbeIsFilter(probe.capturedFilter) && this.NCCFlightProbeIsFilter(zeroFilter))
+    + "; validVelocity=" + ToString(this.NCCFlightProbeIsVelocity(zeroVelocity))
+    + "; no physics writes or teleports";
+}
+
+@addMethod(PlayerPuppet)
 public final func NCCFlightProbeStatus() -> String {
   let probe = this.nccCollisionFlightProbe;
   if !IsDefined(probe) {
     return "Probe has not been requested";
   }
   return probe.status + "; active=" + ToString(probe.active)
+    + "; validationRequested=" + ToString(probe.validationRequested)
     + "; transitionPending=" + ToString(probe.transitionPending)
     + "; requested=" + ToString(probe.requested)
     + "; ticks=" + ToString(probe.ticks)
     + "; lastInputPacket=" + ToString(probe.lastInputPacket)
     + "; inputChecks=" + ToString(probe.inputChecks)
+    + "; captureWrites=" + ToString(probe.captureWrites)
     + "; filterWrites=" + ToString(probe.filterWrites)
     + "; velocityWrites=" + ToString(probe.velocityWrites)
     + "; filterType=" + NameToString(probe.filterType)
@@ -101,6 +228,7 @@ private final func NCCFlightProbeAllowed(stateName: CName, machineName: CName) -
 @addMethod(PlayerPuppet)
 public final func NCCFlightProbeRestore(scriptInterface: ref<StateGameScriptInterface>, reason: String, returnToStart: Bool) {
   let probe = this.nccCollisionFlightProbe;
+  let zeroVelocity: Variant;
   if !IsDefined(probe) {
     return;
   }
@@ -112,15 +240,20 @@ public final func NCCFlightProbeRestore(scriptInterface: ref<StateGameScriptInte
     probe.status = reason;
     return;
   }
-  if !IsDefined(scriptInterface) || scriptInterface.owner != this {
+  if !IsDefined(scriptInterface) || scriptInterface.owner != this || probe.interfaceRef != scriptInterface {
     probe.status = "Restore refused: owner changed";
+    return;
+  }
+  zeroVelocity = this.NCCFlightProbeZeroVelocity();
+  if !this.NCCFlightProbeIsFilter(probe.baselineFilter) || !this.NCCFlightProbeIsVelocity(zeroVelocity) {
+    probe.status = "Restore refused: invalid collision or velocity Variant; no physics writes";
     return;
   }
   if returnToStart && !this.IsDead() && !scriptInterface.IsMountedToObject() {
     GameInstance.GetTeleportationFacility(this.GetGame()).Teleport(this, probe.start, probe.startFacing);
   }
-  scriptInterface.SetStateVectorParameter(physicsStateValue.LinearVelocity, ToVariant(new Vector3(0.0, 0.0, 0.0)));
-  if scriptInterface.SetStateVectorParameter(physicsStateValue.SimulationFilter, probe.baselineFilter) {
+  scriptInterface.SetStateVectorParameter(physicsStateValue.LinearVelocity, zeroVelocity);
+  if this.NCCFlightProbeWriteFilter(scriptInterface, probe.baselineFilter) {
     probe.active = false;
     probe.transitionPending = false;
     probe.status = reason + "; filter restored";
@@ -169,20 +302,23 @@ public final func NCCFlightProbeSuspendForTransition(scriptInterface: ref<StateG
 public final func NCCFlightProbeObserveStateFilter(scriptInterface: ref<StateGameScriptInterface>, stateName: CName, machineName: CName) {
   let probe = this.nccCollisionFlightProbe;
   let chosenFilter: Variant;
+  let zeroFilter: Variant;
+  let zeroVelocity: Variant;
   let resuming: Bool;
   if !IsDefined(probe) || (!probe.active && !probe.transitionPending) {
     return;
   }
-  // The original state method has just chosen its actual filter. Preserve that
-  // exact Variant as the current state's restoration value before overriding it.
-  chosenFilter = scriptInterface.GetStateVectorParameter(physicsStateValue.SimulationFilter);
-  if NotEquals(VariantTypeName(chosenFilter), VariantTypeName(ToVariant(SimulationFilter.ZERO()))) {
+  // The native setter wrapper captured the original state method's successful
+  // filter write before this callback. The native getter cannot read it back.
+  chosenFilter = probe.capturedFilter;
+  zeroFilter = this.NCCFlightProbeZeroFilter();
+  zeroVelocity = this.NCCFlightProbeZeroVelocity();
+  if !IsDefined(probe.capturedInterface) || probe.capturedInterface != scriptInterface
+    || !this.NCCFlightProbeIsFilter(chosenFilter) || !this.NCCFlightProbeIsFilter(zeroFilter)
+    || !this.NCCFlightProbeIsVelocity(zeroVelocity) {
     // The original method has selected the next state's filter. Never replace
     // that value with ZERO if its actual restoration value cannot be read.
     probe.requested = false;
-    if probe.active && !this.IsDead() && !scriptInterface.IsMountedToObject() {
-      GameInstance.GetTeleportationFacility(this.GetGame()).Teleport(this, probe.start, probe.startFacing);
-    }
     probe.active = false;
     probe.transitionPending = false;
     probe.status = "Stopped: new state filter could not be read; native filter retained";
@@ -201,7 +337,7 @@ public final func NCCFlightProbeObserveStateFilter(scriptInterface: ref<StateGam
     this.NCCFlightProbeRestore(scriptInterface, "Stopped for locomotion transition", true);
     return;
   }
-  if scriptInterface.SetStateVectorParameter(physicsStateValue.SimulationFilter, ToVariant(SimulationFilter.ZERO())) {
+  if this.NCCFlightProbeWriteFilter(scriptInterface, zeroFilter) {
     resuming = probe.transitionPending;
     probe.transitionPending = false;
     probe.active = true;
@@ -228,7 +364,16 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
   let forward: Float;
   let vertical: Float;
   let blocked: Bool;
-  if !IsDefined(probe) || (!probe.requested && !probe.active) {
+  let zeroFilter: Variant;
+  let zeroVelocity: Variant;
+  if !IsDefined(probe) {
+    return;
+  }
+  if probe.validationRequested {
+    this.NCCFlightProbeRunValidation(scriptInterface, stateName, machineName);
+    return;
+  }
+  if !probe.requested && !probe.active {
     return;
   }
   if probe.transitionPending {
@@ -255,16 +400,23 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
     this.NCCFlightProbeRestore(scriptInterface, "Returned to activation point", true);
     return;
   }
+  zeroFilter = this.NCCFlightProbeZeroFilter();
+  zeroVelocity = this.NCCFlightProbeZeroVelocity();
+  if !this.NCCFlightProbeIsFilter(zeroFilter) || !this.NCCFlightProbeIsVelocity(zeroVelocity) {
+    this.NCCFlightProbeRestore(scriptInterface, "Activation refused: invalid zero filter or velocity Variant", true);
+    return;
+  }
   if !probe.active {
     if !scriptInterface.IsOnGround() || !(Equals(stateName, n"stand") || Equals(stateName, n"crouch")) {
       probe.status = "Waiting for grounded stand/crouch";
       return;
     }
-    probe.baselineFilter = scriptInterface.GetStateVectorParameter(physicsStateValue.SimulationFilter);
+    probe.baselineFilter = probe.capturedFilter;
     probe.filterType = VariantTypeName(probe.baselineFilter);
-    if NotEquals(probe.filterType, VariantTypeName(ToVariant(SimulationFilter.ZERO()))) {
+    if !IsDefined(probe.capturedInterface) || probe.capturedInterface != scriptInterface
+      || !this.NCCFlightProbeIsFilter(probe.baselineFilter) {
       probe.requested = false;
-      probe.status = "Activation refused: collision baseline has unexpected type";
+      probe.status = "Activation refused: no valid collision filter captured for this interface";
       return;
     }
     probe.velocityType = VariantTypeName(scriptInterface.GetStateVectorParameter(physicsStateValue.LinearVelocity));
@@ -276,7 +428,7 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
     probe.filterWrites = 0;
     probe.velocityWrites = 0;
     probe.interfaceRef = scriptInterface;
-    if !scriptInterface.SetStateVectorParameter(physicsStateValue.SimulationFilter, ToVariant(SimulationFilter.ZERO())) {
+    if !this.NCCFlightProbeWriteFilter(scriptInterface, zeroFilter) {
       probe.requested = false;
       probe.status = "Collision setter rejected activation";
       return;
@@ -308,13 +460,17 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
   if (packet & 128u) != 0u { speed = 0.75; }
   probe.target += movement * (speed * dt);
   probe.target.W = 1.0;
-  if !scriptInterface.SetStateVectorParameter(physicsStateValue.SimulationFilter, ToVariant(SimulationFilter.ZERO())) {
+  if !this.NCCFlightProbeIsFilter(probe.baselineFilter) {
+    this.NCCFlightProbeRestore(scriptInterface, "Stopped: collision baseline became invalid", true);
+    return;
+  }
+  if !this.NCCFlightProbeWriteFilter(scriptInterface, zeroFilter) {
     this.NCCFlightProbeRestore(scriptInterface, "Collision setter rejected update", true);
     return;
   }
   probe.filterWrites += 1;
   GameInstance.GetTeleportationFacility(this.GetGame()).Teleport(this, probe.target, Quaternion.ToEulerAngles(this.GetWorldOrientation()));
-  if scriptInterface.SetStateVectorParameter(physicsStateValue.LinearVelocity, ToVariant(new Vector3(0.0, 0.0, 0.0))) {
+  if scriptInterface.SetStateVectorParameter(physicsStateValue.LinearVelocity, zeroVelocity) {
     probe.velocityWrites += 1;
   } else {
     this.NCCFlightProbeRestore(scriptInterface, "Velocity setter rejected update", true);
@@ -363,6 +519,10 @@ public func OnForcedExit(stateContext: ref<StateContext>, scriptInterface: ref<S
 @wrapMethod(PlayerPuppet)
 protected cb func OnDetach() -> Bool {
   // No attempt to teleport or operate through an old interface during teardown.
+  if IsDefined(this.nccCollisionFlightProbe) {
+    this.nccCollisionFlightProbe.capturedInterface = null;
+    this.nccCollisionFlightProbe.interfaceRef = null;
+  }
   this.nccCollisionFlightProbe = null;
   return wrappedMethod();
 }

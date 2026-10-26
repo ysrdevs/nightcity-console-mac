@@ -1563,10 +1563,10 @@ function createLocalizationGate(names,fill) {
             if (getGameVersion()!=='2.5') throw new Error('Flight prototype requires game 2.5.0.');
             if (!executorGate || !executorGate.flightInputAvailable)
                 throw new Error('Flight input bridge is unavailable; flight stays disabled.');
-            const verbs={toggle:'NCCFlightProbeToggle',return:'NCCFlightProbeReturn',off:'NCCFlightProbeReturn',status:'NCCFlightProbeStatus'};
+            const verbs={validate:'NCCFlightProbeValidate',toggle:'NCCFlightProbeToggle',return:'NCCFlightProbeReturn',off:'NCCFlightProbeReturn',status:'NCCFlightProbeStatus'};
             action=action||'status';
             if (!Object.prototype.hasOwnProperty.call(verbs,action))
-                throw new Error('Use flight toggle, flight return, or flight status.');
+                throw new Error('Use flight validate, flight toggle, flight return, or flight status.');
             const method=verbs[action];
             const names=['gamePlayerPuppet','PlayerPuppet'];
             const input=resolveAny(names,'NCCFlightInput');
