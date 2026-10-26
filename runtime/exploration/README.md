@@ -28,7 +28,9 @@ Each native write copies a finite Vector3, validates the current physics handle 
 
 The user confirmed horizontal and vertical camera look with this position-only build. That camera test's live status recorded 444 issued position writes and 444 subsequent proximity readbacks, zero refusals, and completion of the 10-second return with the filter restored. Flight was inactive with no pending transition. The final readback distance was 0.0206m and final physics/entity origin divergence was zero; these are final samples, not maxima. All 106 framework hooks were installed and the fault log contained only initialization.
 
-In a subsequent same-session test, the user confirmed passing through a barrier that blocks normal walking, stopping movement and turning after releasing input, automatic return to the starting spot, and normal collision blocking the barrier again afterward. The process remained running with no new fault recorded. A fresh status for that barrier run was not captured at this checkpoint; the 444-write counters above belong to the earlier camera test. Early manual return remains unverified.
+In a subsequent same-session test, the user confirmed passing through a barrier that blocks normal walking, stopping movement and turning after releasing input, automatic return to the starting spot, and normal collision blocking the barrier again afterward. Its later status recorded 403 writes and readbacks, zero refusals, and completed automatic return with the filter restored. The process remained running with no new fault recorded.
+
+The user also confirmed an early **Return to start**, with normal walking and collision restored. Its separate status reported `Returned to activation point; filter restored`, inactive flight, no pending transition, 275 issued writes, 274 proximity readbacks and zero refusals. The final issued write need not receive another proximity readback when return takes priority. The user then quit the game and launcher normally. This is the accepted bounded movement checkpoint, not full lifecycle or release acceptance.
 
 ## Validation at this checkpoint
 
@@ -39,7 +41,7 @@ In a subsequent same-session test, the user confirmed passing through a barrier 
 - The combined script set compiles with VA, Equipment-EX, Cyberware-EX and the existing plugin scripts.
 - The overlay output reader now runs on a worker with a bounded 128 KiB tail and 400 lines. The render path only consumes completed snapshots; clear operations invalidate older pending output. Sanitizer fixtures cover partial lines, replacement, truncation, special files and concurrent reads.
 
-Static and native fixture checks do not establish gameplay behavior or an FPS improvement. The user has confirmed the narrow camera, movement, barrier, automatic-return and restored-collision flows above; camera behavior during locomotion transitions and early manual return still need acceptance. Then repeat the established Creator, VA purchase, outfit switching, dual OS and save/relaunch checks.
+Static and native fixture checks do not establish gameplay behavior or an FPS improvement. The user has confirmed the narrow camera, movement, barrier, automatic-return, manual-return and restored-collision flows above. Camera behavior during locomotion transitions and broader player/menu lifecycle behavior still need acceptance. Then repeat the established Creator, VA purchase, outfit switching, dual OS and save/relaunch checks.
 
 Before production use, complete player lifecycle and menu/transition testing, explicit safe exit behavior, configurable controls and speed, persistent places and performance comparisons. Manual diagnostic commands currently return script Strings using the existing runtime convention; add explicit native String ownership handling or replace these with primitive results before frequent polling. Do not turn this status command into a frame loop.
 
