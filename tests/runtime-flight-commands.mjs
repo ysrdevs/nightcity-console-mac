@@ -17,23 +17,28 @@ function pointer(value) {
 }
 
 function method(name, overrides = {}) {
-  const metadata = { params: 0, hash: name === 'NCCFlightInput' ? UINT32 : STRING,
+  const metadata = { params: name === 'NCCFlightProbePrepare' ? 1 : 0,
+    hash: name === 'NCCFlightInput' ? UINT32 : STRING,
+    parameterHash: UINT32, nullParameters: false, nullParameter: false, nullParameterType: false,
     isStatic: false, nullReturn: false, ...overrides };
   return {
     isStatic: metadata.isStatic,
     fn: { name, add(offset) {
-      assert.equal(offset, 0x30, 'only the validated parameter-count field is read');
-      return { readU32: () => metadata.params };
+      if (offset === 0x30) return { readU32: () => metadata.params };
+      assert.equal(offset, 0x28, 'only parameter count/table metadata may be read');
+      return { readPointer: () => ({ isNull: () => metadata.nullParameters,
+        readPointer: () => ({ isNull: () => metadata.nullParameter,
+          readPointer: () => ({ isNull: () => metadata.nullParameterType, hash: metadata.parameterHash }) }) }) };
     } },
     retType: { hash: metadata.hash, isNull: () => metadata.nullReturn },
   };
 }
 
 function harness(options = {}) {
-  const methods = new Map(['NCCFlightInput', 'NCCFlightProbeToggle', 'NCCFlightProbeValidate',
+  const methods = new Map(['NCCFlightInput', 'NCCFlightProbePrepare', 'NCCFlightProbeValidate',
     'NCCFlightProbeReturn', 'NCCFlightProbeStatus', 'NCCFlightProbeCameraTrace'].map(name => [name, method(name)]));
   const state = { version: '2.5', packet: 512 | 256, player: pointer(0xabc0),
-    calls: [], lookups: [], bindings: [], reads: [], logs: [], snapshotReads: 0, fault: null, ...options };
+    calls: [], lookups: [], bindings: [], reads: [], logs: [], snapshotReads: 0, snapshots: [], fault: null, ...options };
   const game = pointer(0xdef0);
   const gate = {
     flightInputAvailable: options.exportAvailable !== false,
@@ -44,11 +49,16 @@ function harness(options = {}) {
       assert.equal(this.binding, methods.get('NCCFlightInput').fn,
         'the exact validated method must be bound before checking native availability');
       if (state.fault === 'input-snapshot') throw Error('INPUT_SNAPSHOT_FAILED');
+      state.snapshots.push(state.packet >>> 0);
       return state.packet;
     },
   };
   const context = vm.createContext({
-    ensureFlightCapture() { if(state.fault === 'capture-setup') throw Error('CAPTURE_SETUP_FAILED'); state.reads.push('capture-setup'); },
+    ensureFlightCapture() {
+      if(state.fault === 'capture-setup') throw Error('CAPTURE_SETUP_FAILED');
+      state.reads.push('capture-setup');
+      if (options.afterCapture) options.afterCapture(state);
+    },
     ensureFlightPosition() { if(state.fault === 'position-setup') throw Error('POSITION_SETUP_FAILED'); state.reads.push('position-setup'); },
     getGameVersion: () => state.version,
     executorGate: options.missingGate ? null : gate,
@@ -67,7 +77,12 @@ function harness(options = {}) {
     callFunc(fn, owner, type, args, resultSize) {
       state.calls.push({ name: fn.name, owner, type, args: Array.from(args), resultSize });
       assert.equal(owner, state.player, 'calls must use the authoritative current player');
-      assert.equal(args.length, 0, 'all prototype commands are zero-argument methods');
+      if (fn.name === 'NCCFlightProbePrepare') {
+        assert.deepEqual(Array.from(args), [String(state.snapshots.at(-1))],
+          'preparation must receive the exact non-consuming native snapshot as unsigned decimal');
+        assert(state.reads.includes('capture-setup') && state.reads.includes('position-setup'),
+          'both native gates must be configured before preparation is queued');
+      } else assert.equal(args.length, 0, 'diagnostic/return commands remain zero-argument methods');
       assert.notEqual(fn.name, 'NCCFlightInput',
         'command callbacks must not attempt a scripted input round trip: Frida suppresses the same listener');
       if (state.fault === 'target-call') throw Error('TARGET_CALL_FAILED');
@@ -117,8 +132,8 @@ for (const action of ['enable', 'constructor', 'toString', '__proto__', 'hasOwnP
   assert.equal(h.state.reads.length, 0, 'invalid verbs must not enter the engine for player lookup');
   assert.equal(h.state.bindings.length, 0, 'invalid verbs must preserve any active binding');
 }
-for (const [action, name] of [['toggle', 'NCCFlightProbeToggle'], ['validate', 'NCCFlightProbeValidate'], ['camera', 'NCCFlightProbeCameraTrace']]) {
-  for (const invalid of [null, { params: 1 }, { hash: UINT32 }, { isStatic: true }, { nullReturn: true }]) {
+for (const [action, name] of [['toggle', 'NCCFlightProbePrepare'], ['validate', 'NCCFlightProbeValidate'], ['camera', 'NCCFlightProbeCameraTrace']]) {
+  for (const invalid of [null, { params: action === 'toggle' ? 0 : 1 }, { params: 2 }, { hash: UINT32 }, { isStatic: true }, { nullReturn: true }]) {
     const h = harness();
     if (invalid === null) h.methods.delete(name);
     else h.methods.set(name, method(name, invalid));
@@ -127,12 +142,30 @@ for (const [action, name] of [['toggle', 'NCCFlightProbeToggle'], ['validate', '
     assert.equal(h.state.bindings.length, 0);
   }
 }
+for (const invalid of [{ nullParameters: true }, { nullParameter: true }, { nullParameterType: true }, { parameterHash: STRING }]) {
+  const h = harness();
+  h.methods.set('NCCFlightProbePrepare', method('NCCFlightProbePrepare', invalid));
+  assert.throws(() => h.run('toggle'), /requires one Uint32 input packet/);
+  assert.equal(h.state.calls.length, 0);
+  assert.equal(h.state.snapshotReads, 0);
+  assert.equal(h.state.bindings.length, 0);
+}
 for (const packet of [0, 1, 256, 256 | 1]) {
   const h = harness({ packet });
   assert.throws(() => h.run('toggle'), /native input is not ready/);
   assert.equal(h.state.calls.length, 0, 'a non-ready native snapshot must not execute a script command');
   assert.equal(h.state.snapshotReads, 1);
   assert(h.gate.binding.isNull(), 'a failed native availability check must disable input binding');
+}
+for (const [packet, message] of [[512 | 4096, /Return to the game/], [512 | 32768, /counter exhausted/]]) {
+  const h = harness({ packet });
+  assert.throws(() => h.run('toggle'), message);
+  assert.equal(h.state.calls.length, 0);
+  assert.equal(h.state.snapshotReads, 1);
+  assert.equal(h.gate.binding, h.methods.get('NCCFlightInput').fn,
+    'focus rejection must retain input binding for ongoing stop processing');
+  h.run('return'); h.run('status');
+  assert.deepEqual(h.state.calls.map(call => call.name), ['NCCFlightProbeReturn', 'NCCFlightProbeStatus']);
 }
 for (const fault of ['input-snapshot']) {
   const h = harness({ fault });
@@ -141,7 +174,7 @@ for (const fault of ['input-snapshot']) {
   assert(h.gate.binding.isNull(), 'a throwing native snapshot must disable input binding');
 }
 for (const [action, expected] of [[undefined, 'NCCFlightProbeStatus'], ['status', 'NCCFlightProbeStatus'],
-  ['validate', 'NCCFlightProbeValidate'], ['camera', 'NCCFlightProbeCameraTrace'], ['toggle', 'NCCFlightProbeToggle'],
+  ['validate', 'NCCFlightProbeValidate'], ['camera', 'NCCFlightProbeCameraTrace'], ['toggle', 'NCCFlightProbePrepare'],
   ['return', 'NCCFlightProbeReturn'], ['off', 'NCCFlightProbeReturn']]) {
   const h = harness();
   h.run(action);
@@ -149,6 +182,22 @@ for (const [action, expected] of [[undefined, 'NCCFlightProbeStatus'], ['status'
   assert.equal(h.state.snapshotReads, 1);
   assert.equal(h.state.logs.at(-1), `[Flight] result:${expected}`);
   assert.equal(h.gate.binding, h.methods.get('NCCFlightInput').fn);
+}
+for (const packet of [512 | 256, 512 | 3072 | 128, (0x80000000 | 512 | 256) >>> 0, (0xffff0000 | 512) >>> 0]) {
+  const h = harness({ packet });
+  h.run('toggle');
+  assert.deepEqual(h.state.calls[0].args, [String(packet)]);
+  assert.equal(h.state.snapshotReads, 1, 'the command samples native input once and never consumes it');
+  assert.deepEqual(h.state.lookups, ['NCCFlightInput', 'NCCFlightProbePrepare'],
+    'one-click command must not invoke Validate, the input stub, or a collision-filter method');
+}
+{
+  const initial = (7 << 16) | 512 | 256;
+  const h = harness({ packet: initial, afterCapture(state) { state.packet = (8 << 16) | 512; } });
+  h.run('toggle');
+  assert.deepEqual(h.state.calls[0].args, [String(initial)],
+    'focus changes during setup must not silently replace the original request epoch');
+  assert.equal(h.state.snapshotReads, 1);
 }
 {
   const h = harness({ fault: 'position-setup' });
@@ -169,3 +218,4 @@ for (const [action, expected] of [[undefined, 'NCCFlightProbeStatus'], ['status'
 }
 
 console.log('PASS production flight commands: game version, bridge availability, exact RTTI signatures, invalid verbs, current player, fail-closed native snapshot, no callback-origin script input call, String buffers and stable status binding');
+console.log('PASS one-click preparation: exact instance String(Uint32), unsigned epoch/settings packet, no mandatory Validate/crouch call, inactive/exhausted rejection, return/status availability and request epoch preserved across setup');

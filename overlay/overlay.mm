@@ -1282,24 +1282,23 @@ static void drawQuickTab() {
 static void drawExplorationTab() {
     ImGui::TextUnformatted("Experimental flight");
     ImGui::TextWrapped("This private test returns you after 60 seconds of game time, or sooner at the 128 m range limit. Stay near your starting point for the full-minute test. Start on clear ground and do not save during flight.");
-    if (ImGui::Button("Start / stop flight")) runLabeled("flight toggle", "Flight toggle requested. Check Console for status.");
+    if (ImGui::Button("Start / stop flight")) runLabeled("flight toggle", "Flight requested. Close F1 to prepare and start on clear ground.");
     ImGui::SameLine();
     if (ImGui::Button("Return to start")) runLabeled("flight return", "Return and collision restoration requested.");
-    ImGui::TextWrapped("Close F1 to move: WASD, Space up, Control down, Shift boost. Hold Alt (Option) for slow, precise movement.");
+    ImGui::TextWrapped("Click Start and close F1 while standing or crouching on clear ground. Flight prepares automatically. Move with WASD, Space up, Control down, and Shift boost. Hold Alt (Option) for precise movement.");
     int speedPreset = static_cast<int>(g_explorationInput.preset());
     ImGui::SetNextItemWidth(180);
     if (ImGui::Combo("Flight speed", &speedPreset, "Normal: 4 m/s\0Slow: 2 m/s\0Fast: 6 m/s\0Faster: 8 m/s\0"))
         g_explorationInput.setPreset(static_cast<uint32_t>(speedPreset));
     ImGui::TextDisabled("Shift: 12 m/s. Alt (Option): 0.75 m/s.");
     ImGui::TextWrapped("Switching away from the game cancels flight. Opening F1 pauses movement so you can use Return to start.");
-    ImGui::Separator();
-    if (ImGui::Button("Validate flight")) runLabeled("flight validate", "Read-only flight validation requested. Check flight status for results.");
-    ImGui::SameLine();
     if (ImGui::Button("Check flight status")) runLabeled("flight status", "Flight status requested in Console.");
-    ImGui::TextWrapped("Before the first flight: Validate flight, close F1, then crouch and stand to capture the normal collision filter. Validate again and check status. Results appear in the Console tab.");
-    ImGui::Separator();
-    if (ImGui::Button("Record camera input")) runLabeled("flight camera", "Camera trace requested. Close F1 and look left/right for 5 seconds, then start one flight and repeat.");
-    ImGui::TextWrapped("Camera diagnostic: records one normal-look baseline and the next flight. Use Check flight status afterward to collect results.");
+    if (ImGui::CollapsingHeader("Flight diagnostics")) {
+        if (ImGui::Button("Validate flight")) runLabeled("flight validate", "Read-only flight validation requested. Check flight status for results.");
+        ImGui::TextWrapped("Optional diagnostic results appear in the Console tab. Validation is not required before Start.");
+        if (ImGui::Button("Record camera input")) runLabeled("flight camera", "Camera trace requested. Close F1 and look left/right for 5 seconds, then start one flight and repeat.");
+        ImGui::TextWrapped("Records one normal-look baseline and the next flight. Use Check flight status afterward to collect both recordings.");
+    }
 }
 
 // ---- Creator: build a custom iconic weapon IN-PROCESS (ported from makeweapon.py). No Python, no
