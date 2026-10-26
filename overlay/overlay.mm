@@ -1281,7 +1281,7 @@ static void drawQuickTab() {
 
 static void drawExplorationTab() {
     ImGui::TextUnformatted("Experimental flight");
-    ImGui::TextWrapped("This private test returns you to your starting point after 10 seconds. Start on clear ground and do not save during flight.");
+    ImGui::TextWrapped("This private test returns you after 60 seconds of game time, or sooner at the 128 m range limit. Stay near your starting point for the full-minute test. Start on clear ground and do not save during flight.");
     if (ImGui::Button("Start / stop flight")) runLabeled("flight toggle", "Flight toggle requested. Check Console for status.");
     ImGui::SameLine();
     if (ImGui::Button("Return to start")) runLabeled("flight return", "Return and collision restoration requested.");

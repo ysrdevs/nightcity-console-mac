@@ -1,5 +1,5 @@
 // Experimental 1.8 feasibility probe, installed only in the isolated test profile.
-// No gravity changes. A 10-second limit and every normal stop return to start.
+// No gravity changes. A 60-second limit and every normal stop return to start.
 // Native state setters returning true do not prove actual collision passage.
 
 // Temporary, explicitly armed camera diagnostics. Objects are allocated once
@@ -183,6 +183,10 @@ class NCCCollisionFlightProbeState extends IScriptable {
   public let positionReadbackPending: Bool;
   public let positionReadbackDistance: Float;
   public let positionOriginDivergence: Float;
+  public let maxPositionReadbackDistance: Float;
+  public let maxPositionOriginDivergence: Float;
+  public let maxObservedEntityRadius: Float;
+  public let lastIssuedTargetRadius: Float;
   public let positionOriginDelta: Vector4;
   public let positionLastTarget: Vector4;
   public let positionLastRefusal: String;
@@ -712,6 +716,8 @@ public final func NCCFlightProbeStatus() -> String {
     + "; validationRequested=" + ToString(probe.validationRequested)
     + "; transitionPending=" + ToString(probe.transitionPending)
     + "; requested=" + ToString(probe.requested)
+    + "; elapsedSeconds=" + FloatToStringPrec(probe.elapsed, 3)
+    + "; simulationLimitSeconds=60; issuedUpdateLimit=32768"
     + "; ticks=" + ToString(probe.ticks)
     + "; lastInputPacket=" + ToString(probe.lastInputPacket)
     + "; inputChecks=" + ToString(probe.inputChecks)
@@ -723,6 +729,10 @@ public final func NCCFlightProbeStatus() -> String {
     + "; positionReadbackPending=" + ToString(probe.positionReadbackPending)
     + "; positionReadbackDistance=" + FloatToStringPrec(probe.positionReadbackDistance, 4)
     + "; positionOriginDivergence=" + FloatToStringPrec(probe.positionOriginDivergence, 4)
+    + "; maxPositionReadbackDistance=" + FloatToStringPrec(probe.maxPositionReadbackDistance, 4)
+    + "; maxPositionOriginDivergence=" + FloatToStringPrec(probe.maxPositionOriginDivergence, 4)
+    + "; maxObservedEntityRadiusMeters=" + FloatToStringPrec(probe.maxObservedEntityRadius, 3)
+    + "; lastIssuedTargetRadiusMeters=" + FloatToStringPrec(probe.lastIssuedTargetRadius, 3)
     + "; positionRefusals=" + ToString(probe.positionRefusals)
     + "; positionLastRefusal=" + probe.positionLastRefusal
     + "; stopRequested=" + ToString(probe.stopRequested)
@@ -914,6 +924,8 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
   let physicsPosition: Vector4;
   let entityPosition: Vector4;
   let originDelta: Vector4;
+  let observedEntityRadius: Float;
+  let targetRadius: Float;
   let speed: Float;
   let dt: Float;
   let packet: Uint32;
@@ -1023,13 +1035,23 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
   originDelta = physicsPosition - entityPosition;
   originDelta.W = 0.0;
   if probe.active {
+    observedEntityRadius = Vector4.Distance(entityPosition, probe.start);
+    if observedEntityRadius >= 0.0 && observedEntityRadius <= 1000000.0 {
+      probe.maxObservedEntityRadius = MaxF(probe.maxObservedEntityRadius, observedEntityRadius);
+    }
     probe.positionOriginDivergence = Vector4.Length(originDelta - probe.positionOriginDelta);
+    if probe.positionOriginDivergence >= 0.0 && probe.positionOriginDivergence <= 1000000.0 {
+      probe.maxPositionOriginDivergence = MaxF(probe.maxPositionOriginDivergence, probe.positionOriginDivergence);
+    }
     if !(probe.positionOriginDivergence <= 0.25) {
       this.NCCFlightProbePositionRefused(scriptInterface, "Position refused: physics/entity origins diverged by more than 0.25m");
       return;
     }
     if probe.positionReadbackPending {
       probe.positionReadbackDistance = Vector4.Distance(physicsPosition, probe.positionLastTarget);
+      if probe.positionReadbackDistance >= 0.0 && probe.positionReadbackDistance <= 1000000.0 {
+        probe.maxPositionReadbackDistance = MaxF(probe.maxPositionReadbackDistance, probe.positionReadbackDistance);
+      }
       if !(probe.positionReadbackDistance <= 1.0) {
         this.NCCFlightProbePositionRefused(scriptInterface, "Position refused: prior target is more than 1m from physics readback");
         return;
@@ -1069,6 +1091,10 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
     probe.target = probe.start;
     probe.startFacing = Quaternion.ToEulerAngles(this.GetWorldOrientation());
     probe.elapsed = 0.0;
+    probe.maxPositionReadbackDistance = 0.0;
+    probe.maxPositionOriginDivergence = 0.0;
+    probe.maxObservedEntityRadius = 0.0;
+    probe.lastIssuedTargetRadius = 0.0;
     probe.ticks = 0;
     probe.filterWrites = 0;
     probe.velocityWrites = 0;
@@ -1082,8 +1108,12 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
     probe.active = true;
   }
   probe.elapsed += timeDelta;
-  if probe.elapsed >= 10.0 {
-    this.NCCFlightProbeRestore(scriptInterface, "10-second probe complete", true);
+  if probe.elapsed >= 60.0 {
+    this.NCCFlightProbeRestore(scriptInterface, "60-second probe complete", true);
+    return;
+  }
+  if probe.positionWritesIssued >= 32768 {
+    this.NCCFlightProbeRestore(scriptInterface, "32768 issued-update limit reached; returned to activation point", true);
     return;
   }
   dt = ClampF(timeDelta, 0.0, 0.05);
@@ -1128,9 +1158,10 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
   nextTarget.W = 1.0;
   physicsTarget = nextTarget + probe.positionOriginDelta;
   physicsTarget.W = 1.0;
+  targetRadius = Vector4.Distance(nextTarget, probe.start);
   if !this.NCCFlightProbeBoundedVector(nextTarget, 100000.0)
     || !this.NCCFlightProbeBoundedVector(physicsTarget, 100000.0)
-    || !(Vector4.Distance(nextTarget, probe.start) <= 128.0) {
+    || !(targetRadius >= 0.0 && targetRadius <= 128.0) {
     this.NCCFlightProbePositionRefused(scriptInterface, "Position refused: target exceeds the bounded probe area");
     return;
   }
@@ -1153,6 +1184,7 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
   }
   probe.target = nextTarget;
   probe.positionLastTarget = physicsTarget;
+  probe.lastIssuedTargetRadius = targetRadius;
   probe.positionReadbackPending = true;
   probe.positionWritesIssued += 1;
   if scriptInterface.SetStateVectorParameter(physicsStateValue.LinearVelocity, zeroVelocity) {
