@@ -701,8 +701,11 @@ function createExecutorGate(enter, leave) {
     // Read only the overlay's atomic snapshot from a command callback. Calling
     // Exec here would re-enter this listener and Frida suppresses that hook.
     const flightPacket=flightInput ? new NativeFunction(flightInput,'uint',[],{scheduling:'exclusive',traps:'none'}) : null;
-    const state=Memory.alloc(40);
-    state.writeByteArray(new Uint8Array(40));
+    const captureBegin=Module.findGlobalExportByName('nightcity_flight_capture_begin');
+    const captureConsume=Module.findGlobalExportByName('nightcity_flight_capture_consume');
+    const captureAvailable=!!captureBegin && !!captureConsume;
+    const state=Memory.alloc(56);
+    state.writeByteArray(new Uint8Array(56));
     const enterCallback=new NativeCallback(enter,'uint',['pointer','pointer','pointer']);
     const leaveCallback=new NativeCallback(leave,'void',['pointer','uint']);
     const module=new CModule(`
@@ -712,19 +715,24 @@ function createExecutorGate(enter, leave) {
             gpointer player;
             guint epoch;
             gpointer flight_input_fn;
+            gpointer capture_begin_fn, capture_end_fn;
         } GateState;
         typedef struct {
             guint depth, epoch;
             guintptr contexts[88];
             gpointer functions[32];
         } ThreadState;
-        typedef struct { gpointer context; guint *flight_result; } CallState;
+        typedef struct {
+            gpointer context; guint *flight_result;
+            gpointer capture_context, capture_result; guint capture_kind, capture_depth;
+        } CallState;
         extern GateState gate_state;
         extern guint atomic_load32(const guint *address);
         extern gpointer atomic_load_pointer(gpointer const *address);
         extern guint enter_js(gpointer fn, gpointer context, gpointer frame);
         extern void leave_js(gpointer context, guint depth);
         ${flightInput ? 'extern guint flight_input(void);' : 'static guint flight_input(void) { return 256; }'}
+        ${captureAvailable ? 'extern guint capture_begin(gpointer context, guint depth); extern guint capture_consume(gpointer context, guint depth, gpointer output);' : 'static guint capture_begin(gpointer context, guint depth) { return 0; } static guint capture_consume(gpointer context, guint depth, gpointer output) { return 0; }'}
         void on_enter(GumInvocationContext *ic) {
             ThreadState *thread=gum_invocation_context_get_listener_thread_data(ic,sizeof(ThreadState));
             CallState *call=gum_invocation_context_get_listener_invocation_data(ic,sizeof(CallState));
@@ -737,9 +745,17 @@ function createExecutorGate(enter, leave) {
             }
             call->context=NULL;
             call->flight_result=NULL;
+            call->capture_kind=0;
             gpointer fn=gum_invocation_context_get_nth_argument(ic,0);
             if (fn && fn==atomic_load_pointer(&gate_state.flight_input_fn)) {
                 call->flight_result=gum_invocation_context_get_nth_argument(ic,3);
+                return;
+            }
+            if (fn && (fn==atomic_load_pointer(&gate_state.capture_begin_fn) || fn==atomic_load_pointer(&gate_state.capture_end_fn))) {
+                call->capture_kind=fn==atomic_load_pointer(&gate_state.capture_begin_fn) ? 1 : 2;
+                call->capture_context=gum_invocation_context_get_nth_argument(ic,1);
+                call->capture_result=gum_invocation_context_get_nth_argument(ic,3);
+                call->capture_depth=thread->depth;
                 return;
             }
             if (atomic_load32(&gate_state.busy)) return;
@@ -766,11 +782,15 @@ function createExecutorGate(enter, leave) {
             ThreadState *thread=gum_invocation_context_get_listener_thread_data(ic,sizeof(ThreadState));
             CallState *call=gum_invocation_context_get_listener_invocation_data(ic,sizeof(CallState));
             if (call->flight_result) *call->flight_result=flight_input();
+            if (call->capture_kind==1 && call->capture_result)
+                *(guint*)call->capture_result=capture_begin(call->capture_context,call->capture_depth);
+            if (call->capture_kind==2)
+                capture_consume(call->capture_context,call->capture_depth,call->capture_result);
             if (thread->depth) thread->depth--;
             if (!atomic_load32(&gate_state.busy) && atomic_load32(&gate_state.pending))
                 leave_js(call->context,thread->depth);
         }
-    `,Object.assign({gate_state:state,enter_js:enterCallback,leave_js:leaveCallback,atomic_load32:atomic.load32,atomic_load_pointer:atomic.loadPointer}, flightInput ? {flight_input:flightInput} : {}),{toolchain:'internal'});
+    `,Object.assign({gate_state:state,enter_js:enterCallback,leave_js:leaveCallback,atomic_load32:atomic.load32,atomic_load_pointer:atomic.loadPointer}, flightInput ? {flight_input:flightInput} : {}, captureAvailable ? {capture_begin:captureBegin,capture_consume:captureConsume} : {}),{toolchain:'internal'});
     return {
         // Keep code, memory and callbacks alive as long as the attached listener.
         module:module,state:state,atomic:atomic,enterCallback:enterCallback,leaveCallback:leaveCallback,
@@ -783,8 +803,37 @@ function createExecutorGate(enter, leave) {
         flightInput(value){atomic.writePointer(state.add(32),value);},
         flightInputAvailable:!!flightInput,
         flightInputPacket(){return flightPacket ? flightPacket() : 256;},
+        flightCaptureAvailable:captureAvailable,
+        flightCaptureMethods(begin,end){atomic.writePointer(state.add(40),begin);atomic.writePointer(state.add(48),end);},
         refresh(){atomic.write32(state.add(24),(atomic.read32(state.add(24))+1)>>>0);},
     };
+}
+
+function createFlightCaptureHook(address,type,size,alignment,enumValue) {
+    const names=['configure','prepare','finish'];
+    const exports=names.map(name=>Module.findGlobalExportByName('nightcity_flight_capture_'+name));
+    if(exports.some(value=>!value)) throw new Error('Native collision capture helpers are unavailable.');
+    const configure=new NativeFunction(exports[0],'uint',['pointer','uint','uint','uint'],{scheduling:'exclusive',traps:'none'});
+    if(!configure(type,size,alignment,enumValue)) throw new Error('Collision capture type configuration was rejected.');
+    const module=new CModule(`
+        #include <gum/guminterceptor.h>
+        typedef struct { guintptr candidate[16]; guint prepared; } CaptureCall;
+        extern guint capture_prepare(gpointer context, guint value, gpointer variant, gpointer candidate);
+        extern guint capture_finish(gpointer candidate, guint accepted);
+        void on_enter(GumInvocationContext *ic) {
+            CaptureCall *call=gum_invocation_context_get_listener_invocation_data(ic,sizeof(CaptureCall));
+            call->prepared=capture_prepare(gum_invocation_context_get_nth_argument(ic,0),
+                (guint)(guintptr)gum_invocation_context_get_nth_argument(ic,1),
+                gum_invocation_context_get_nth_argument(ic,2),call->candidate);
+        }
+        void on_leave(GumInvocationContext *ic) {
+            CaptureCall *call=gum_invocation_context_get_listener_invocation_data(ic,sizeof(CaptureCall));
+            if(call->prepared) capture_finish(call->candidate,((guintptr)gum_invocation_context_get_return_value(ic)&0xff)!=0);
+        }
+    `,{capture_prepare:exports[1],capture_finish:exports[2]},{toolchain:'internal'});
+    const listener=Interceptor.attach(address,{onEnter:module.on_enter,onLeave:module.on_leave});
+    Interceptor.flush();
+    return {module:module,listener:listener};
 }
 // END NATIVE EXECUTOR GATE
 
@@ -871,7 +920,7 @@ function createLocalizationGate(names,fill) {
             GetClass=new NativeFunction(rv.add(0x10).readPointer(),'pointer',['pointer','uint64']);
             GetEnum =new NativeFunction(rv.add(0x18).readPointer(),'pointer',['pointer','uint64']); }
         let player=null, playerVt=null, fromtd=null, busy=false, lastCmd='', lastLReq=''; const pendingQ=[];
-        let executorGate=null;
+        let executorGate=null, flightCaptureHook=null;
         // Every producer (including Creator retry timers) arms the native command gate.
         pendingQ.push=function(){ const n=Array.prototype.push.apply(this,arguments); if(executorGate)executorGate.pending(n>0); return n; };
         // Executor nesting depth per thread. One shared counter stalled the queue for the rest of the session
@@ -1559,6 +1608,36 @@ function createLocalizationGate(names,fill) {
             return ((lf&0x40000000)?p.readPointer():p).readUtf8String(n); }catch(e){ return ''; } }
         // Exploration prototype commands are the only place that configures the
         // exact Uint32 input method. Movement itself stays in redscript/engine updates.
+        function ensureFlightCapture() {
+            if(flightCaptureHook) return;
+            if(!executorGate.flightCaptureAvailable) throw new Error('Collision capture bridge is unavailable.');
+            const classes=['gamestateMachineGameScriptInterface','StateGameScriptInterface'];
+            const begin=resolveAny(classes,'NCCFlightCaptureBegin'),end=resolveAny(classes,'NCCFlightCaptureEnd');
+            const variantName='0x'+fnv('Variant').toString(16),filterName='0x'+fnv('physicsSimulationFilter').toString(16);
+            function signature(method,staticMethod,returnName) {
+                return method && method.isStatic===staticMethod && method.fn.add(0x30).readU32()===0 &&
+                    !method.retType.isNull() && nameOf(method.retType)===returnName;
+            }
+            if(!signature(begin,false,T_U32) || !signature(end,false,variantName))
+                throw new Error('Collision capture script signatures differ.');
+            const zero=resolveAny(['physicsSimulationFilter','SimulationFilter'],'ZERO');
+            if(!signature(zero,true,filterName)) throw new Error('Collision filter type is unavailable.');
+            // Mac RTTI has two destructor slots: GetSize and GetAlignment follow GetName.
+            const measure=(type,offset)=>new NativeFunction(type.readPointer().add(offset).readPointer(),'uint',['pointer'])(type);
+            const size=measure(zero.retType,0x18),alignment=measure(zero.retType,0x20);
+            if(size!==16 || alignment!==8 || measure(end.retType,0x18)!==24 || measure(end.retType,0x20)!==8)
+                throw new Error('Collision capture native layout differs.');
+            const enumValue=resolveEnumByTypeHash('0x'+fnv('physicsStateValue').toString(16),'SimulationFilter');
+            if(enumValue===null || !enumValue.equals(uint64(32))) throw new Error('Collision filter enum differs.');
+            const address=base.add(0x24c0304);
+            const bytes=new Uint8Array(address.readByteArray(24));
+            const expected='ff4301d1f65702a9f44f03a9fd7b04a9fd030191f30302aa';
+            const actual=Array.from(bytes,value=>value.toString(16).padStart(2,'0')).join('');
+            if(actual!==expected) throw new Error('Collision setter fingerprint differs.');
+            flightCaptureHook=createFlightCaptureHook(address,zero.retType,size,alignment,32);
+            executorGate.flightCaptureMethods(begin.fn,end.fn);
+            log('[Flight] Native filter capture ready; crouch and stand before validating again.');
+        }
         function doFlight(action) {
             if (getGameVersion()!=='2.5') throw new Error('Flight prototype requires game 2.5.0.');
             if (!executorGate || !executorGate.flightInputAvailable)
@@ -1587,6 +1666,7 @@ function createLocalizationGate(names,fill) {
                 const packet=executorGate.flightInputPacket();
                 if ((packet&512)===0) throw new Error('Flight native input is not ready.');
             } catch (e) { executorGate.flightInput(ptr(0)); throw e; }
+            ensureFlightCapture();
             // This checks native availability only. The script must obtain READY
             // through NCCFlightInput on its next engine update before it changes
             // collision or position. Never manufacture READY or bypass that gate.

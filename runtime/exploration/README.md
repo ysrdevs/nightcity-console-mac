@@ -8,9 +8,11 @@ The command runs inside the executor hook's return callback. Frida suppresses re
 
 The second prototype crashed in the native collision setter while copying a null Variant payload. Two empty type names could pass its earlier equality check. The native 2.5 `GetStateVectorParameter` implementation does not support reading `SimulationFilter`; its case returns an empty Variant. All owned physics writes now require a defined Variant with the exact expected native type. Filter and velocity values are materialized in typed locals before conversion. Do not reuse the unsupported getter as a restoration source.
 
-The intended restoration source is a copy of a filter the engine successfully applies, associated with the current locomotion interface and excluding the probe's own writes. The installed compiler does not support wrapping this native setter in redscript. Capture helpers are prepared, but no provider feeds them in this checkpoint, so flight activation stays disabled. A native capture path still needs implementation and lifetime validation; no preset is substituted for an unknown current filter.
+The restoration source is a copy of a filter the engine successfully applies. The installed compiler does not support wrapping this native setter in redscript, so a native listener captures it only within a bounded scope around the original scripted collision-setting method. A shared native thread-local stack associates each scope with its interface and executor depth, copies the verified 16-byte filter payload, and consumes it into an initially empty owned Variant. Failed captures invalidate the script's older same-interface capture. Flight's later writes occur outside this scope. No preset is substituted for an unknown current filter.
 
-`flight validate` queues a read-only check on the locomotion update. It reports the native input packet and Variant validity through `flight status`, without writing physics parameters or teleporting. This diagnostic must pass before another movement test. Collision passage and restoration remain unverified after the crash.
+Setup checks both script signatures, the exact native filter and Variant sizes and alignments, the reflected enum value, and the 2.5 setter's instruction fingerprint. Native fixtures cover inline and heap inputs, source lifetime, output boundaries, rejected/failed calls, nested scopes, stale scopes, overflow, and concurrent threads. The actual Frida integration fixture verifies the shared native state and argument/return preservation. These fixtures do not establish the game's live capture or restoration. The movement command and UI remain disabled for this checkpoint.
+
+`flight validate` first configures native capture, then queues a read-only check on the locomotion update. After that first call, crouch and stand normally to give the original state logic a chance to apply its filter, then validate and check status again. The report includes input readiness, capture validity, current-interface matching and Variant types, without probe physics writes or teleports. This diagnostic must pass before another movement test. Collision passage and restoration remain unverified after the crash.
 
 While active, the script uses the locomotion update context, camera-relative movement, the current state's collision filter and zero velocity. Held keys come from one atomic native snapshot. Movement does not cross into JavaScript, read command files or write logs every frame. Opening F1 or losing application focus clears held input. Unsupported player states stop the probe. Normal stops restore the captured filter and return to the activation point; a 30-second simulation-time limit does the same. Flight state is transient and is discarded on player detach.
 
@@ -33,11 +35,13 @@ Before production use, complete player lifecycle and menu/transition testing, ex
 ```sh
 node --check runtime/red4ext_hooks.js
 node tests/runtime-flight-commands.mjs
+node tests/runtime-flight-capture-setup.mjs
 node tests/runtime-native-fallback.mjs
 node tests/runtime-diagnostics.mjs
 node tests/creator-transaction.mjs
 node tests/creator-catalog.mjs
 bash tools/test-output-snapshot.sh
+bash tools/test-flight-capture.sh
 clang++ -std=c++17 -O2 -pthread tests/exploration-input.cpp -o /tmp/nightcity-exploration-input-test
 /tmp/nightcity-exploration-input-test
 ```

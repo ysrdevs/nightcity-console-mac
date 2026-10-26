@@ -24,6 +24,7 @@
 #include "frame_cadence.h"
 #include "exploration_input.h"
 #include "output_snapshot.h"
+#include "flight_capture.h"
 #include <thread>
 #include <chrono>
 #include <unistd.h>
@@ -78,6 +79,28 @@ __attribute__((visibility("default"))) void nightcity_atomic_store_pointer(void*
 }
 #endif
 // END RUNTIME ATOMIC HELPERS
+
+// BEGIN FLIGHT CAPTURE EXPORTS
+static_assert(sizeof(nightcity::flight_capture::Candidate) <= 128, "Native capture scratch bound");
+static_assert(alignof(nightcity::flight_capture::Candidate) <= 8, "Native capture scratch alignment");
+extern "C" {
+__attribute__((visibility("default"))) uint32_t nightcity_flight_capture_configure(void* type, uint32_t size, uint32_t alignment, uint32_t enumValue) {
+    return nightcity::flight_capture::configure(reinterpret_cast<uintptr_t>(type), size, alignment, enumValue);
+}
+__attribute__((visibility("default"))) uint32_t nightcity_flight_capture_begin(void* context, uint32_t depth) {
+    return nightcity::flight_capture::begin(reinterpret_cast<uintptr_t>(context), depth);
+}
+__attribute__((visibility("default"))) uint32_t nightcity_flight_capture_consume(void* context, uint32_t depth, void* output) {
+    return nightcity::flight_capture::consume(reinterpret_cast<uintptr_t>(context), depth, output);
+}
+__attribute__((visibility("default"))) uint32_t nightcity_flight_capture_prepare(void* context, uint32_t enumValue, const void* variant, void* candidate) {
+    return nightcity::flight_capture::prepare(reinterpret_cast<uintptr_t>(context), enumValue, variant, static_cast<nightcity::flight_capture::Candidate*>(candidate));
+}
+__attribute__((visibility("default"))) uint32_t nightcity_flight_capture_finish(void* candidate, uint32_t accepted) {
+    return nightcity::flight_capture::finish(static_cast<nightcity::flight_capture::Candidate*>(candidate), accepted != 0);
+}
+}
+// END FLIGHT CAPTURE EXPORTS
 
 // ---- state ----
 // presentDrawable: is implemented per-GPU-family command-buffer class (AGXG13X/G14/G15/G16F/...). The class

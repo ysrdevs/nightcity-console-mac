@@ -48,6 +48,7 @@ function harness(options = {}) {
     },
   };
   const context = vm.createContext({
+    ensureFlightCapture() { if(state.fault === 'capture-setup') throw Error('CAPTURE_SETUP_FAILED'); state.reads.push('capture-setup'); },
     getGameVersion: () => state.version,
     executorGate: options.missingGate ? null : gate,
     T_U32: UINT32,

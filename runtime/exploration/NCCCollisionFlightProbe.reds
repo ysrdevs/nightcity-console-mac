@@ -47,6 +47,19 @@ class NCCCollisionFlightTransitionWatchdog extends DelayCallback {
 @addField(PlayerPuppet)
 private let nccCollisionFlightProbe: ref<NCCCollisionFlightProbeState>;
 
+@addMethod(StateGameScriptInterface)
+public final func NCCFlightCaptureBegin() -> Uint32 {
+  // Native capture bridge returns a nonzero token only for a ready scope.
+  return 0u;
+}
+
+@addMethod(StateGameScriptInterface)
+public final func NCCFlightCaptureEnd() -> Variant {
+  // Missing capture support returns an empty value and cannot enable flight.
+  let empty: Variant;
+  return empty;
+}
+
 @addMethod(PlayerPuppet)
 public final func NCCFlightInput() -> Uint32 {
   // Native exact-function result bridge replaces only this return value.
@@ -56,12 +69,9 @@ public final func NCCFlightInput() -> Uint32 {
 
 @addMethod(PlayerPuppet)
 public final func NCCFlightProbeToggle() -> String {
-  if !IsDefined(this.nccCollisionFlightProbe) {
-    this.nccCollisionFlightProbe = new NCCCollisionFlightProbeState();
-  }
-  this.nccCollisionFlightProbe.requested = !this.nccCollisionFlightProbe.requested;
-  this.nccCollisionFlightProbe.status = this.nccCollisionFlightProbe.requested ? "Requested: waiting for grounded locomotion" : "Requested: return and restore";
-  return this.nccCollisionFlightProbe.status;
+  // Keep movement disabled until the new native capture has passed its live
+  // read-only check. The console command must obey the same restriction as UI.
+  return "Flight movement is disabled in this capture test. Use Validate flight.";
 }
 
 @addMethod(PlayerPuppet)
@@ -132,6 +142,20 @@ public final func NCCFlightProbeCaptureFilter(scriptInterface: ref<StateGameScri
     probe.baselineFilter = value;
     probe.filterType = VariantTypeName(value);
   }
+}
+
+@addMethod(PlayerPuppet)
+public final func NCCFlightProbeInvalidateCapture(scriptInterface: ref<StateGameScriptInterface>) {
+  let probe = this.nccCollisionFlightProbe;
+  let empty: Variant;
+  if !IsDefined(probe) || !IsDefined(scriptInterface) || scriptInterface.owner != this
+    || probe.ownFilterWrite || probe.capturedInterface != scriptInterface {
+    return;
+  }
+  // A failed scope invalidates future activation on this interface. Keep the
+  // active restoration baseline separate until the transition handler decides.
+  probe.capturedFilter = empty;
+  probe.capturedInterface = null;
 }
 
 @addMethod(PlayerPuppet)
@@ -299,7 +323,7 @@ public final func NCCFlightProbeSuspendForTransition(scriptInterface: ref<StateG
 }
 
 @addMethod(PlayerPuppet)
-public final func NCCFlightProbeObserveStateFilter(scriptInterface: ref<StateGameScriptInterface>, stateName: CName, machineName: CName) {
+public final func NCCFlightProbeObserveStateFilter(scriptInterface: ref<StateGameScriptInterface>, stateName: CName, machineName: CName, capturedFresh: Bool) {
   let probe = this.nccCollisionFlightProbe;
   let chosenFilter: Variant;
   let zeroFilter: Variant;
@@ -308,12 +332,12 @@ public final func NCCFlightProbeObserveStateFilter(scriptInterface: ref<StateGam
   if !IsDefined(probe) || (!probe.active && !probe.transitionPending) {
     return;
   }
-  // The native setter wrapper captured the original state method's successful
+  // A bounded native scope captured the original state method's successful
   // filter write before this callback. The native getter cannot read it back.
   chosenFilter = probe.capturedFilter;
   zeroFilter = this.NCCFlightProbeZeroFilter();
   zeroVelocity = this.NCCFlightProbeZeroVelocity();
-  if !IsDefined(probe.capturedInterface) || probe.capturedInterface != scriptInterface
+  if !capturedFresh || !IsDefined(probe.capturedInterface) || probe.capturedInterface != scriptInterface
     || !this.NCCFlightProbeIsFilter(chosenFilter) || !this.NCCFlightProbeIsFilter(zeroFilter)
     || !this.NCCFlightProbeIsVelocity(zeroVelocity) {
     // The original method has selected the next state's filter. Never replace
@@ -491,10 +515,19 @@ public func OnUpdate(timeDelta: Float, stateContext: ref<StateContext>, scriptIn
 
 @wrapMethod(LocomotionTransition)
 public final func SetCollisionFilter(scriptInterface: ref<StateGameScriptInterface>) {
+  let captureToken = scriptInterface.NCCFlightCaptureBegin();
   wrappedMethod(scriptInterface);
+  let capturedFilter = scriptInterface.NCCFlightCaptureEnd();
+  let capturedFresh = captureToken != 0u && IsDefined(capturedFilter)
+    && Equals(VariantTypeName(capturedFilter), n"physicsSimulationFilter");
   let player = scriptInterface.owner as PlayerPuppet;
   if IsDefined(player) {
-    player.NCCFlightProbeObserveStateFilter(scriptInterface, this.GetStateName(), this.GetStateMachineName());
+    if capturedFresh {
+      player.NCCFlightProbeCaptureFilter(scriptInterface, capturedFilter);
+    } else {
+      player.NCCFlightProbeInvalidateCapture(scriptInterface);
+    }
+    player.NCCFlightProbeObserveStateFilter(scriptInterface, this.GetStateName(), this.GetStateMachineName(), capturedFresh);
   }
 }
 
