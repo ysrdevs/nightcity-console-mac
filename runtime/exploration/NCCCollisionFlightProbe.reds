@@ -1,5 +1,5 @@
 // Experimental 1.8 feasibility probe, installed only in the isolated test profile.
-// No gravity changes. A 30-second limit and every normal stop return to start.
+// No gravity changes. A 10-second limit and every normal stop return to start.
 // Native state setters returning true do not prove actual collision passage.
 
 class NCCCollisionFlightProbeState extends IScriptable {
@@ -69,9 +69,26 @@ public final func NCCFlightInput() -> Uint32 {
 
 @addMethod(PlayerPuppet)
 public final func NCCFlightProbeToggle() -> String {
-  // Keep movement disabled until the new native capture has passed its live
-  // read-only check. The console command must obey the same restriction as UI.
-  return "Flight movement is disabled in this capture test. Use Validate flight.";
+  let probe = this.nccCollisionFlightProbe;
+  if !IsDefined(probe) {
+    return "Flight refused: validate and capture a normal locomotion filter first";
+  }
+  if probe.active || probe.requested || probe.transitionPending {
+    probe.requested = false;
+    probe.status = "Requested: return and restore";
+    return probe.status;
+  }
+  if probe.validationRequested {
+    return "Flight refused: read-only validation is still pending";
+  }
+  if !IsDefined(probe.capturedInterface) || !this.NCCFlightProbeIsFilter(probe.capturedFilter) {
+    return "Flight refused: no valid normal collision filter has been captured";
+  }
+  // The next ordinary update still verifies READY, current-interface identity,
+  // grounded stand/crouch, and all setter Variants before enabling movement.
+  probe.requested = true;
+  probe.status = "Requested: waiting for grounded locomotion";
+  return probe.status;
 }
 
 @addMethod(PlayerPuppet)
@@ -342,10 +359,15 @@ public final func NCCFlightProbeObserveStateFilter(scriptInterface: ref<StateGam
     || !this.NCCFlightProbeIsVelocity(zeroVelocity) {
     // The original method has selected the next state's filter. Never replace
     // that value with ZERO if its actual restoration value cannot be read.
+    probe.status = "Stopped: fresh collision capture failed; native filter retained";
+    if probe.active && IsDefined(scriptInterface) && scriptInterface.owner == this
+      && !this.IsDead() && !scriptInterface.IsMountedToObject() {
+      GameInstance.GetTeleportationFacility(this.GetGame()).Teleport(this, probe.start, probe.startFacing);
+      probe.status = "Stopped: fresh collision capture failed; return requested; native filter retained";
+    }
     probe.requested = false;
     probe.active = false;
     probe.transitionPending = false;
-    probe.status = "Stopped: new state filter could not be read; native filter retained";
     probe.interfaceRef = null;
     return;
   }
@@ -391,6 +413,22 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
   let zeroFilter: Variant;
   let zeroVelocity: Variant;
   if !IsDefined(probe) {
+    return;
+  }
+  if probe.active && (!IsDefined(scriptInterface) || scriptInterface.owner != this
+    || probe.interfaceRef != scriptInterface) {
+    // Never apply an old state's baseline or ZERO through a different context.
+    // Only request the safe return when the current context still owns us.
+    probe.status = "Stopped: locomotion context changed; new state filter untouched";
+    if IsDefined(scriptInterface) && scriptInterface.owner == this
+      && !this.IsDead() && !scriptInterface.IsMountedToObject() {
+      GameInstance.GetTeleportationFacility(this.GetGame()).Teleport(this, probe.start, probe.startFacing);
+      probe.status = "Stopped: locomotion context changed; return requested; new state filter untouched";
+    }
+    probe.requested = false;
+    probe.active = false;
+    probe.transitionPending = false;
+    probe.interfaceRef = null;
     return;
   }
   if probe.validationRequested {
@@ -460,8 +498,8 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
     probe.active = true;
   }
   probe.elapsed += MaxF(timeDelta, 0.0);
-  if probe.elapsed >= 30.0 {
-    this.NCCFlightProbeRestore(scriptInterface, "30-second probe complete", true);
+  if probe.elapsed >= 10.0 {
+    this.NCCFlightProbeRestore(scriptInterface, "10-second probe complete", true);
     return;
   }
   dt = ClampF(timeDelta, 0.0, 0.05);

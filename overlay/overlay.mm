@@ -93,6 +93,12 @@ __attribute__((visibility("default"))) uint32_t nightcity_flight_capture_begin(v
 __attribute__((visibility("default"))) uint32_t nightcity_flight_capture_consume(void* context, uint32_t depth, void* output) {
     return nightcity::flight_capture::consume(reinterpret_cast<uintptr_t>(context), depth, output);
 }
+__attribute__((visibility("default"))) uint32_t nightcity_flight_capture_owned_begin() {
+    return nightcity::flight_capture::ownedBegin();
+}
+__attribute__((visibility("default"))) uint32_t nightcity_flight_capture_owned_end() {
+    return nightcity::flight_capture::ownedEnd();
+}
 __attribute__((visibility("default"))) uint32_t nightcity_flight_capture_prepare(void* context, uint32_t enumValue, const void* variant, void* candidate) {
     return nightcity::flight_capture::prepare(reinterpret_cast<uintptr_t>(context), enumValue, variant, static_cast<nightcity::flight_capture::Candidate*>(candidate));
 }
@@ -1229,12 +1235,17 @@ static void drawQuickTab() {
 }
 
 static void drawExplorationTab() {
-    ImGui::TextUnformatted("Flight validation");
-    ImGui::TextWrapped("Flight is disabled in this diagnostic build while collision restoration is being corrected. Validate checks input and physics value types without changing collision or moving your character.");
+    ImGui::TextUnformatted("Experimental flight");
+    ImGui::TextWrapped("This private test returns you to your starting point after 10 seconds. Start on clear ground and do not save during flight.");
+    if (ImGui::Button("Start / stop flight")) runLabeled("flight toggle", "Flight toggle requested. Check Console for status.");
+    ImGui::SameLine();
+    if (ImGui::Button("Return to start")) runLabeled("flight return", "Return and collision restoration requested.");
+    ImGui::TextWrapped("Close F1 to move: WASD, Space up, Control down, Shift boost, Option precision.");
+    ImGui::Separator();
     if (ImGui::Button("Validate flight")) runLabeled("flight validate", "Read-only flight validation requested. Check flight status for results.");
     ImGui::SameLine();
     if (ImGui::Button("Check flight status")) runLabeled("flight status", "Flight status requested in Console.");
-    ImGui::TextWrapped("Load a save, stand on clear ground, click Validate flight, then Check flight status. Results appear in the Console tab.");
+    ImGui::TextWrapped("Before the first flight: Validate flight, close F1, then crouch and stand to capture the normal collision filter. Validate again and check status. Results appear in the Console tab.");
 }
 
 // ---- Creator: build a custom iconic weapon IN-PROCESS (ported from makeweapon.py). No Python, no

@@ -23,7 +23,7 @@ HOST = r'''
 #include <thread>
 #include <vector>
 
-constexpr uintptr_t beginFn = 0xb1, endFn = 0xe1, wrapperFn = 0xabc;
+constexpr uintptr_t beginFn = 0xb1, endFn = 0xe1, ownedFn = 0xa1, wrapperFn = 0xabc;
 constexpr uintptr_t originalReturn = 0xa1b2c3d4;
 constexpr uint64_t beforeGuard = 0x1122334455667788, afterGuard = 0x99aabbccddeeff00;
 alignas(8) static unsigned char fakeType[16];
@@ -33,7 +33,7 @@ struct GuardedVariant { uint64_t before = beforeGuard; Variant value; uint64_t a
 struct GuardedToken { uint32_t before = 0x11223344, value = 0xdeadbeef, after = 0xaabbccdd; };
 struct Request { uint32_t mode, configured, nesting; uint64_t seed; };
 enum Mode { Inline, Heap, WrongEnum, WrongType, Refused, WrongContext, OwnWrite,
-            NestedSame, NestedOther, NullVariant };
+            NestedSame, NestedOther, NullVariant, OuterOwnWrite, OuterOwnThenOriginal };
 struct ExpectedSetter {
     void* context = nullptr;
     uint32_t state = 0;
@@ -42,8 +42,10 @@ struct ExpectedSetter {
     bool accepted = false;
 };
 static thread_local ExpectedSetter expected;
+struct ExpectedOwned { void* context; void* frame; void* output; void* resultType; };
+static thread_local ExpectedOwned expectedOwned{};
 static thread_local uint32_t failures = 0;
-static std::atomic<uint64_t> setterCalls{0}, beginCalls{0}, endCalls{0};
+static std::atomic<uint64_t> setterCalls{0}, beginCalls{0}, endCalls{0}, ownedCalls{0};
 
 static uintptr_t typeToken() { return reinterpret_cast<uintptr_t>(fakeType); }
 static bool guardsOK(const GuardedVariant& value) {
@@ -71,6 +73,7 @@ __attribute__((noinline,optnone,visibility("default"))) uintptr_t ncc_capture_ex
 static void invokeSetter(uint32_t mode, void* context, uint64_t seed) {
     uint64_t* heap = nullptr;
     Variant value{typeToken() | 1, {seed ^ 0x123456789abcdef0, seed ^ 0xfedcba9876543210}};
+    if (mode == OwnWrite) value.payload[0] = value.payload[1] = 0;
     if (mode == Heap) {
         heap = new uint64_t[2]{value.payload[0], value.payload[1]};
         value.type = typeToken();
@@ -89,6 +92,18 @@ static void invokeSetter(uint32_t mode, void* context, uint64_t seed) {
     if (heap) { heap[0] = heap[1] = 0; delete[] heap; }
 }
 
+static void invokeOwned(void* context, uint32_t nesting) {
+    Request request{OwnWrite, 1, nesting, 0};
+    GuardedToken result;
+    const auto previous = expectedOwned;
+    expectedOwned = {context, &request, &result.value, reinterpret_cast<void*>(0xface)};
+    if (ncc_capture_executor(reinterpret_cast<void*>(ownedFn), context, &request,
+        &result.value, reinterpret_cast<void*>(0xface)) != originalReturn) failures |= 4096;
+    if (result.before != 0x11223344 || result.after != 0xaabbccdd || result.value != 0x87654321)
+        failures |= 8192;
+    expectedOwned = previous;
+}
+
 extern "C" {
 __attribute__((noinline,optnone,visibility("default"))) uintptr_t ncc_capture_executor(
     void* fn, void* context, void* frame, void* output, void* resultType) {
@@ -99,6 +114,17 @@ __attribute__((noinline,optnone,visibility("default"))) uintptr_t ncc_capture_ex
     } else if (function == endFn) {
         endCalls.fetch_add(1, std::memory_order_relaxed);
         if (output) std::memset(output, 0, sizeof(Variant)); // Empty Variant stub.
+    } else if (function == ownedFn) {
+        ownedCalls.fetch_add(1, std::memory_order_relaxed);
+        if (context != expectedOwned.context || frame != expectedOwned.frame ||
+            output != expectedOwned.output || resultType != expectedOwned.resultType) failures |= 16384;
+        const auto request = *static_cast<const Request*>(frame);
+        // Model the exact owned script method's body, including a reentrant
+        // owned call. Both ZERO setters must execute but must not become A.
+        invokeSetter(OwnWrite, context, 0);
+        if (request.nesting) invokeOwned(context, request.nesting - 1);
+        invokeSetter(OwnWrite, context, 0);
+        if (output) *static_cast<uint32_t*>(output) = 0x87654321;
     } else if (function == wrapperFn) {
         const auto request = *static_cast<const Request*>(frame);
         if (request.mode != OwnWrite) {
@@ -119,6 +145,20 @@ __attribute__((noinline,optnone,visibility("default"))) uintptr_t ncc_capture_ex
             if (!guardsOK(nested)) failures |= 128;
             checkVariant(nested.value, request.configured, inner.seed);
         }
+        if (request.mode == OuterOwnWrite || request.mode == OuterOwnThenOriginal) {
+            // A is active at this depth. A same-owner nested scope captures B
+            // and consumes it, leaving A active while owned ZERO writes run.
+            Request inner{Inline, request.configured, 0, request.seed + 1};
+            GuardedVariant nested;
+            if (ncc_capture_executor(reinterpret_cast<void*>(wrapperFn), context, &inner,
+                &nested.value, nullptr) != originalReturn) failures |= 64;
+            if (!guardsOK(nested)) failures |= 128;
+            checkVariant(nested.value, request.configured, inner.seed);
+            invokeOwned(context, request.nesting);
+            // Exclusion must stop when the owned method returns. A later real
+            // original C still replaces A as the last accepted baseline.
+            if (request.mode == OuterOwnThenOriginal) invokeSetter(Inline, context, request.seed + 2);
+        }
         if (ncc_capture_executor(reinterpret_cast<void*>(endFn), context, nullptr, output, resultType) != originalReturn)
             failures |= 256;
     }
@@ -128,6 +168,7 @@ __attribute__((visibility("default"))) void* ncc_capture_type() { return fakeTyp
 __attribute__((visibility("default"))) uint64_t ncc_capture_setter_calls() { return setterCalls.load(); }
 __attribute__((visibility("default"))) uint64_t ncc_capture_begin_calls() { return beginCalls.load(); }
 __attribute__((visibility("default"))) uint64_t ncc_capture_end_calls() { return endCalls.load(); }
+__attribute__((visibility("default"))) uint64_t ncc_capture_owned_calls() { return ownedCalls.load(); }
 __attribute__((visibility("default"))) uint32_t ncc_capture_run(uint32_t mode, uint32_t configured,
     uint32_t nesting, uint64_t seed, void* output) {
     failures = 0;
@@ -136,8 +177,9 @@ __attribute__((visibility("default"))) uint32_t ncc_capture_run(uint32_t mode, u
     if (ncc_capture_executor(reinterpret_cast<void*>(wrapperFn), reinterpret_cast<void*>(0x2000),
         &request, &result.value, nullptr) != originalReturn) failures |= 512;
     if (!guardsOK(result)) failures |= 1024;
-    const bool valid = configured && (mode == Inline || mode == Heap || mode == NestedSame || mode == NestedOther);
-    checkVariant(result.value, valid, seed);
+    const bool valid = configured && (mode == Inline || mode == Heap || mode == NestedSame ||
+        mode == NestedOther || mode == OuterOwnWrite || mode == OuterOwnThenOriginal);
+    checkVariant(result.value, valid, mode == OuterOwnThenOriginal ? seed + 2 : seed);
     if (output) std::memcpy(output, &result.value, sizeof(Variant));
     // A subsequent own write and unmatched End cannot reuse the earlier capture.
     invokeSetter(OwnWrite, reinterpret_cast<void*>(0x2000), seed + 100);
@@ -153,7 +195,8 @@ __attribute__((visibility("default"))) uint32_t ncc_capture_workers(uint32_t ite
     for (uint32_t thread = 0; thread < 4; ++thread) threads.emplace_back([&, thread] {
         for (uint32_t i = 0; i < iterations; ++i) {
             const uint64_t seed = (uint64_t(thread) << 32) | i;
-            for (uint32_t mode : {uint32_t(Inline), uint32_t(Heap), uint32_t(NestedSame), uint32_t(NestedOther), uint32_t(Refused)})
+            for (uint32_t mode : {uint32_t(Inline), uint32_t(Heap), uint32_t(NestedSame), uint32_t(NestedOther),
+                                 uint32_t(Refused), uint32_t(OuterOwnWrite), uint32_t(OuterOwnThenOriginal)})
                 problems.fetch_or(ncc_capture_run(mode, 1, 3, seed, nullptr));
         }
     });
@@ -177,12 +220,12 @@ try {
  let entries=0,internalEntries=0,leaves=0;
  const gate=createExecutorGate((fn,ctx,frame)=>{
    entries++;
-   if(fn.equals(ptr(0xb1))||fn.equals(ptr(0xe1)))internalEntries++;
+   if(fn.equals(ptr(0xb1))||fn.equals(ptr(0xe1))||fn.equals(ptr(0xa1)))internalEntries++;
    return 1;
  },()=>{leaves++;});
  globalThis.keepGate=gate;
  assert(gate.flightCaptureAvailable,'production capture exports available');
- gate.flightCaptureMethods(ptr(0xb1),ptr(0xe1));gate.observers(true);
+ gate.flightCaptureMethods(ptr(0xb1),ptr(0xe1),ptr(0xa1));gate.observers(true);
  Interceptor.attach(Module.getGlobalExportByName('ncc_capture_executor'),gate.callbacks);
  Interceptor.flush();
  const native=(name,ret,args)=>new NativeFunction(Module.getGlobalExportByName(name),ret,args);
@@ -191,6 +234,7 @@ try {
  const setterCalls=native('ncc_capture_setter_calls','uint64',[]);
  const beginCalls=native('ncc_capture_begin_calls','uint64',[]);
  const endCalls=native('ncc_capture_end_calls','uint64',[]);
+ const ownedCalls=native('ncc_capture_owned_calls','uint64',[]);
  const workers=native('ncc_capture_workers','uint',['uint']);
  const output=Memory.alloc(40);const result=output.add(8);
  const guarded=()=>{output.writeU64(uint64('0x1122334455667788'));output.add(32).writeU64(uint64('0x99aabbccddeeff00'));result.writeByteArray(new Uint8Array(24));};
@@ -218,6 +262,22 @@ try {
    assert(internalEntries===0&&leaves===0,'Begin/End never enter JavaScript');
  }
  console.log('PASS native capture integration: unconfigured, inline and heap snapshots, exact 24-byte guards, original arguments/results, wrong enum/type/context/null, rejected original, own writes excluded, natural executor scopes and nested owners');
+ for(const mode of [10,11]) {
+   guarded();before=entries;const seed=0x7890+mode;
+   const settersBefore=setterCalls().toNumber(),ownedBefore=ownedCalls().toNumber();
+   const code=run(mode,1,2,seed,result);
+   assert(code===0,'outer baseline after nested owned ZERO mode '+mode+': 0x'+code.toString(16));
+   const expectedSeed=seed+(mode===11?2:0);
+   assert(result.readPointer().equals(type.or(1)),'outer owned-write result stays inline');
+   assert(result.add(8).readU64().equals(uint64('0x123456789abcdef0').xor(expectedSeed)),'outer baseline A or later original C first word');
+   assert(result.add(16).readU64().equals(uint64('0xfedcba9876543210').xor(expectedSeed)),'outer baseline A or later original C second word');
+   checkGuards();
+   assert(entries===before+2,'only outer and nested original wrappers enter JavaScript');
+   assert(internalEntries===0&&leaves===0,'owned method and nested owned methods stay native');
+   assert(ownedCalls().toNumber()===ownedBefore+3,'all three original owned method bodies execute');
+   assert(setterCalls().toNumber()===settersBefore+(mode===11?10:9),'all original and ZERO setters execute once');
+ }
+ console.log('PASS native capture owned exclusion: outer A survives nested same-owner B and nested owned ZERO setters, later original C replaces A, original owned arguments/results preserved, no JavaScript owned-method callbacks');
  gate.busy(true);before=entries;
  const concurrent=workers(100);
  assert(concurrent===0,'four-thread nested capture and result isolation: 0x'+concurrent.toString(16));
@@ -264,9 +324,24 @@ def main():
                                text=True, timeout=60, check=True)
     output = completed.stdout + completed.stderr
     (directory / 'native-flight-capture.txt').write_text(output)
-    required = ['PASS native capture integration:', 'PASS native capture concurrency:', 'host completed']
+    required = ['PASS native capture integration:', 'PASS native capture owned exclusion:',
+                'PASS native capture concurrency:', 'host completed']
     if 'FAIL' in output or any(marker not in output for marker in required):
         raise AssertionError(output)
+    # Bind a nearby, nonmatching owned method in a fresh host. The exact same
+    # sequence must reproduce the original A -> ZERO corruption. This verifies
+    # that the regression actually depends on production owned-write exclusion.
+    negative = TEST.replace('ptr(0xb1),ptr(0xe1),ptr(0xa1)', 'ptr(0xb1),ptr(0xe1),ptr(0xa2)', 1)
+    try:
+        (directory / 'probe.js').write_text(gate + negative)
+        rejected = subprocess.run([str(directory / 'host'), str(gadget)], capture_output=True,
+                                  text=True, timeout=60, check=True)
+        negative_output = rejected.stdout + rejected.stderr
+        (directory / 'native-flight-capture-negative-control.txt').write_text(negative_output)
+        if 'outer baseline after nested owned ZERO mode 10: 0x1' not in negative_output:
+            raise AssertionError('Missing exact owned-write negative-control failure:\n' + negative_output)
+    finally:
+        (directory / 'probe.js').write_text(gate + TEST)
     report = {
         'isolated_host_not_game_acceptance': True,
         'runtime_sha256': hashlib.sha256(runtime.encode()).hexdigest(),
@@ -275,12 +350,16 @@ def main():
         'gadget_sha256': hashlib.sha256(gadget.read_bytes()).hexdigest(),
         'threads': 4,
         'worker_iterations': 100,
+        'owned_write_negative_control': 'Nonmatching owned method reproduces outer baseline corruption (0x1)',
         'checks': ['production exports and CModule factories', 'unconfigured fail closed',
                    'exact inline and heap source captures', 'owned payload after source lifetime',
                    '24-byte output guards and 4-byte Begin guards', 'original setter arguments and bool return unchanged',
                    'wrong enum, type, context and null rejected', 'false original result not captured',
                    'own writes outside capture ignored', 'natural Begin/setter/End executor route',
                    'Begin/End avoid JavaScript callbacks', 'nested same/different contexts',
+                   'outer baseline survives nested owned ZERO writes after nested capture consumed',
+                   'later accepted original replaces baseline after owned exclusion ends',
+                   'owned method arguments and return unchanged without JavaScript callbacks',
                    'four-thread scope and result isolation', 'original Begin/End stub execution preserved'],
     }
     (directory / 'results.json').write_text(json.dumps(report, indent=2) + '\n')

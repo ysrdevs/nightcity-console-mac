@@ -178,6 +178,56 @@ int main() {
         assert(capture::begin(inner, 3)); accepted(inner, {3, 30});
         expect(inner, 3, {3, 30}); expect(ownerA, 2, {2, 20});
     }
+
+    // Regression: consuming an inner scope leaves the same-interface outer
+    // scope active. The inner wrapper's subsequent own ZERO write must not
+    // overwrite the outer original filter while that native scope is open.
+    assert(capture::begin(ownerA, 2)); accepted(ownerA, {2, 20});
+    assert(capture::begin(ownerA, 3)); accepted(ownerA, {3, 30});
+    expect(ownerA, 3, {3, 30});
+    assert(capture::ownedBegin() == 1);
+    assert(!capture::prepare(ownerA, 32, &zero.value, &candidate));
+    assert(!capture::finish(&candidate, true));
+    assert(capture::ownedEnd() == 1);
+    expect(ownerA, 2, {2, 20});
+
+    // A second legitimate setter after the guarded write is still captured.
+    assert(capture::begin(ownerA, 2)); accepted(ownerA, {2, 20});
+    assert(capture::begin(ownerA, 3)); accepted(ownerA, {3, 30});
+    expect(ownerA, 3, {3, 30});
+    assert(capture::ownedBegin() == 1);
+    assert(capture::ownedBegin() == 1);
+    assert(!capture::prepare(ownerA, 32, &zero.value, &candidate));
+    assert(capture::ownedEnd() == 1);
+    assert(!capture::prepare(ownerA, 32, &zero.value, &candidate));
+    assert(capture::ownedEnd() == 1);
+    accepted(ownerA, {4, 40}); expect(ownerA, 2, {4, 40});
+
+    // An outer original call may remain in flight during a nested own call.
+    assert(capture::begin(ownerA, 2));
+    const OwnedVariant original({9, 90});
+    auto originalCandidate = prepare(ownerA, original.value);
+    assert(capture::ownedBegin() == 1);
+    assert(!capture::prepare(ownerA, 32, &zero.value, &candidate));
+    assert(capture::ownedEnd() == 1);
+    assert(capture::finish(&originalCandidate, true));
+    expect(ownerA, 2, {9, 90});
+
+    // No publication while suppressed, even for an earlier prepared candidate.
+    assert(capture::begin(ownerA, 2)); accepted(ownerA, {7, 70});
+    originalCandidate = prepare(ownerA, original.value);
+    assert(capture::ownedBegin() == 1);
+    assert(!capture::finish(&originalCandidate, true));
+    assert(capture::ownedEnd() == 1);
+    assert(!capture::finish(&originalCandidate, true));
+    expect(ownerA, 2, {7, 70});
+
+    // Unbalanced guard exit cannot leave a previously captured scope available.
+    assert(capture::begin(ownerA, 2)); accepted(ownerA, {2, 20});
+    assert(capture::ownedEnd() == 0);
+    assert(!capture::consume(ownerA, 2, &empty));
+    assert(capture::begin(ownerA, 2)); accepted(ownerA, {5, 50});
+    expect(ownerA, 2, {5, 50});
     assert(capture::begin(ownerA, 2)); accepted(ownerA, {2, 20});
     assert(capture::begin(ownerB, 4));
     auto stale = prepare(ownerB, zero.value);
@@ -215,7 +265,13 @@ int main() {
         for (uint64_t sequence = 0; sequence < 500; ++sequence) {
             assert(capture::begin(ownerA, 2)); accepted(ownerA, {worker, sequence});
             assert(capture::begin(ownerA, 3)); accepted(ownerA, {sequence, worker});
-            expect(ownerA, 3, {sequence, worker}); expect(ownerA, 2, {worker, sequence});
+            expect(ownerA, 3, {sequence, worker});
+            assert(capture::ownedBegin() == 1);
+            const OwnedVariant own({0, 0});
+            capture::Candidate suppressed;
+            assert(!capture::prepare(ownerA, 32, &own.value, &suppressed));
+            assert(capture::ownedEnd() == 1);
+            expect(ownerA, 2, {worker, sequence});
         }
     });
     for (auto& worker : workers) worker.join();
@@ -230,5 +286,5 @@ int main() {
     expect(ownerA, 2, {77, 88});
 
     assert(OwnedVariant::allocations == OwnedVariant::frees);
-    std::puts("Flight capture: immutable configuration, inline/heap payload ownership, 24-byte output guards, rejection, scopes, stale cleanup, overflow, own-write exclusion and eight-thread isolation passed");
+    std::puts("Flight capture: immutable configuration, inline/heap payload ownership, 24-byte output guards, rejection, scopes, stale cleanup, overflow, nested own-write suppression, underflow cleanup and eight-thread isolation passed");
 }

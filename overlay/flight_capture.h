@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <type_traits>
 
 namespace nightcity::flight_capture {
@@ -51,6 +52,8 @@ struct Scope {
 struct ThreadState {
     const uint64_t id = nextThreadId.fetch_add(1, std::memory_order_relaxed);
     uint32_t nextSerial = 1;
+    uint32_t ownedDepth = 0;
+    bool captureDisabled = false;
     std::size_t count = 0;
     std::array<Scope, maxScopes> scopes{};
 };
@@ -98,7 +101,7 @@ inline bool configure(uintptr_t type, uint32_t size, uint32_t alignment,
 
 inline uint32_t begin(uintptr_t context, uint32_t executorDepth) noexcept {
     auto& state = detail::threadState();
-    if (!detail::config() || !context || !executorDepth || !state.id || !state.nextSerial) {
+    if (!detail::config() || !context || !executorDepth || !state.id || !state.nextSerial || state.captureDisabled) {
         state.count = 0;
         return 0;
     }
@@ -116,13 +119,39 @@ inline uint32_t begin(uintptr_t context, uint32_t executorDepth) noexcept {
     return serial;
 }
 
+// The executor hook brackets the exact flight-owned filter writer's original
+// body. A redscript Bool alone cannot exclude a setter from an outer native
+// capture scope that remains active after a nested scope has been consumed.
+inline uint32_t ownedBegin() noexcept {
+    auto& state = detail::threadState();
+    if (state.captureDisabled) return 0;
+    if (state.ownedDepth == std::numeric_limits<uint32_t>::max()) {
+        state.count = 0;
+        state.captureDisabled = true;
+        return 0;
+    }
+    ++state.ownedDepth;
+    return 1;
+}
+
+inline uint32_t ownedEnd() noexcept {
+    auto& state = detail::threadState();
+    if (state.captureDisabled || !state.ownedDepth) {
+        state.count = 0;
+        return 0;
+    }
+    --state.ownedDepth;
+    return 1;
+}
+
 inline bool prepare(uintptr_t context, uint32_t enumValue, const void* variant,
                     Candidate* candidate) noexcept {
     if (!candidate) return false;
     *candidate = {};
     const auto* config = detail::config();
     auto& state = detail::threadState();
-    if (!config || !state.count || !context || !variant || enumValue != config->enumValue)
+    if (!config || state.captureDisabled || state.ownedDepth || !state.count ||
+        !context || !variant || enumValue != config->enumValue)
         return false;
     const auto& scope = state.scopes[state.count - 1];
     if (scope.context != context) return false;
@@ -152,7 +181,8 @@ inline bool finish(Candidate* candidate, bool accepted) noexcept {
     const Candidate prepared = *candidate;
     candidate->valid = 0;
     auto& state = detail::threadState();
-    if (!accepted || !prepared.valid || !detail::config() || prepared.threadId != state.id ||
+    if (!accepted || !prepared.valid || !detail::config() || state.captureDisabled || state.ownedDepth ||
+        prepared.threadId != state.id ||
         !state.count || prepared.slot != state.count - 1)
         return false;
     auto& scope = state.scopes[prepared.slot];

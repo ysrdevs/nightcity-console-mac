@@ -8,8 +8,9 @@ const begin = source.indexOf('function ensureFlightCapture() {');
 const end = source.indexOf('function doFlight(action)', begin);
 assert(begin >= 0 && end > begin);
 const code = source.slice(begin, end);
-const hashes = { Variant: 0x101n, physicsSimulationFilter: 0x102n, physicsStateValue: 0x103n };
+const hashes = { Variant: 0x101n, physicsSimulationFilter: 0x102n, physicsStateValue: 0x103n, 'handle:gamestateMachineGameScriptInterface': 0x104n };
 const UINT32 = '0x3d2e9dd9e3c28d8c';
+const BOOL = '0xf7bdd5a7c820889d';
 const fingerprint = 'ff4301d1f65702a9f44f03a9fd7b04a9fd030191f30302aa';
 function type(hash, size, alignment) {
   return { hash, size, alignment, isNull: () => false,
@@ -22,20 +23,26 @@ function fixture() {
   const methods = {
     NCCFlightCaptureBegin: method(type(UINT32, 4, 4)),
     NCCFlightCaptureEnd: method(type('0x101', 24, 8)),
+    NCCFlightProbeWriteFilter: { ...method(type(BOOL, 1, 1)), params: 2, interfaceHash: '0x104', valueHash: '0x101', paramsNull: false },
     ZERO: method(type('0x102', 16, 8), true),
   };
   for (const [name, value] of Object.entries(methods)) {
-    value.fn = { name, add: offset => { assert.equal(offset, 0x30); return { readU32: () => value.params }; } };
+    value.fn = { name, add: offset => {
+      if (offset === 0x30) return { readU32: () => value.params };
+      assert.equal(offset, 0x28);
+      return { readPointer: () => ({ isNull: () => value.paramsNull, readPointer: () => ({ readPointer: () => ({ hash: value.interfaceHash }) }),
+        add: entry => { assert.equal(entry, 8); return { readPointer: () => ({ readPointer: () => ({ hash: value.valueHash }) }) }; } }) };
+    } };
   }
   const state = { bytes: fingerprint, enumValue: 32, hooks: [], bindings: [], logs: [], failAttach: false };
   const address = { readByteArray: count => { assert.equal(count, 24); return Uint8Array.from(Buffer.from(state.bytes, 'hex')).buffer; } };
   const gate = { flightCaptureAvailable: true, flightCaptureMethods: (...args) => state.bindings.push(args) };
   const context = vm.createContext({
-    flightCaptureHook: null, executorGate: gate, T_U32: UINT32,
+    flightCaptureHook: null, executorGate: gate, T_U32: UINT32, T_BOOL: BOOL,
     fnv: name => { assert(name in hashes); return hashes[name]; },
     nameOf: value => value.hash,
     resolveAny(classes, name) {
-      assert(Array.from(classes).includes(name === 'ZERO' ? 'physicsSimulationFilter' : 'gamestateMachineGameScriptInterface'));
+      assert(Array.from(classes).includes(name === 'ZERO' ? 'physicsSimulationFilter' : name === 'NCCFlightProbeWriteFilter' ? 'gamePlayerPuppet' : 'gamestateMachineGameScriptInterface'));
       return methods[name];
     },
     resolveEnumByTypeHash(hash, name) {
@@ -67,6 +74,13 @@ for (const mutate of [
   f => { f.methods.NCCFlightCaptureEnd.retType.hash = UINT32; },
   f => { f.methods.NCCFlightCaptureEnd.retType.size = 16; },
   f => { f.methods.NCCFlightCaptureEnd.retType.alignment = 16; },
+  f => { delete f.methods.NCCFlightProbeWriteFilter; },
+  f => { f.methods.NCCFlightProbeWriteFilter.isStatic = true; },
+  f => { f.methods.NCCFlightProbeWriteFilter.params = 1; },
+  f => { f.methods.NCCFlightProbeWriteFilter.retType.hash = UINT32; },
+  f => { f.methods.NCCFlightProbeWriteFilter.paramsNull = true; },
+  f => { f.methods.NCCFlightProbeWriteFilter.interfaceHash = UINT32; },
+  f => { f.methods.NCCFlightProbeWriteFilter.valueHash = UINT32; },
   f => { f.methods.ZERO.isStatic = false; },
   f => { f.methods.ZERO.retType.hash = '0xffff'; },
   f => { f.methods.ZERO.retType.size = 24; },
@@ -86,7 +100,7 @@ for (const mutate of [
   const f = fixture(); f.run(); f.run();
   assert.equal(f.state.hooks.length, 1, 'repeat validation reuses one capture hook');
   assert.equal(f.state.bindings.length, 1);
-  assert.deepEqual(f.state.bindings[0], [f.methods.NCCFlightCaptureBegin.fn, f.methods.NCCFlightCaptureEnd.fn]);
+  assert.deepEqual(f.state.bindings[0], [f.methods.NCCFlightCaptureBegin.fn, f.methods.NCCFlightCaptureEnd.fn, f.methods.NCCFlightProbeWriteFilter.fn]);
   assert.equal(f.state.hooks[0][1], f.methods.ZERO.retType);
   assert.deepEqual(f.state.hooks[0].slice(2), [16, 8, 32]);
 }
