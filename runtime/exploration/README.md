@@ -4,7 +4,7 @@ This is an experimental, local test checkpoint based on released 1.7.1. It is no
 
 ## Current travel stage
 
-The travel build removes the prototype's 60-second, 128m and 32,768-update lifetime limits. The native movement bridge retains its finite-coordinate, per-step, current-context, physics/entity agreement and subsequent-readback checks. Diagnostic counters saturate instead of overflowing. The first destination-stop check passed as described below; wider travel and the remaining lifecycle checks are pending.
+The travel build removes the prototype's 60-second, 128m and 32,768-update lifetime limits. The native movement bridge retains its finite-coordinate, per-step, current-context, physics/entity agreement and subsequent-readback checks. Diagnostic counters saturate instead of overflowing. Destination stopping and a flight over 75 seconds passed as described below; the remaining travel lifecycle checks are pending.
 
 | Control | Behavior |
 | --- | --- |
@@ -21,7 +21,9 @@ The latest clear recovery position comes from a verified observed position, neve
 
 The **Exploration** tab sends `flight start`, `flight stop`, `flight resume`, `flight return` and `flight status`; validation and camera recording remain optional diagnostics. Legacy `toggle` means Start and `off` means Stop here. Every command requires game 2.5, an authoritative player lookup and its exact script signature. Start and Resume additionally require a native input snapshot and validated movement bridges. The next ordinary engine update independently checks READY and the request's focus generation. Stop, Return and Status remain callable without input readiness or new movement setup. No automatic JavaScript status polling is added.
 
-The user confirmed that **Stop here** leaves them at the new destination with normal walking and collision restored. They also tested an elevated stop and reported falling to the ground safely in that case. The current process had all 106 framework hooks installed and no recorded fault. A separate read-only status request could not resolve the current player (caught lookup errors), so it did not yield flight counters or restoration telemetry. This is user-confirmed destination-stop acceptance, not proof of safe falls at arbitrary heights. Travel beyond the old limits, pause/resume, optional return, blocked exits and compatibility checks remain pending for this build.
+The user confirmed that **Stop here** leaves them at the new destination with normal walking and collision restored. They also tested an elevated stop and reported falling to the ground safely in that case. The current process had all 106 framework hooks installed and no recorded fault. A separate read-only status request could not resolve the current player (caught lookup errors), so it did not yield flight counters or restoration telemetry. This is user-confirmed destination-stop acceptance, not proof of safe falls at arbitrary heights. The subsequent longer-flight check is recorded below; pause/resume, optional return, blocked exits and compatibility checks remain pending for this build.
+
+The user then confirmed flying for over 75 seconds and travelling far from the start without an automatic return, followed by Stop here retaining the destination and restoring normal walking. They also reported a successful high building landing. A later status resolved a different current player instance from the latest Start/Stop and showed fresh inactive flight state, zero movement counters and no unconfirmed restoration. Consequently it does not measure the earlier trip or establish its exact distance. All 106 hooks remained installed with no new fault-log entry. Longer travel and the tested landing are user-confirmed; pause/resume, optional return, blocked exits and current-build mod compatibility still need acceptance.
 
 ## Accepted prototype checkpoints and implementation background
 
