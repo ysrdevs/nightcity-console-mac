@@ -870,6 +870,28 @@ public final func NCCFlightProbeStatus() -> String {
 }
 
 @addMethod(PlayerPuppet)
+public const final func NCCFlightProbeOwnsMovement(const scriptInterface: ref<StateGameScriptInterface>) -> Bool {
+  let probe = this.nccCollisionFlightProbe;
+  return IsDefined(probe) && probe.active && IsDefined(scriptInterface)
+    && scriptInterface.owner == this && IsDefined(probe.interfaceRef)
+    && probe.interfaceRef == scriptInterface;
+}
+
+@wrapMethod(LocomotionTransition)
+protected const final func WantsToDodge(const stateContext: ref<StateContext>, const scriptInterface: ref<StateGameScriptInterface>) -> Bool {
+  if Equals(this.GetStateMachineName(), n"Locomotion") && IsDefined(scriptInterface) {
+    let player = scriptInterface.owner as PlayerPuppet;
+    if IsDefined(player) && player.NCCFlightProbeOwnsMovement(scriptInterface) {
+      // Control is flight descent while this exact interface owns movement.
+      // The original decision only checks eligibility and writes DodgeDirection;
+      // its caller still performs normal action-listener/decision bookkeeping.
+      return false;
+    }
+  }
+  return wrappedMethod(stateContext, scriptInterface);
+}
+
+@addMethod(PlayerPuppet)
 private final func NCCFlightProbeAllowed(stateName: CName, machineName: CName) -> Bool {
   return Equals(machineName, n"Locomotion")
     && (Equals(stateName, n"stand") || Equals(stateName, n"crouch")

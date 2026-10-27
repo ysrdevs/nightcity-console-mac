@@ -13,7 +13,7 @@ function body(name) {
   return source.slice(open+1,end-1).replace(/\/\/[^\n]*/g,'')
     .replace(/let (\w+): Vector4;/g,'let $1 = new Vector4();').replace(/let (\w+): Float;/g,'let $1 = 0;')
     .replace(/let (\w+): [^;]+;/g,'let $1;').replace(/([\w.]+) \/ (\d+)u/g,'Math.floor($1 / $2)')
-    .replace(/\b(\d+)u\b/g,'$1').replace(/\bn"/g,'"').replace(/\s+as PlayerPuppet/g,'')
+    .replace(/\b(\d+)u\b/g,'$1').replace(/\bn"/g,'"').replace(/scriptInterface.owner as PlayerPuppet/g,'AsPlayer(scriptInterface.owner)')
     .replace(/FromVariant<Vector4>/g,'FromVariant')
     .replaceAll('probe.target + probe.positionOriginDelta','Vector4.Add(probe.target,probe.positionOriginDelta)')
     .replaceAll('physicsPosition - entityPosition','Vector4.Sub(physicsPosition,entityPosition)')
@@ -36,7 +36,7 @@ class Vector4 {
 }
 class Vector3{constructor(X,Y,Z){Object.assign(this,{X,Y,Z});}}
 const methods={EnsureMenuListener:'',RequestStop:'reason',Pause:'reason',MenuChanged:'value',ObserveInput:'packet',
-  Count:'value',BoundedVector:'value,limit',Allowed:'stateName,machineName',Toggle:'',Prepare:'commandPacket',Return:'',
+  Count:'value',BoundedVector:'value,limit',Allowed:'stateName,machineName',OwnsMovement:'scriptInterface',Toggle:'',Prepare:'commandPacket',Return:'',
   StopHere:'',Resume:'commandPacket',Restore:'scriptInterface,reason,allowRecovery',
   RestoreAt:'scriptInterface,destination,facing,move,reason',ObserveExitPosition:'scriptInterface',ProcessExit:'scriptInterface',
   PositionRefused:'scriptInterface,reason',CaptureFilter:'scriptInterface,value',SuspendForTransition:'scriptInterface',
@@ -56,7 +56,7 @@ function fixture(){
     lastClearFacing:facing,lastClearanceProbePosition:s.entity,positionOriginDelta:new Vector4(),positionLastTarget:s.physics,positionReadbackPending:false,
     positionWritesIssued:0,positionReadbacks:0,positionRefusals:0,ticks:0,filterWrites:0,velocityWrites:0,maxObservedEntityRadius:0,
     maxPositionOriginDivergence:0,maxPositionReadbackDistance:0,elapsed:0,clearanceClock:0,clearanceProbes:0,capsuleHeight:1.8,capsuleRadius:.4});
-  const p={nccCollisionFlightProbe:defaults(),GetGame:()=>0,IsDead:()=>!!s.dead,GetWorldPosition:()=>s.entity,GetWorldOrientation:()=>facing,
+  const p={isPlayer:true,nccCollisionFlightProbe:defaults(),GetGame:()=>0,IsDead:()=>!!s.dead,GetWorldPosition:()=>s.entity,GetWorldOrientation:()=>facing,
     NCCFlightProbeIsFilter:v=>!!v?.valid,NCCFlightProbeIsVelocity:()=>true,NCCFlightProbeZeroVelocity:()=>({}),
     NCCFlightProbeZeroFilter:()=>({valid:true,zero:true}),NCCFlightCameraBefore:()=>false,NCCFlightCameraStartActive:()=>{},
     NCCFlightProbeCameraFacing:()=>facing,NCCFlightInput(){s.reads++;return s.packet;},
@@ -68,7 +68,7 @@ function fixture(){
     GetCameraSystem:()=>({GetActiveCameraRight:()=>new Vector4(1,0,0,0),GetActiveCameraForward:()=>new Vector4(0,1,0,0)}),
     NCCFlightWritePosition(v){s.positions++;s.physics=new Vector4(v.X,v.Y,v.Z,1);s.entity=s.physics;return !s.rejectPosition;}};
   const board={GetBool:()=>s.menu,RegisterListenerBool(id,owner,callback){if(s.registrationFails)return null;owner[callback](s.menu);return {};}};
-  const c=vm.createContext({Vector4,Vector3,FromVariant:v=>v.value,IsDefined:v=>v!==null&&v!==undefined,Equals:(a,b)=>a===b,NotEquals:(a,b)=>a!==b,
+  const c=vm.createContext({Vector4,Vector3,FromVariant:v=>v.value,AsPlayer:v=>v?.isPlayer?v:null,IsDefined:v=>v!==null&&v!==undefined,Equals:(a,b)=>a===b,NotEquals:(a,b)=>a!==b,
     AbsF:Math.abs,MinF:Math.min,MaxF:Math.max,ClampF:(n,a,b)=>Math.max(a,Math.min(n,b)),VariantTypeName:v=>v?.type||'physicsSimulationFilter',NameToString:v=>v,
     Quaternion:{ToEulerAngles:v=>v},GetAllBlackboardDefs:()=>({UI_System:{IsInMenu:'menu'}}),EngineTime:{ToFloat:v=>v},
     GameInstance:{GetBlackboardSystem:()=>({Get:()=>board}),GetSimTime:()=>s.time,GetDelaySystem:()=>({DelayCallbackNextFrame:cb=>s.callbacks.push(cb)}),
@@ -215,4 +215,38 @@ for(const unsafe of ['scene','mounted','dead','timeout']){
   f.p.NCCFlightProbeObserveStateFilter(f.si,'aimWalk','Locomotion',true);
   assert.equal(f.q.active,false,unsafe);assert.equal(f.s.zero,0);assert.equal(f.s.teleports.length,0);
 }
-console.log('PASS actual travel lifecycle, including scanner/jump/regular-landing handoffs, paused ownership and explicit unsafe-state rejection');
+function dodgeDecision(f, si=f.si, machine='Locomotion', originalResult=true) {
+  const calls=[];
+  const c=vm.createContext({IsDefined:v=>v!==null&&v!==undefined,Equals:(a,b)=>a===b,AsPlayer:v=>v?.isPlayer?v:null,
+    wrappedMethod:(...args)=>{calls.push(args);return originalResult;}});
+  const decision=vm.runInContext(`(function(stateContext,scriptInterface){${body('WantsToDodge')}})`,c);
+  const before={reads:f.s.reads,zero:f.s.zero,restores:f.s.restores,positions:f.s.positions,velocity:f.s.velocity};
+  const result=decision.call({GetStateMachineName:()=>machine},f.sc,si);
+  assert.deepEqual({reads:f.s.reads,zero:f.s.zero,restores:f.s.restores,positions:f.s.positions,velocity:f.s.velocity},before,
+    'dodge gating only reads script ownership; no native input polling or physics writes');
+  for(const args of calls){assert.equal(args.length,2);assert.equal(args[0],f.sc);assert.equal(args[1],si);}
+  return {result,calls:calls.length};
+}
+for(const state of ['active','paused','cleanup']){
+  const f=fixture().active();f.q.paused=state==='paused';
+  if(state==='cleanup'){f.q.stopRequested=true;f.q.restoreUnconfirmed=true;f.q.requested=false;}
+  assert.deepEqual(dodgeDecision(f),{result:false,calls:0},state);
+}
+for(const state of ['inactive','preparing','pending','missingProbe','staleInterface','missingInterface','foreignOwner','foreignPlayer','otherMachine']){
+  const f=fixture();let si=f.si,machine='Locomotion';
+  if(state==='preparing'){f.q.requested=true;f.q.preparePending=true;}
+  if(state==='pending'){f.q.requested=true;f.q.transitionPending=true;}
+  if(state==='missingProbe')f.p.nccCollisionFlightProbe=null;
+  if(state==='staleInterface'){f.q.active=true;si={...f.si};}
+  if(state==='missingInterface'){f.q.active=true;si=null;}
+  if(state==='foreignOwner'){f.q.active=true;si={...f.si,owner:{}};}
+  if(state==='foreignPlayer'){f.q.active=true;si={...f.si,owner:fixture().p};}
+  if(state==='otherMachine'){f.q.active=true;machine='LocomotionLowGravity';}
+  for(const originalResult of [false,true])assert.deepEqual(dodgeDecision(f,si,machine,originalResult),{result:originalResult,calls:1},state);
+}
+for(const stop of ['NCCFlightProbeStopHere','NCCFlightProbeReturn']){
+  const f=fixture().active();assert.deepEqual(dodgeDecision(f),{result:false,calls:0});
+  f.p[stop]();f.tick();assert.equal(f.q.active,false);
+  assert.deepEqual(dodgeDecision(f),{result:true,calls:1},'normal dash immediately returns after '+stop);
+}
+console.log('PASS actual travel lifecycle, supported handoffs and scoped dash decision veto with unchanged inactive/foreign-context behavior');
