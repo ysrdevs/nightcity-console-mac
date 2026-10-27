@@ -69,7 +69,7 @@ function fixture(){
     NCCFlightWritePosition(v){s.positions++;s.physics=new Vector4(v.X,v.Y,v.Z,1);s.entity=s.physics;return !s.rejectPosition;}};
   const board={GetBool:()=>s.menu,RegisterListenerBool(id,owner,callback){if(s.registrationFails)return null;owner[callback](s.menu);return {};}};
   const c=vm.createContext({Vector4,Vector3,FromVariant:v=>v.value,IsDefined:v=>v!==null&&v!==undefined,Equals:(a,b)=>a===b,NotEquals:(a,b)=>a!==b,
-    AbsF:Math.abs,MinF:Math.min,MaxF:Math.max,ClampF:(n,a,b)=>Math.max(a,Math.min(n,b)),VariantTypeName:v=>v?.type||'physicsSimulationFilter',
+    AbsF:Math.abs,MinF:Math.min,MaxF:Math.max,ClampF:(n,a,b)=>Math.max(a,Math.min(n,b)),VariantTypeName:v=>v?.type||'physicsSimulationFilter',NameToString:v=>v,
     Quaternion:{ToEulerAngles:v=>v},GetAllBlackboardDefs:()=>({UI_System:{IsInMenu:'menu'}}),EngineTime:{ToFloat:v=>v},
     GameInstance:{GetBlackboardSystem:()=>({Get:()=>board}),GetSimTime:()=>s.time,GetDelaySystem:()=>({DelayCallbackNextFrame:cb=>s.callbacks.push(cb)}),
       GetTeleportationFacility:()=>({Teleport(owner,pos){assert.equal(owner,p);s.teleports.push(pos);s.entity=pos;s.physics=pos;}})},
@@ -179,4 +179,40 @@ for(const invalid of ['type','origin','W','NaN','readback']){
   f.p.NCCFlightProbeCaptureFilter(f.si,{valid:true});assert.equal(f.q.restoreUnconfirmed,true);f.q.ownFilterWrite=false;
   f.p.NCCFlightProbeCaptureFilter(f.si,{valid:true});assert.equal(f.q.restoreUnconfirmed,false);
 }
-console.log('PASS actual travel lifecycle: setup, pause/resume/stop/return, unlimited bounded steps, current-state restoration, checkpoint recovery, cleanup retry, observed exit validation and idle/paused polling bounds');
+// These five vanilla states preserve the normal filter/update/exit callback
+// chain. Their real handoff must keep the current trip, including paused trips.
+const addedStates=['aimWalk','doubleJump','chargeJump','hoverJump','regularLand'];
+for(const stateName of addedStates)for(const paused of [false,true]){
+  const f=fixture().active(),anchor=f.q.start;f.q.paused=paused;
+  assert.equal(f.p.NCCFlightProbeAllowed(stateName,'Locomotion'),true,stateName);
+  f.p.NCCFlightProbeSuspendForTransition(f.si);
+  assert.equal(f.q.active,false);assert.equal(f.q.transitionPending,true);assert.equal(f.s.restores,1);
+  f.p.NCCFlightProbeCaptureFilter(f.si,{valid:true});
+  f.p.NCCFlightProbeObserveStateFilter(f.si,stateName,'Locomotion',true);
+  assert.equal(f.q.active,true,stateName);assert.equal(f.q.transitionPending,false);
+  assert.equal(f.q.paused,paused);assert.equal(f.q.start,anchor);assert.equal(f.s.teleports.length,0);
+  f.p.NCCFlightProbeUpdate(.02,f.sc,f.si,stateName,'Locomotion');
+  assert.equal(f.q.active,true);assert.equal(f.s.positions,1);assert.equal(f.s.teleports.length,0);
+  f.p.NCCFlightProbeStopHere();f.p.NCCFlightProbeUpdate(.02,f.sc,f.si,stateName,'Locomotion');
+  assert.equal(f.q.active,false);assert.equal(f.s.restores,2);assert.equal(f.s.teleports.length,0);
+}
+for(const [stateName,machine] of [
+  ['deathLand','Locomotion'],['hardLand','Locomotion'],['veryHardLand','Locomotion'],['knockdown','Locomotion'],
+  ['workspot','Locomotion'],['bodySlamJump','Locomotion'],['ladderJump','Locomotion'],['dodgeAir','Locomotion'],
+  ['aimWalk','LocomotionLowGravity'],['jump','LocomotionSwimming'],['stand','Scene'],
+]){
+  const f=fixture().active();assert.equal(f.p.NCCFlightProbeAllowed(stateName,machine),false);
+  f.p.NCCFlightProbeSuspendForTransition(f.si);const writes=f.s.zero;
+  f.p.NCCFlightProbeObserveStateFilter(f.si,stateName,machine,true);
+  assert.equal(f.q.active,false);assert.equal(f.q.requested,false);assert.equal(f.q.transitionPending,false);
+  assert.equal(f.s.zero,writes,'unsupported handoff cannot disable collision again');
+  assert.equal(f.s.teleports.length,0);assert.match(f.q.status,new RegExp(machine+'/'+stateName));
+}
+for(const unsafe of ['scene','mounted','dead','timeout']){
+  const f=fixture().active();f.p.NCCFlightProbeSuspendForTransition(f.si);
+  if(unsafe==='scene')f.si.IsSceneAnimationActive=()=>true;
+  if(unsafe==='mounted')f.s.mounted=true;if(unsafe==='dead')f.s.dead=true;if(unsafe==='timeout')f.s.time+=.1;
+  f.p.NCCFlightProbeObserveStateFilter(f.si,'aimWalk','Locomotion',true);
+  assert.equal(f.q.active,false,unsafe);assert.equal(f.s.zero,0);assert.equal(f.s.teleports.length,0);
+}
+console.log('PASS actual travel lifecycle, including scanner/jump/regular-landing handoffs, paused ownership and explicit unsafe-state rejection');

@@ -875,7 +875,9 @@ private final func NCCFlightProbeAllowed(stateName: CName, machineName: CName) -
     && (Equals(stateName, n"stand") || Equals(stateName, n"crouch")
       || Equals(stateName, n"preCrouch") || Equals(stateName, n"sprint")
       || Equals(stateName, n"sprintWindup") || Equals(stateName, n"fall")
-      || Equals(stateName, n"jump"));
+      || Equals(stateName, n"jump") || Equals(stateName, n"aimWalk")
+      || Equals(stateName, n"doubleJump") || Equals(stateName, n"chargeJump")
+      || Equals(stateName, n"hoverJump") || Equals(stateName, n"regularLand"));
 }
 
 @addMethod(PlayerPuppet)
@@ -1157,7 +1159,8 @@ public final func NCCFlightProbeObserveStateFilter(scriptInterface: ref<StateGam
     || this.IsDead() || scriptInterface.IsMountedToObject() || scriptInterface.IsPlayerInBraindance()
     || scriptInterface.IsSceneAnimationActive()
     || (probe.transitionPending && EngineTime.ToFloat(GameInstance.GetSimTime(this.GetGame())) > probe.transitionDeadline) {
-    this.NCCFlightProbeRestore(scriptInterface, "Stopped for locomotion transition", true);
+    this.NCCFlightProbeRestore(scriptInterface, "Stopped for locomotion transition: "
+      + NameToString(machineName) + "/" + NameToString(stateName), true);
     return;
   }
   if this.NCCFlightProbeWriteFilter(scriptInterface, zeroFilter) {
@@ -1362,7 +1365,8 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
   blocked = (packet & 256u) != 0u;
   if this.IsDead() || scriptInterface.IsMountedToObject() || scriptInterface.IsPlayerInBraindance()
     || scriptInterface.IsSceneAnimationActive() || !this.NCCFlightProbeAllowed(stateName, machineName) {
-    this.NCCFlightProbeRestore(scriptInterface, "Stopped for unsupported player state", true);
+    this.NCCFlightProbeRestore(scriptInterface, "Stopped for unsupported player state: "
+      + NameToString(machineName) + "/" + NameToString(stateName), true);
     return;
   }
   if !probe.requested {
