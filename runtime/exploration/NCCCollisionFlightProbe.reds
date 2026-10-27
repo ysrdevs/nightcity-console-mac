@@ -163,6 +163,140 @@ class NCCFlightCameraWindow extends IScriptable {
   }
 }
 
+class NCCFlightTransitionSample extends IScriptable {
+  public let phase: CName;
+  public let time: Float;
+  public let dt: Float;
+  public let callback: Int32;
+  public let serial: Uint32;
+  public let fromState: CName;
+  public let fromMachine: CName;
+  public let toState: CName;
+  public let toMachine: CName;
+  public let owned: Bool;
+  public let physicsValid: Bool;
+  public let physicsType: CName;
+  public let physics: Vector4;
+  public let entity: Vector4;
+  public let target: Vector4;
+  public let expected: Vector4;
+  public let recovery: Vector4;
+  public let error: Vector4;
+  public let pending: Bool;
+  public let active: Bool;
+  public let paused: Bool;
+  public let handoff: Bool;
+  public let writes: Int32;
+  public let captures: Int32;
+}
+
+class NCCFlightTransitionTrace extends IScriptable {
+  public let samples: array<ref<NCCFlightTransitionSample>>;
+  public let next: Int32;
+  public let count: Int32;
+  public let events: Int32;
+  public let callbacks: Int32;
+  public let elapsed: Float;
+  public let lastDelta: Float;
+  public let watch: Int32;
+  public let running: Bool;
+  public let stop: CName;
+  public let fromState: CName;
+  public let fromMachine: CName;
+  public let toState: CName;
+  public let toMachine: CName;
+  public let recovery: Vector4;
+
+  public func TraceInitialize() {
+    let i = 0;
+    this.next = 0;
+    this.count = 0;
+    this.events = 0;
+    this.callbacks = 0;
+    this.elapsed = 0.0;
+    this.lastDelta = 0.0;
+    this.watch = 0;
+    this.running = false;
+    this.stop = n"awaiting-activation";
+    while i < 32 {
+      ArrayPush(this.samples, new NCCFlightTransitionSample());
+      i += 1;
+    }
+  }
+
+  public func TraceAdvance(dt: Float) -> Bool {
+    if !this.running { return false; }
+    this.callbacks += 1;
+    this.lastDelta = dt;
+    if dt >= 0.0 && dt <= 1.0 { this.elapsed += dt; }
+    if this.callbacks >= 4096 || this.elapsed >= 30.0 {
+      this.TraceFreeze(n"budget");
+      return false;
+    }
+    return true;
+  }
+
+  public func TraceNext() -> ref<NCCFlightTransitionSample> {
+    let sample: ref<NCCFlightTransitionSample>;
+    if !this.TraceAvailable() { return null; }
+    this.events += 1;
+    sample = this.samples[this.next];
+    this.next += 1;
+    if this.next == 32 { this.next = 0; }
+    if this.count < 32 { this.count += 1; }
+    return sample;
+  }
+
+  public func TraceAvailable() -> Bool {
+    if !this.running { return false; }
+    if this.events >= 8192 || ArraySize(this.samples) != 32 {
+      this.TraceFreeze(n"event-budget");
+      return false;
+    }
+    return true;
+  }
+
+  public func TraceFreeze(reason: CName) {
+    if this.running {
+      this.running = false;
+      this.stop = reason;
+    }
+  }
+
+  private func TraceVector(value: Vector4) -> String {
+    return FloatToStringPrec(value.X, 4) + "," + FloatToStringPrec(value.Y, 4) + "," + FloatToStringPrec(value.Z, 4);
+  }
+
+  public func TraceReport() -> String {
+    let report = "\nTransition trace: running=" + ToString(this.running) + " stop=" + NameToString(this.stop)
+      + " callbacks=" + ToString(this.callbacks) + "/4096 seconds=" + FloatToStringPrec(this.elapsed, 3)
+      + "/30 retained=" + ToString(this.count) + "/32"
+      + " events=" + ToString(this.events) + "/8192"
+      + "\nphase simTime latestUpdateDt frame serial from>to owned/physics/type active/paused/handoff pending writes captures; physics; entity; target; expected; recovery; signedXYZerror";
+    let i = 0;
+    let index = this.next - this.count;
+    let sample: ref<NCCFlightTransitionSample>;
+    if index < 0 { index += 32; }
+    while i < this.count {
+      sample = this.samples[index];
+      report += "\n" + NameToString(sample.phase) + " " + FloatToStringPrec(sample.time, 4)
+        + " " + FloatToStringPrec(sample.dt, 4) + " " + ToString(sample.callback) + " " + ToString(sample.serial)
+        + " " + NameToString(sample.fromMachine) + "/" + NameToString(sample.fromState)
+        + ">" + NameToString(sample.toMachine) + "/" + NameToString(sample.toState)
+        + " " + ToString(sample.owned) + "/" + ToString(sample.physicsValid) + "/" + NameToString(sample.physicsType)
+        + " " + ToString(sample.active) + "/" + ToString(sample.paused) + "/" + ToString(sample.handoff)
+        + " " + ToString(sample.pending) + " " + ToString(sample.writes) + " " + ToString(sample.captures)
+        + "; " + this.TraceVector(sample.physics) + "; " + this.TraceVector(sample.entity)
+        + "; " + this.TraceVector(sample.target) + "; " + this.TraceVector(sample.expected)
+        + "; " + this.TraceVector(sample.recovery) + "; " + this.TraceVector(sample.error);
+      index += 1;
+      if index == 32 { index = 0; }
+      i += 1;
+    }
+    return report;
+  }
+}
+
 class NCCCollisionFlightProbeState extends IScriptable {
   public let validationRequested: Bool;
   public let requested: Bool;
@@ -240,6 +374,7 @@ class NCCCollisionFlightProbeState extends IScriptable {
   public let cameraActive: ref<NCCFlightCameraWindow>;
   public let cameraCurrent: ref<NCCFlightCameraWindow>;
   public let cameraActiveArmed: Bool;
+  public let transitionTrace: ref<NCCFlightTransitionTrace>;
 }
 
 class NCCCollisionFlightTransitionWatchdog extends DelayCallback {
@@ -451,6 +586,8 @@ public final func NCCFlightProbePrepare(commandPacket: Uint32) -> String {
   probe.prepareCallbacks = 0;
   probe.prepareElapsed = 0.0;
   probe.preparedInterface = null;
+  probe.transitionTrace = new NCCFlightTransitionTrace();
+  probe.transitionTrace.TraceInitialize();
   probe.status = "Requested: close F1 to prepare grounded locomotion";
   return probe.status;
 }
@@ -673,6 +810,8 @@ private final func NCCFlightProbeCount(value: Int32) -> Int32 {
 private final func NCCFlightProbePositionRefused(scriptInterface: ref<StateGameScriptInterface>, reason: String) {
   let probe = this.nccCollisionFlightProbe;
   if IsDefined(probe) {
+    this.NCCFlightTraceSnapshot(scriptInterface, n"refusal");
+    if IsDefined(probe.transitionTrace) { probe.transitionTrace.TraceFreeze(n"first-refusal"); }
     probe.positionRefusals = this.NCCFlightProbeCount(probe.positionRefusals);
     probe.positionLastRefusal = reason;
     this.NCCFlightProbeRestore(scriptInterface, reason, true);
@@ -811,6 +950,7 @@ private final func NCCFlightProbeRunValidation(scriptInterface: ref<StateGameScr
 public final func NCCFlightProbeStatus() -> String {
   let probe = this.nccCollisionFlightProbe;
   let cameraReport: String;
+  let transitionReport: String;
   if !IsDefined(probe) {
     return "Probe has not been requested";
   }
@@ -821,6 +961,7 @@ public final func NCCFlightProbeStatus() -> String {
   if IsDefined(probe.cameraActive) {
     cameraReport += probe.cameraActive.Report("active");
   }
+  if IsDefined(probe.transitionTrace) { transitionReport = probe.transitionTrace.TraceReport(); }
   return probe.status + "; active=" + ToString(probe.active)
     + "; validationRequested=" + ToString(probe.validationRequested)
     + "; transitionPending=" + ToString(probe.transitionPending)
@@ -866,7 +1007,125 @@ public final func NCCFlightProbeStatus() -> String {
     + "; filterType=" + NameToString(probe.filterType)
     + "; velocityType=" + NameToString(probe.velocityType)
     + "; state=" + NameToString(probe.stateName)
-    + "; machine=" + NameToString(probe.machineName) + "; " + this.NCCFlightClearanceReport() + cameraReport;
+    + "; machine=" + NameToString(probe.machineName) + "; " + this.NCCFlightClearanceReport() + cameraReport + transitionReport;
+}
+
+@addMethod(PlayerPuppet)
+private const final func NCCFlightTraceOwnsContext(scriptInterface: ref<StateGameScriptInterface>) -> Bool {
+  let probe = this.nccCollisionFlightProbe;
+  return IsDefined(probe) && IsDefined(scriptInterface) && scriptInterface.owner == this
+    && ((probe.active && probe.interfaceRef == scriptInterface)
+      || (!probe.active && probe.transitionPending && probe.capturedInterface == scriptInterface));
+}
+
+@addMethod(PlayerPuppet)
+private final func NCCFlightTraceRecord(scriptInterface: ref<StateGameScriptInterface>, phase: CName,
+  physics: Vector4, entity: Vector4, valid: Bool, typeName: CName) {
+  let probe = this.nccCollisionFlightProbe;
+  let trace: ref<NCCFlightTransitionTrace>;
+  let sample: ref<NCCFlightTransitionSample>;
+  if !IsDefined(probe) || !IsDefined(probe.transitionTrace) { return; }
+  trace = probe.transitionTrace;
+  sample = trace.TraceNext();
+  if !IsDefined(sample) { return; }
+  sample.owned = this.NCCFlightTraceOwnsContext(scriptInterface);
+  sample.phase = phase;
+  sample.time = trace.elapsed;
+  if sample.owned { sample.time = EngineTime.ToFloat(GameInstance.GetSimTime(this.GetGame())); }
+  sample.dt = trace.lastDelta;
+  sample.callback = trace.callbacks;
+  sample.serial = probe.transitionSerial;
+  sample.fromState = trace.fromState;
+  sample.fromMachine = trace.fromMachine;
+  sample.toState = trace.toState;
+  sample.toMachine = trace.toMachine;
+  sample.physicsValid = valid;
+  sample.physicsType = typeName;
+  sample.physics = physics;
+  sample.entity = entity;
+  sample.target = probe.target;
+  sample.expected = probe.positionLastTarget;
+  sample.recovery = trace.recovery;
+  sample.error = new Vector4(0.0, 0.0, 0.0, 0.0);
+  if valid {
+    sample.error = new Vector4(physics.X - sample.expected.X, physics.Y - sample.expected.Y, physics.Z - sample.expected.Z, 0.0);
+  }
+  sample.pending = probe.positionReadbackPending;
+  sample.active = probe.active;
+  sample.paused = probe.paused;
+  sample.handoff = probe.transitionPending;
+  sample.writes = probe.positionWritesIssued;
+  sample.captures = probe.captureWrites;
+  if !sample.owned { trace.TraceFreeze(n"owner-or-interface-changed"); }
+}
+
+@addMethod(PlayerPuppet)
+public final func NCCFlightTraceSnapshot(scriptInterface: ref<StateGameScriptInterface>, phase: CName) {
+  let probe = this.nccCollisionFlightProbe;
+  let value: Variant;
+  let physics: Vector4;
+  let entity: Vector4;
+  let valid: Bool;
+  if !IsDefined(probe) || !IsDefined(probe.transitionTrace) || !probe.transitionTrace.TraceAvailable() { return; }
+  if this.NCCFlightTraceOwnsContext(scriptInterface) {
+    value = scriptInterface.GetStateVectorParameter(physicsStateValue.Position);
+    entity = this.GetWorldPosition();
+    valid = IsDefined(value) && Equals(VariantTypeName(value), n"Vector4");
+    if valid { physics = FromVariant<Vector4>(value); }
+  }
+  this.NCCFlightTraceRecord(scriptInterface, phase, physics, entity, valid, VariantTypeName(value));
+}
+
+@addMethod(PlayerPuppet)
+public final func NCCFlightTraceBefore(timeDelta: Float, scriptInterface: ref<StateGameScriptInterface>) -> Bool {
+  let probe = this.nccCollisionFlightProbe;
+  if !IsDefined(probe) || !IsDefined(probe.transitionTrace) || !probe.transitionTrace.running { return false; }
+  if !probe.active && !probe.transitionPending {
+    probe.transitionTrace.TraceFreeze(n"session-ended");
+    return false;
+  }
+  if !probe.transitionTrace.TraceAdvance(timeDelta) { return false; }
+  if !this.NCCFlightTraceOwnsContext(scriptInterface) {
+    this.NCCFlightTraceSnapshot(scriptInterface, n"invalid-update-owner");
+    return false;
+  }
+  if probe.transitionTrace.watch > 0 { this.NCCFlightTraceSnapshot(scriptInterface, n"before-vanilla-update"); }
+  return true;
+}
+
+@addMethod(PlayerPuppet)
+public final func NCCFlightTraceAfter(scriptInterface: ref<StateGameScriptInterface>) {
+  let probe = this.nccCollisionFlightProbe;
+  if IsDefined(probe) && IsDefined(probe.transitionTrace) && probe.transitionTrace.running && probe.transitionTrace.watch > 0 {
+    this.NCCFlightTraceSnapshot(scriptInterface, n"after-vanilla-update");
+  }
+}
+
+@addMethod(PlayerPuppet)
+public final func NCCFlightTraceEndCallback() {
+  let probe = this.nccCollisionFlightProbe;
+  if IsDefined(probe) && IsDefined(probe.transitionTrace) && probe.transitionTrace.running && probe.transitionTrace.watch > 0 {
+    probe.transitionTrace.watch -= 1;
+  }
+}
+
+@addMethod(PlayerPuppet)
+public final func NCCFlightTraceState(scriptInterface: ref<StateGameScriptInterface>, stateName: CName, machineName: CName, entering: Bool) {
+  let probe = this.nccCollisionFlightProbe;
+  if !IsDefined(probe) || !IsDefined(probe.transitionTrace) || !probe.transitionTrace.running { return; }
+  if !probe.active && !probe.transitionPending { return; }
+  if entering {
+    probe.transitionTrace.toState = stateName;
+    probe.transitionTrace.toMachine = machineName;
+    this.NCCFlightTraceSnapshot(scriptInterface, n"fresh-filter-capture");
+  } else {
+    probe.transitionTrace.fromState = stateName;
+    probe.transitionTrace.fromMachine = machineName;
+    probe.transitionTrace.toState = n"None";
+    probe.transitionTrace.toMachine = n"None";
+    probe.transitionTrace.watch = 4;
+    this.NCCFlightTraceSnapshot(scriptInterface, n"before-locomotion-exit");
+  }
 }
 
 @addMethod(PlayerPuppet)
@@ -958,7 +1217,13 @@ private final func NCCFlightProbeRestoreAt(scriptInterface: ref<StateGameScriptI
       probe.status = "Restore refused: cannot move this player to a recovery position";
       return false;
     }
+    if IsDefined(probe.transitionTrace) && probe.transitionTrace.running {
+      probe.transitionTrace.recovery = destination;
+      probe.transitionTrace.watch = 4;
+    }
+    this.NCCFlightTraceSnapshot(scriptInterface, n"before-teleport");
     GameInstance.GetTeleportationFacility(this.GetGame()).Teleport(this, destination, facing);
+    this.NCCFlightTraceSnapshot(scriptInterface, n"after-teleport");
   }
   scriptInterface.SetStateVectorParameter(physicsStateValue.LinearVelocity, zeroVelocity);
   if this.NCCFlightProbeWriteFilter(scriptInterface, probe.baselineFilter) {
@@ -1449,8 +1714,12 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
         probe.maxPositionReadbackDistance = MaxF(probe.maxPositionReadbackDistance, probe.positionReadbackDistance);
       }
       if !(probe.positionReadbackDistance <= 1.0) {
+        this.NCCFlightTraceRecord(scriptInterface, n"readback-failed", physicsPosition, entityPosition, true, n"Vector4");
         this.NCCFlightProbePositionRefused(scriptInterface, "Position refused: prior target is more than 1m from physics readback");
         return;
+      }
+      if IsDefined(probe.transitionTrace) && probe.transitionTrace.running && probe.transitionTrace.watch > 0 {
+        this.NCCFlightTraceRecord(scriptInterface, n"readback", physicsPosition, entityPosition, true, n"Vector4");
       }
       // This records a bounded next-callback observation, not exact arrival.
       probe.positionReadbacks = this.NCCFlightProbeCount(probe.positionReadbacks);
@@ -1515,6 +1784,16 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
     if !this.NCCFlightClearanceVerifyControls(scriptInterface, this.GetWorldPosition()) {
       this.NCCFlightProbeRestore(scriptInterface, "Activation stopped: clearance controls failed under flight collision", true);
       return;
+    }
+    if IsDefined(probe.transitionTrace) && Equals(probe.transitionTrace.stop, n"awaiting-activation") {
+      probe.transitionTrace.running = true;
+      probe.transitionTrace.stop = n"running";
+      probe.transitionTrace.lastDelta = timeDelta;
+      probe.transitionTrace.fromState = stateName;
+      probe.transitionTrace.fromMachine = machineName;
+      probe.transitionTrace.toState = stateName;
+      probe.transitionTrace.toMachine = machineName;
+      this.NCCFlightTraceSnapshot(scriptInterface, n"activated");
     }
   }
   probe.elapsed = MinF(probe.elapsed + timeDelta, 1000000000.0);
@@ -1622,17 +1901,21 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
 public func OnUpdate(timeDelta: Float, stateContext: ref<StateContext>, scriptInterface: ref<StateGameScriptInterface>) {
   let beforePlayer = scriptInterface.owner as PlayerPuppet;
   let cameraFrame: Bool;
+  let traceFrame: Bool;
   let preparation: Int32;
   let stateName: CName;
   let machineName: CName;
   if IsDefined(beforePlayer) {
     cameraFrame = beforePlayer.NCCFlightCameraBefore(timeDelta, scriptInterface);
+    traceFrame = beforePlayer.NCCFlightTraceBefore(timeDelta, scriptInterface);
   }
   wrappedMethod(timeDelta, stateContext, scriptInterface);
   let player = scriptInterface.owner as PlayerPuppet;
   if IsDefined(beforePlayer) && player != beforePlayer {
     beforePlayer.NCCFlightCameraStop();
+    beforePlayer.NCCFlightTraceSnapshot(scriptInterface, n"owner-changed");
     cameraFrame = false;
+    traceFrame = false;
   }
   if IsDefined(player) {
     stateName = this.GetStateName();
@@ -1640,6 +1923,7 @@ public func OnUpdate(timeDelta: Float, stateContext: ref<StateContext>, scriptIn
     if cameraFrame {
       player.NCCFlightCameraPhase(scriptInterface, 1);
     }
+    if traceFrame { player.NCCFlightTraceAfter(scriptInterface); }
     preparation = player.NCCFlightProbePreparationTick(timeDelta, stateContext, scriptInterface,
       stateName, machineName);
     if preparation == 2 {
@@ -1658,6 +1942,7 @@ public func OnUpdate(timeDelta: Float, stateContext: ref<StateContext>, scriptIn
     if cameraFrame {
       player.NCCFlightCameraPhase(scriptInterface, 2);
     }
+    if traceFrame { player.NCCFlightTraceEndCallback(); }
   }
 }
 
@@ -1672,6 +1957,7 @@ public final func SetCollisionFilter(scriptInterface: ref<StateGameScriptInterfa
   if IsDefined(player) {
     if capturedFresh {
       player.NCCFlightProbeCaptureFilter(scriptInterface, capturedFilter);
+      player.NCCFlightTraceState(scriptInterface, this.GetStateName(), this.GetStateMachineName(), true);
     } else {
       player.NCCFlightProbeInvalidateCapture(scriptInterface);
     }
@@ -1683,6 +1969,7 @@ public final func SetCollisionFilter(scriptInterface: ref<StateGameScriptInterfa
 public func OnExit(stateContext: ref<StateContext>, scriptInterface: ref<StateGameScriptInterface>) {
   let player = scriptInterface.owner as PlayerPuppet;
   if IsDefined(player) {
+    player.NCCFlightTraceState(scriptInterface, this.GetStateName(), this.GetStateMachineName(), false);
     player.NCCFlightProbeSuspendForTransition(scriptInterface);
   }
   wrappedMethod(stateContext, scriptInterface);
@@ -1692,6 +1979,8 @@ public func OnExit(stateContext: ref<StateContext>, scriptInterface: ref<StateGa
 public func OnForcedExit(stateContext: ref<StateContext>, scriptInterface: ref<StateGameScriptInterface>) {
   let player = scriptInterface.owner as PlayerPuppet;
   if IsDefined(player) {
+    player.NCCFlightTraceState(scriptInterface, this.GetStateName(), this.GetStateMachineName(), false);
+    player.NCCFlightTraceSnapshot(scriptInterface, n"forced-exit");
     player.NCCFlightProbeRestore(scriptInterface, "Forced locomotion exit", true);
   }
   wrappedMethod(stateContext, scriptInterface);

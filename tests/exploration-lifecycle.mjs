@@ -12,8 +12,9 @@ function body(name) {
   assert.equal(depth,0);
   return source.slice(open+1,end-1).replace(/\/\/[^\n]*/g,'')
     .replace(/let (\w+): Vector4;/g,'let $1 = new Vector4();').replace(/let (\w+): Float;/g,'let $1 = 0;')
+    .replace(/let (\w+): Bool;/g,'let $1 = false;')
     .replace(/let (\w+): [^;]+;/g,'let $1;').replace(/([\w.]+) \/ (\d+)u/g,'Math.floor($1 / $2)')
-    .replace(/\b(\d+)u\b/g,'$1').replace(/\bn"/g,'"').replace(/scriptInterface.owner as PlayerPuppet/g,'AsPlayer(scriptInterface.owner)')
+    .replace(/\b(\d+)u\b/g,'$1').replace(/(?<![\w\\])n"/g,'"').replace(/scriptInterface.owner as PlayerPuppet/g,'AsPlayer(scriptInterface.owner)')
     .replace(/FromVariant<Vector4>/g,'FromVariant')
     .replaceAll('probe.target + probe.positionOriginDelta','Vector4.Add(probe.target,probe.positionOriginDelta)')
     .replaceAll('physicsPosition - entityPosition','Vector4.Sub(physicsPosition,entityPosition)')
@@ -23,7 +24,8 @@ function body(name) {
     .replaceAll('movement * (speed * dt)','Vector4.Scale(movement,speed*dt)')
     .replaceAll('probe.target + step','Vector4.Add(probe.target,step)')
     .replaceAll('nextTarget + probe.positionOriginDelta','Vector4.Add(nextTarget,probe.positionOriginDelta)')
-    .replace(/\bif\s+([^{}]+)\{/g,'if ($1) {');
+    .replace(/\bif\s+([^{}]+)\{/g,'if ($1) {')
+    .replace(/\bwhile\s+([^{}]+)\{/g,'while ($1) {');
 }
 class Vector4 {
   constructor(X=0,Y=0,Z=0,W=0){Object.assign(this,{X,Y,Z,W});}
@@ -47,7 +49,7 @@ const methods={EnsureMenuListener:'',RequestStop:'reason',Pause:'reason',MenuCha
 const packet=(epoch=3,flags=512)=>epoch*65536+flags;
 function fixture(){
   const s={menu:false,current:true,grounded:true,packet:packet(),time:100,entity:new Vector4(10,20,30,1),physics:new Vector4(10,20,30,1),
-    reads:0,normal:0,zero:0,restores:0,velocity:0,positions:0,teleports:[],queries:[],callbacks:[],accepted:true,controls:true};
+    reads:0,positionReads:0,entityReads:0,sampleAllocations:0,formats:0,normal:0,zero:0,restores:0,velocity:0,positions:0,teleports:[],queries:[],callbacks:[],accepted:true,controls:true};
   const facing={Yaw:0,Pitch:0,Roll:0};
   const defaults=()=>({active:false,requested:false,paused:false,resumeRequested:false,exitRequest:0,preparePending:false,prepared:false,
     prepareCallbacks:0,prepareElapsed:0,transitionPending:false,transitionSerial:4,stopRequested:false,stopReason:'',restoreUnconfirmed:false,
@@ -56,7 +58,7 @@ function fixture(){
     lastClearFacing:facing,lastClearanceProbePosition:s.entity,positionOriginDelta:new Vector4(),positionLastTarget:s.physics,positionReadbackPending:false,
     positionWritesIssued:0,positionReadbacks:0,positionRefusals:0,ticks:0,filterWrites:0,velocityWrites:0,maxObservedEntityRadius:0,
     maxPositionOriginDivergence:0,maxPositionReadbackDistance:0,elapsed:0,clearanceClock:0,clearanceProbes:0,capsuleHeight:1.8,capsuleRadius:.4});
-  const p={isPlayer:true,nccCollisionFlightProbe:defaults(),GetGame:()=>0,IsDead:()=>!!s.dead,GetWorldPosition:()=>s.entity,GetWorldOrientation:()=>facing,
+  const p={isPlayer:true,nccCollisionFlightProbe:defaults(),GetGame:()=>0,IsDead:()=>!!s.dead,GetWorldPosition:()=>{s.entityReads++;return s.entity;},GetWorldOrientation:()=>facing,
     NCCFlightProbeIsFilter:v=>!!v?.valid,NCCFlightProbeIsVelocity:()=>true,NCCFlightProbeZeroVelocity:()=>({}),
     NCCFlightProbeZeroFilter:()=>({valid:true,zero:true}),NCCFlightCameraBefore:()=>false,NCCFlightCameraStartActive:()=>{},
     NCCFlightProbeCameraFacing:()=>facing,NCCFlightInput(){s.reads++;return s.packet;},
@@ -64,26 +66,36 @@ function fixture(){
     NCCFlightClearanceInitialize(){s.initialized=true;return !s.initFails;},NCCFlightClearanceVerifyControls(si,pos){s.controlPosition=pos;return s.controls;},
     NCCFlightClearanceAt(si,pos){s.queries.push(pos);return s.clear?s.clear(pos):s.controls;}};
   const si={owner:p,IsMountedToObject:()=>!!s.mounted,IsPlayerInBraindance:()=>false,IsSceneAnimationActive:()=>false,IsOnGround:()=>s.grounded,
-    SetStateVectorParameter(){s.velocity++;return true;},GetStateVectorParameter(k){return k==='pos'?{type:s.type||'Vector4',value:s.physics}:{type:'Vector4'};},
+    SetStateVectorParameter(){s.velocity++;return true;},GetStateVectorParameter(k){if(k==='pos')s.positionReads++;return k==='pos'?{type:s.type||'Vector4',value:s.physics}:{type:'Vector4'};},
     GetCameraSystem:()=>({GetActiveCameraRight:()=>new Vector4(1,0,0,0),GetActiveCameraForward:()=>new Vector4(0,1,0,0)}),
     NCCFlightWritePosition(v){s.positions++;s.physics=new Vector4(v.X,v.Y,v.Z,1);s.entity=s.physics;return !s.rejectPosition;}};
   const board={GetBool:()=>s.menu,RegisterListenerBool(id,owner,callback){if(s.registrationFails)return null;owner[callback](s.menu);return {};}};
+  class Trace {constructor(){this.samples=[];this.recovery=new Vector4();}}
   const c=vm.createContext({Vector4,Vector3,FromVariant:v=>v.value,AsPlayer:v=>v?.isPlayer?v:null,IsDefined:v=>v!==null&&v!==undefined,Equals:(a,b)=>a===b,NotEquals:(a,b)=>a!==b,
+    ArrayPush:(a,v)=>a.push(v),ArraySize:a=>a.length,ToString:v=>{s.formats++;return String(v);},FloatToStringPrec:(v,n)=>{s.formats++;return v.toFixed(n);},
+    NCCFlightTransitionTrace:Trace,NCCFlightTransitionSample:class{constructor(){s.sampleAllocations++;}},
     AbsF:Math.abs,MinF:Math.min,MaxF:Math.max,ClampF:(n,a,b)=>Math.max(a,Math.min(n,b)),VariantTypeName:v=>v?.type||'physicsSimulationFilter',NameToString:v=>v,
     Quaternion:{ToEulerAngles:v=>v},GetAllBlackboardDefs:()=>({UI_System:{IsInMenu:'menu'}}),EngineTime:{ToFloat:v=>v},
     GameInstance:{GetBlackboardSystem:()=>({Get:()=>board}),GetSimTime:()=>s.time,GetDelaySystem:()=>({DelayCallbackNextFrame:cb=>s.callbacks.push(cb)}),
-      GetTeleportationFacility:()=>({Teleport(owner,pos){assert.equal(owner,p);s.teleports.push(pos);s.entity=pos;s.physics=pos;}})},
+      GetTeleportationFacility:()=>({Teleport(owner,pos){assert.equal(owner,p);s.teleports.push(pos);if(!s.deferTeleport){s.entity=pos;s.physics=pos;}}})},
     physicsStateValue:{Position:'pos',LinearVelocity:'vel'},NCCCollisionFlightTransitionWatchdog:class{},
     NCCCollisionFlightProbeState:class{constructor(){Object.assign(this,defaults(),{focusEpochValid:false});}},
     wrappedMethod:()=>{if(s.afterOriginal)s.afterOriginal();}});
   for(const [name,args]of Object.entries(methods))p['NCCFlightProbe'+name]=vm.runInContext(`(function(${args}){${body('NCCFlightProbe'+name)}})`,c).bind(p);
+  for(const [name,args]of Object.entries({Initialize:'',Advance:'dt',Next:'',Available:'',Freeze:'reason',Vector:'value',Report:''}))
+    Trace.prototype['Trace'+name]=vm.runInContext(`(function(${args}){${body('Trace'+name)}})`,c);
+  for(const [name,args]of Object.entries({OwnsContext:'scriptInterface',Record:'scriptInterface,phase,physics,entity,valid,typeName',
+    Snapshot:'scriptInterface,phase',Before:'timeDelta,scriptInterface',After:'scriptInterface',EndCallback:'',State:'scriptInterface,stateName,machineName,entering'}))
+    p['NCCFlightTrace'+name]=vm.runInContext(`(function(${args}){${body('NCCFlightTrace'+name)}})`,c).bind(p);
   const sc={IsStateActive:(m,n)=>s.current&&m==='Locomotion'&&n==='stand'};
   const transition={GetStateName:()=> 'stand',GetStateMachineName:()=> 'Locomotion',
     GetStaticBoolParameterDefault:()=>{s.static=(s.static||0)+1;return !!s.zeroPreset;},GetStaticFloatParameterDefault:(n,fallback)=>fallback,
     SetCollisionFilter(x){assert.equal(x,si);s.normal++;if(!s.captureFails)p.NCCFlightProbeCaptureFilter(si,{valid:true});if(s.afterCapture)s.afterCapture();}};
   const tick=vm.runInContext(`(function(timeDelta,stateContext,scriptInterface){${body('OnUpdate')}})`,c).bind(transition);
+  const exit=vm.runInContext(`(function(stateContext,scriptInterface){${body('OnExit')}})`,c).bind(transition);
   p.nccCollisionFlightProbe.interfaceRef=si;p.nccCollisionFlightProbe.capturedInterface=si;
-  return{s,p,si,sc,get q(){return p.nccCollisionFlightProbe;},tick(dt=.02,x=si){tick(dt,sc,x);},
+  return{s,p,si,sc,get q(){return p.nccCollisionFlightProbe;},tick(dt=.02,x=si){tick(dt,sc,x);},exit(){exit(sc,si);},
+    trace(){const t=new Trace();t.TraceInitialize();t.running=true;t.stop='running';t.fromState=t.toState='stand';t.fromMachine=t.toMachine='Locomotion';this.q.transitionTrace=t;return t;},
     start(v=packet()){return p.NCCFlightProbePrepare(v);},active(){this.q.active=true;this.q.requested=true;p.NCCFlightProbeEnsureMenuListener();return this;}};
 }
 {
@@ -249,4 +261,102 @@ for(const stop of ['NCCFlightProbeStopHere','NCCFlightProbeReturn']){
   f.p[stop]();f.tick();assert.equal(f.q.active,false);
   assert.deepEqual(dodgeDecision(f),{result:true,calls:1},'normal dash immediately returns after '+stop);
 }
-console.log('PASS actual travel lifecycle, supported handoffs and scoped dash decision veto with unchanged inactive/foreign-context behavior');
+function samples(t){return Array.from({length:t.count},(_,i)=>t.samples[(t.next-t.count+i+32)%32]);}
+{
+  const f=fixture();f.start(packet(3,768));const t=f.q.transitionTrace;
+  assert.equal(t.running,false);assert.equal(t.samples.length,32);assert.equal(f.s.sampleAllocations,32);
+  f.s.packet=packet(3,768);for(let i=0;i<5;i++)f.tick();assert.equal(t.callbacks,0);assert.equal(t.events,0);
+  f.s.packet=packet();f.tick();assert.equal(t.running,false,'preparation alone does not start recording');
+  f.tick();assert.equal(t.running,true);assert.equal(samples(t)[0].phase,'activated');assert.equal(f.s.formats,0);
+}
+{
+  const f=fixture().active(),t=f.trace(),allocated=[...t.samples];
+  for(let i=0;i<100;i++){f.s.time=i;f.p.NCCFlightTraceSnapshot(f.si,'ring');}
+  assert.equal(t.count,32);assert.equal(t.events,100);assert.deepEqual(t.samples,allocated);
+  assert.equal(samples(t)[0].time,68);assert.equal(samples(t).at(-1).time,99);
+  assert.equal(f.s.sampleAllocations,32,'recording reuses preallocated sample objects');assert.equal(f.s.formats,0);
+  const report=t.TraceReport();assert.match(report,/latestUpdateDt/);assert.match(report,/events=100\/8192/);assert(f.s.formats>0);
+  t.TraceFreeze('first-refusal');const retained=JSON.stringify(t.samples),reads=f.s.positionReads;
+  f.p.NCCFlightTraceSnapshot(f.si,'late');assert.equal(JSON.stringify(t.samples),retained);assert.equal(f.s.positionReads,reads);
+}
+for(const cap of ['events','callbacks','time']){
+  const f=fixture().active(),t=f.trace();
+  if(cap==='events'){
+    for(let i=0;i<8192;i++)f.p.NCCFlightTraceSnapshot(f.si,'burst');
+    const reads=f.s.positionReads;f.p.NCCFlightTraceSnapshot(f.si,'past-cap');
+    assert.equal(t.events,8192);assert.equal(f.s.positionReads,reads,'event cap is checked before native getters');
+  }else if(cap==='callbacks'){
+    for(let i=0;i<4096;i++)f.p.NCCFlightTraceBefore(0,f.si);
+    assert.equal(t.callbacks,4096);assert.equal(f.s.positionReads,0);
+  }else{
+    for(let i=0;i<30;i++)f.p.NCCFlightTraceBefore(1,f.si);
+    assert.equal(t.elapsed,30);assert.equal(t.callbacks,30);
+  }
+  assert.equal(t.running,false);const events=t.events,reads=f.s.positionReads;
+  f.p.NCCFlightTraceSnapshot(f.si,'after-budget');assert.equal(t.events,events);assert.equal(f.s.positionReads,reads);
+}
+for(const stale of ['interface','owner','inactive']){
+  const f=fixture().active(),t=f.trace();let si=f.si;
+  if(stale==='interface')si={...f.si};if(stale==='owner')si={...f.si,owner:{}};if(stale==='inactive')f.q.active=false;
+  const before={p:f.s.positionReads,e:f.s.entityReads};f.p.NCCFlightTraceSnapshot(si,'stale');
+  assert.deepEqual({p:f.s.positionReads,e:f.s.entityReads},before,'invalid context gets no new physics/entity reads');
+  assert.equal(samples(t)[0].owned,false);assert.equal(samples(t)[0].physicsValid,false);assert.equal(t.running,false);
+}
+{
+  const f=fixture().active(),t=f.trace();t.watch=4;
+  for(let i=0;i<5;i++){
+    const reads=f.s.positionReads;f.tick();
+    assert.equal(f.s.positionReads-reads,i<4?3:1,'only four watched callbacks add pre/post snapshots');
+  }
+  assert.equal(t.watch,0);assert.equal(samples(t).filter(x=>x.phase==='before-vanilla-update').length,4);
+  assert.equal(samples(t).filter(x=>x.phase==='after-vanilla-update').length,4);
+  assert.equal(f.s.formats,0);assert.equal(f.s.sampleAllocations,32);
+}
+// Engine Teleport enqueues a request. A deferred engine mock must record the
+// old observed position after issuance, not silently report requested arrival.
+for(const deferred of [false,true]){
+  const f=fixture().active(),t=f.trace();f.s.deferTeleport=deferred;f.s.clear=pos=>pos.X!==10;
+  f.exit();assert.equal(f.q.transitionPending,true);assert.equal(f.s.teleports.length,1);
+  const before=samples(t).find(x=>x.phase==='before-teleport'),after=samples(t).find(x=>x.phase==='after-teleport');
+  assert.equal(before.physics.X,10);assert.equal(after.physics.X,deferred?10:8);assert.equal(after.recovery.X,8);
+  assert.equal(after.target.X,10,'snapshot does not adopt requested recovery as observed target');
+  f.p.NCCFlightProbeCaptureFilter(f.si,{valid:true});f.p.NCCFlightTraceState(f.si,'sprint','Locomotion',true);
+  f.p.NCCFlightProbeObserveStateFilter(f.si,'sprint','Locomotion',true);
+  assert.equal(f.q.active,true);assert.equal(f.q.paused,true);assert.equal(f.q.positionLastTarget.X,8);
+  const captured=samples(t).find(x=>x.phase==='fresh-filter-capture');assert.equal(captured.handoff,true);
+  assert.equal(captured.fromState,'stand');assert.equal(captured.toState,'sprint');assert.equal(captured.physics.X,deferred?10:8);
+  f.tick(.037);
+  if(deferred){
+    assert.equal(f.q.positionRefusals,1);assert.equal(t.stop,'first-refusal');assert.equal(t.running,false);
+    const failed=samples(t).find(x=>x.phase==='readback-failed');assert.equal(failed.dt,.037);
+    assert.equal(failed.error.X,2);assert.equal(failed.error.Y,0);assert.equal(failed.error.Z,0);
+    assert.equal(failed.physics.X,10);assert.equal(failed.expected.X,8);assert.equal(failed.pending,true);
+    assert.equal(samples(t).at(-1).phase,'refusal','freeze precedes emergency cleanup and its queued teleport');
+  }else{assert.equal(f.q.positionRefusals,0);assert.equal(f.q.active,true);}
+}
+{
+  const f=fixture().active(),t=f.trace();t.watch=4;f.q.paused=true;f.q.positionReadbackPending=true;
+  f.q.positionLastTarget=new Vector4(8,20,30,1);f.q.target=f.q.positionLastTarget;
+  f.s.afterOriginal=()=>{f.s.physics=f.s.entity=new Vector4(8,20,30,1);};
+  f.tick(.04);assert.equal(samples(t).find(x=>x.phase==='before-vanilla-update').physics.X,10);
+  assert.equal(samples(t).find(x=>x.phase==='after-vanilla-update').physics.X,8);
+  assert.equal(samples(t).find(x=>x.phase==='readback').error.X,0);assert.equal(f.q.positionRefusals,0);
+}
+// Diagnostic getters must not change accepted movement, control decisions,
+// collision restoration, queued destinations, or the existing refusal outcome.
+for(const action of ['move','stop','return','recovery','refusal']){
+  const outputs=[];
+  for(const trace of [false,true]){
+    const f=fixture().active();if(trace)f.trace();
+    if(action==='move'){f.s.packet=packet(3,513);f.tick();}
+    if(action==='stop'){f.p.NCCFlightProbeStopHere();f.tick();}
+    if(action==='return'){f.p.NCCFlightProbeReturn();f.tick();}
+    if(action==='recovery'){f.s.clear=pos=>pos.X!==10;f.s.deferTeleport=true;f.exit();}
+    if(action==='refusal'){f.q.positionReadbackPending=true;f.q.positionLastTarget=new Vector4(7,20,30,1);f.tick();}
+    outputs.push({active:f.q.active,paused:f.q.paused,requested:f.q.requested,transition:f.q.transitionPending,status:f.q.status,
+      zero:f.s.zero,restores:f.s.restores,velocity:f.s.velocity,positions:f.s.positions,teleports:f.s.teleports,
+      queries:f.s.queries,packetReads:f.s.reads,refusals:f.q.positionRefusals,target:f.q.target});
+  }
+  assert.deepEqual(outputs[0],outputs[1],action+' diagnostics are observational');
+}
+console.log('PASS actual travel lifecycle, handoffs/dash veto and bounded observational transition trace including deferred Teleport, refusal freeze and stale-owner guards');
