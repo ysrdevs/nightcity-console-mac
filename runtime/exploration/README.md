@@ -4,7 +4,7 @@ This is an experimental, local test checkpoint based on released 1.7.1. It is no
 
 ## Current travel stage
 
-The travel build removes the prototype's 60-second, 128m and 32,768-update lifetime limits. The native movement bridge retains its finite-coordinate, per-step, current-context, physics/entity agreement and subsequent-readback checks. Diagnostic counters saturate instead of overflowing. Gameplay acceptance of this travel stage is still pending.
+The travel build removes the prototype's 60-second, 128m and 32,768-update lifetime limits. The native movement bridge retains its finite-coordinate, per-step, current-context, physics/entity agreement and subsequent-readback checks. Diagnostic counters saturate instead of overflowing. The first destination-stop check passed as described below; wider travel and the remaining lifecycle checks are pending.
 
 | Control | Behavior |
 | --- | --- |
@@ -20,6 +20,8 @@ Opening Inventory or losing application focus pauses an active session in place.
 The latest clear recovery position comes from a verified observed position, never an issued target alone. Sampling is limited to four times per second after at least one metre of movement. Exit and return requests recheck their destination. An unavoidable engine state exit restores collision before leaving the owned callback: normally in place, or at a rechecked recovery position when current space is blocked. The next supported state can retain the trip through the existing short handoff without a backward/forward teleport. Recovery leaves movement paused. If no clear recovery position is available, emergency cleanup restores the normal filter at the current position and explicitly reports unconfirmed clearance; that is not reported as a successful clear exit. The transition watchdog does bookkeeping only.
 
 The **Exploration** tab sends `flight start`, `flight stop`, `flight resume`, `flight return` and `flight status`; validation and camera recording remain optional diagnostics. Legacy `toggle` means Start and `off` means Stop here. Every command requires game 2.5, an authoritative player lookup and its exact script signature. Start and Resume additionally require a native input snapshot and validated movement bridges. The next ordinary engine update independently checks READY and the request's focus generation. Stop, Return and Status remain callable without input readiness or new movement setup. No automatic JavaScript status polling is added.
+
+The user confirmed that **Stop here** leaves them at the new destination with normal walking and collision restored. They also tested an elevated stop and reported falling to the ground safely in that case. The current process had all 106 framework hooks installed and no recorded fault. A separate read-only status request could not resolve the current player (caught lookup errors), so it did not yield flight counters or restoration telemetry. This is user-confirmed destination-stop acceptance, not proof of safe falls at arbitrary heights. Travel beyond the old limits, pause/resume, optional return, blocked exits and compatibility checks remain pending for this build.
 
 ## Accepted prototype checkpoints and implementation background
 
