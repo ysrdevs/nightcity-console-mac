@@ -315,6 +315,8 @@ class NCCCollisionFlightProbeState extends IScriptable {
   public let pauseReason: String;
   public let resumeRequested: Bool;
   public let exitRequest: Int32;
+  public let processingExitRequest: Int32;
+  public let lastAcceptedControl: CName;
   public let lastClearValid: Bool;
   public let lastClearPosition: Vector4;
   public let lastClearFacing: EulerAngles;
@@ -337,6 +339,26 @@ class NCCCollisionFlightProbeState extends IScriptable {
   public let arrivalSerial: Int32;
   public let arrivalDistance: Float;
   public let arrivalReason: String;
+  public let arrivalControl: CName;
+  public let arrivalExitIntent: Int32;
+  public let arrivalProcessingExitIntent: Int32;
+  public let arrivalWasPaused: Bool;
+  public let arrivalWasRequested: Bool;
+  public let arrivalInteractionFlags: Int32;
+  public let arrivalMenuOpen: Bool;
+  public let arrivalPreviousTarget: Vector4;
+  public let arrivalPreviousReadbackPending: Bool;
+  public let arrivalPreviousReadbackDistance: Float;
+  public let arrivalPreviousOriginDivergence: Float;
+  public let arrivalFailureReason: String;
+  public let arrivalFailureCallbacks: Int32;
+  public let arrivalFailureElapsed: Float;
+  public let arrivalObservationValid: Bool;
+  public let arrivalObservedAt: Float;
+  public let arrivalObservedState: CName;
+  public let arrivalObservedMachine: CName;
+  public let arrivalObservedEntity: Vector4;
+  public let arrivalObservedPhysics: Vector4;
   public let arrivalRestoreInterface: wref<StateGameScriptInterface>;
   public let arrivalRestoreFilter: Variant;
   public let arrivalRestoreCapture: Int32;
@@ -663,6 +685,44 @@ public final func NCCFlightProbeToggle() -> String {
 }
 
 @addMethod(PlayerPuppet)
+private final func NCCFlightProbeStoredVector(value: Vector4) -> String {
+  return FloatToStringPrec(value.X, 4) + "," + FloatToStringPrec(value.Y, 4) + "," + FloatToStringPrec(value.Z, 4);
+}
+
+@addMethod(PlayerPuppet)
+private final func NCCFlightProbeStoredArrivalReport(message: String) -> String {
+  let probe = this.nccCollisionFlightProbe;
+  if !IsDefined(probe) || !probe.arrivalUnconfirmed || probe.arrivalOwner != this { return message; }
+  // Command-time formatting of stored values only. No state lookup, physics,
+  // input read, full Status recursion, or replay of the submitted relocation.
+  return StrLeft(StrLeft(message, 256) + "\n[Stored relocation] serial=" + ToString(probe.arrivalSerial)
+    + " cause=" + StrLeft(probe.arrivalReason, 256)
+    + " lastOwnedState=" + StrLeft(NameToString(probe.arrivalRestoreMachine), 64) + "/" + StrLeft(NameToString(probe.arrivalRestoreState), 64)
+    + " control=" + StrLeft(NameToString(probe.arrivalControl), 32)
+    + " queuedExit=" + ToString(probe.arrivalExitIntent) + " processingExit=" + ToString(probe.arrivalProcessingExitIntent)
+    + " paused/requested=" + ToString(probe.arrivalWasPaused) + "/" + ToString(probe.arrivalWasRequested)
+    + " flags/menu=" + ToString(probe.arrivalInteractionFlags) + "/" + ToString(probe.arrivalMenuOpen)
+    + " issuedAt=" + FloatToStringPrec(probe.arrivalIssuedAt, 4) + " capture=" + ToString(probe.arrivalRestoreCapture)
+    + " submitted=" + this.NCCFlightProbeStoredVector(probe.arrivalSubmittedPosition)
+    + " destination=" + this.NCCFlightProbeStoredVector(probe.arrivalDestination)
+    + " origin=" + this.NCCFlightProbeStoredVector(probe.arrivalOriginDelta)
+    + " priorTarget=" + this.NCCFlightProbeStoredVector(probe.arrivalPreviousTarget)
+    + " priorReadbackPending/distance/originError=" + ToString(probe.arrivalPreviousReadbackPending)
+      + "/" + FloatToStringPrec(probe.arrivalPreviousReadbackDistance, 4) + "/" + FloatToStringPrec(probe.arrivalPreviousOriginDivergence, 4)
+    + " tolerance=" + FloatToStringPrec(probe.arrivalTolerance, 4)
+    + " latestFailure=" + StrLeft(probe.arrivalFailureReason, 256)
+    + " failureCallbacks/seconds=" + ToString(probe.arrivalFailureCallbacks) + "/" + FloatToStringPrec(probe.arrivalFailureElapsed, 4)
+    + " lastValidObservation=" + ToString(probe.arrivalObservationValid) + "@" + FloatToStringPrec(probe.arrivalObservedAt, 4)
+    + " observedState=" + StrLeft(NameToString(probe.arrivalObservedMachine), 64) + "/" + StrLeft(NameToString(probe.arrivalObservedState), 64)
+    + " entity=" + this.NCCFlightProbeStoredVector(probe.arrivalObservedEntity)
+    + " physics=" + this.NCCFlightProbeStoredVector(probe.arrivalObservedPhysics)
+    + " distance=" + FloatToStringPrec(probe.arrivalDistance, 4)
+    + " now[pending/active/restoreUnconfirmed/callbacks/seconds]=" + ToString(probe.arrivalPending)
+      + "/" + ToString(probe.active) + "/" + ToString(probe.restoreUnconfirmed)
+      + "/" + ToString(probe.arrivalCallbacks) + "/" + FloatToStringPrec(probe.arrivalElapsed, 4), 4096);
+}
+
+@addMethod(PlayerPuppet)
 public final func NCCFlightProbePrepare(commandPacket: Uint32) -> String {
   if !IsDefined(this.nccCollisionFlightProbe) {
     this.nccCollisionFlightProbe = new NCCCollisionFlightProbeState();
@@ -670,19 +730,19 @@ public final func NCCFlightProbePrepare(commandPacket: Uint32) -> String {
   let probe = this.nccCollisionFlightProbe;
   if probe.arrivalUnconfirmed {
     if probe.active || probe.restoreUnconfirmed {
-      return "Start refused: queued relocation collision cleanup is not confirmed";
+      return this.NCCFlightProbeStoredArrivalReport("Start refused: queued relocation collision cleanup is not confirmed");
     }
-    if probe.arrivalPending { return "Start refused: awaiting the queued relocation; no new request was submitted"; }
+    if probe.arrivalPending { return this.NCCFlightProbeStoredArrivalReport("Start refused: awaiting the queued relocation; no new request was submitted"); }
     if probe.arrivalOwner != this || !this.NCCFlightProbeEnsureMenuListener() || probe.menuOpen
       || (commandPacket & 512u) == 0u || (commandPacket & 4096u) != 0u || (commandPacket & 32768u) != 0u {
-      return "Arrival recheck refused: close the menu and focus the game";
+      return this.NCCFlightProbeStoredArrivalReport("Arrival recheck refused: close the menu and focus the game");
     }
     probe.arrivalPending = true;
     probe.arrivalCallbacks = 0;
     probe.arrivalElapsed = 0.0;
     probe.arrivalPollStartedAt = EngineTime.ToFloat(GameInstance.GetSimTime(this.GetGame()));
     probe.status = "Read-only arrival recheck requested; after confirmation, press Start again";
-    return probe.status;
+    return this.NCCFlightProbeStoredArrivalReport(probe.status);
   }
   probe.interactionFlags = this.NCCFlightProbeInteractionFlags(null);
   if probe.interactionFlags < 0 {
@@ -716,6 +776,7 @@ public final func NCCFlightProbePrepare(commandPacket: Uint32) -> String {
   // The actual script input method must independently return READY with that
   // same generation on the natural engine callback before any physics write.
   probe.focusEpoch = commandPacket / 65536u;
+  probe.lastAcceptedControl = n"start";
   probe.focusEpochValid = true;
   probe.stopRequested = false;
   probe.interactionYield = false;
@@ -753,7 +814,7 @@ public final func NCCFlightProbePrepare(commandPacket: Uint32) -> String {
 public final func NCCFlightProbeReturn() -> String {
   let probe = this.nccCollisionFlightProbe;
   if IsDefined(probe) && probe.arrivalUnconfirmed {
-    return "Return refused: the previous relocation is unresolved; no additional request was submitted";
+    return this.NCCFlightProbeStoredArrivalReport("Return refused: the previous relocation is unresolved; no additional request was submitted");
   }
   if IsDefined(probe) && probe.interactionYield {
     return "Return refused: flight yielded to an interaction; no relocation will be submitted";
@@ -762,6 +823,7 @@ public final func NCCFlightProbeReturn() -> String {
     return "Return refused: no active flight session";
   }
   probe.exitRequest = 2;
+  probe.lastAcceptedControl = n"return";
   probe.resumeRequested = false;
   probe.paused = true;
   probe.status = "Requested: return to the activation point and restore collision";
@@ -775,7 +837,7 @@ public final func NCCFlightProbeStopHere() -> String {
     return "Flight is already stopped";
   }
   if probe.arrivalUnconfirmed {
-    return "Flight movement is stopped; the queued relocation remains unresolved and cannot be cancelled here";
+    return this.NCCFlightProbeStoredArrivalReport("Flight movement is stopped; the queued relocation remains unresolved and cannot be cancelled here");
   }
   if !probe.active && !probe.transitionPending {
     probe.requested = false;
@@ -785,6 +847,7 @@ public final func NCCFlightProbeStopHere() -> String {
     return probe.status;
   }
   probe.exitRequest = 1;
+  probe.lastAcceptedControl = n"stop-here";
   probe.resumeRequested = false;
   probe.paused = true;
   probe.status = "Requested: stop here if the player capsule is clear";
@@ -795,7 +858,7 @@ public final func NCCFlightProbeStopHere() -> String {
 public final func NCCFlightProbeResume(commandPacket: Uint32) -> String {
   let probe = this.nccCollisionFlightProbe;
   if IsDefined(probe) && probe.arrivalUnconfirmed {
-    return "Resume refused: queued relocation arrival is unresolved; flight will not resume automatically";
+    return this.NCCFlightProbeStoredArrivalReport("Resume refused: queued relocation arrival is unresolved; flight will not resume automatically");
   }
   if IsDefined(probe) && probe.interactionYield {
     return "Resume refused: finish the interaction and start a new flight";
@@ -815,6 +878,7 @@ public final func NCCFlightProbeResume(commandPacket: Uint32) -> String {
   probe.focusEpoch = commandPacket / 65536u;
   probe.focusEpochValid = true;
   probe.resumeRequested = true;
+  probe.lastAcceptedControl = n"resume";
   probe.status = "Resume requested: close F1 and release movement keys";
   return probe.status;
 }
@@ -1452,6 +1516,9 @@ private final func NCCFlightProbeArrivalFailed(reason: String) {
   let probe = this.nccCollisionFlightProbe;
   if IsDefined(probe) && probe.arrivalUnconfirmed {
     probe.arrivalPending = false;
+    probe.arrivalFailureReason = reason;
+    probe.arrivalFailureCallbacks = probe.arrivalCallbacks;
+    probe.arrivalFailureElapsed = probe.arrivalElapsed;
     probe.status = reason + "; arrival unconfirmed; Start can request a read-only recheck after collision cleanup";
   }
 }
@@ -1567,6 +1634,12 @@ private final func NCCFlightProbeArrivalTick(timeDelta: Float, stateContext: ref
     this.NCCFlightProbeArrivalFailed("Queued arrival observation refused: invalid observed coordinates");
     return;
   }
+  probe.arrivalObservationValid = true;
+  probe.arrivalObservedAt = now;
+  probe.arrivalObservedState = stateName;
+  probe.arrivalObservedMachine = machineName;
+  probe.arrivalObservedEntity = entity;
+  probe.arrivalObservedPhysics = physics;
   divergence = new Vector4(physics.X - entity.X - probe.arrivalOriginDelta.X,
     physics.Y - entity.Y - probe.arrivalOriginDelta.Y, physics.Z - entity.Z - probe.arrivalOriginDelta.Z, 0.0);
   expectedPhysics = new Vector4(probe.arrivalDestination.X + probe.arrivalOriginDelta.X,
@@ -1664,6 +1737,26 @@ private final func NCCFlightProbeRestoreAt(scriptInterface: ref<StateGameScriptI
     probe.arrivalDistance = -1.0;
     probe.arrivalSerial = this.NCCFlightProbeCount(probe.arrivalSerial);
     probe.arrivalReason = reason;
+    probe.arrivalControl = probe.lastAcceptedControl;
+    probe.arrivalExitIntent = probe.exitRequest;
+    probe.arrivalProcessingExitIntent = probe.processingExitRequest;
+    probe.arrivalWasPaused = probe.paused;
+    probe.arrivalWasRequested = probe.requested;
+    probe.arrivalInteractionFlags = probe.interactionFlags;
+    probe.arrivalMenuOpen = probe.menuOpen;
+    probe.arrivalPreviousTarget = probe.positionLastTarget;
+    probe.arrivalPreviousReadbackPending = probe.positionReadbackPending;
+    probe.arrivalPreviousReadbackDistance = probe.positionReadbackDistance;
+    probe.arrivalPreviousOriginDivergence = probe.positionOriginDivergence;
+    probe.arrivalFailureReason = "";
+    probe.arrivalFailureCallbacks = 0;
+    probe.arrivalFailureElapsed = 0.0;
+    probe.arrivalObservationValid = false;
+    probe.arrivalObservedAt = 0.0;
+    probe.arrivalObservedState = n"None";
+    probe.arrivalObservedMachine = n"None";
+    probe.arrivalObservedEntity = new Vector4(0.0, 0.0, 0.0, 0.0);
+    probe.arrivalObservedPhysics = new Vector4(0.0, 0.0, 0.0, 0.0);
     probe.arrivalRestoreInterface = scriptInterface;
     probe.arrivalRestoreFilter = probe.baselineFilter;
     probe.arrivalRestoreCapture = probe.captureWrites;
@@ -1794,6 +1887,7 @@ private final func NCCFlightProbeProcessExit(scriptInterface: ref<StateGameScrip
     return;
   }
   request = probe.exitRequest;
+  probe.processingExitRequest = request;
   probe.exitRequest = 0;
   if request == 1 {
     this.NCCFlightProbeRestore(scriptInterface, "Stopped here; normal gravity resumes", false);
@@ -1806,6 +1900,7 @@ private final func NCCFlightProbeProcessExit(scriptInterface: ref<StateGameScrip
       probe.status = probe.pauseReason;
     }
   }
+  probe.processingExitRequest = 0;
 }
 
 @addMethod(PlayerPuppet)
