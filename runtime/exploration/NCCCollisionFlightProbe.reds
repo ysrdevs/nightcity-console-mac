@@ -354,6 +354,7 @@ class NCCCollisionFlightProbeState extends IScriptable {
   public let arrivalFailureCallbacks: Int32;
   public let arrivalFailureElapsed: Float;
   public let arrivalObservationValid: Bool;
+  public let arrivalObservationWait: CName;
   public let arrivalObservedAt: Float;
   public let arrivalObservedState: CName;
   public let arrivalObservedMachine: CName;
@@ -712,6 +713,7 @@ private final func NCCFlightProbeStoredArrivalReport(message: String) -> String 
     + " tolerance=" + FloatToStringPrec(probe.arrivalTolerance, 4)
     + " latestFailure=" + StrLeft(probe.arrivalFailureReason, 256)
     + " failureCallbacks/seconds=" + ToString(probe.arrivalFailureCallbacks) + "/" + FloatToStringPrec(probe.arrivalFailureElapsed, 4)
+    + " observationWait=" + StrLeft(NameToString(probe.arrivalObservationWait), 32)
     + " lastValidObservation=" + ToString(probe.arrivalObservationValid) + "@" + FloatToStringPrec(probe.arrivalObservedAt, 4)
     + " observedState=" + StrLeft(NameToString(probe.arrivalObservedMachine), 64) + "/" + StrLeft(NameToString(probe.arrivalObservedState), 64)
     + " entity=" + this.NCCFlightProbeStoredVector(probe.arrivalObservedEntity)
@@ -1611,19 +1613,34 @@ private final func NCCFlightProbeArrivalTick(timeDelta: Float, stateContext: ref
     return;
   }
   if probe.active || probe.restoreUnconfirmed { return; }
+  // The outgoing callback can still run on the issuing simulation time. It
+  // cannot observe completion, and its old state need not remain active.
+  if now <= probe.arrivalIssuedAt {
+    probe.arrivalObservationWait = n"same-time";
+    return;
+  }
   if !IsDefined(stateContext) || !stateContext.IsStateActive(machineName, stateName)
     || !this.NCCFlightProbeAllowed(stateName, machineName)
     || probe.capturedInterface != scriptInterface || !probe.capturedNormal
-    || !this.NCCFlightProbeIsFilter(probe.capturedFilter)
-    || this.IsDead() || scriptInterface.IsMountedToObject() || scriptInterface.IsPlayerInBraindance()
-    || scriptInterface.IsSceneAnimationActive() {
-    this.NCCFlightProbeArrivalFailed("Queued arrival observation refused: current normal locomotion context is not confirmed");
+    || !this.NCCFlightProbeIsFilter(probe.capturedFilter) {
+    // Transition callbacks can precede the new state's original filter capture.
+    // Wait within the existing budget without reading through an unready context.
+    probe.arrivalObservationWait = n"context-or-capture";
     return;
   }
-  // Submission and same-frame observations cannot establish queued completion.
-  if now <= probe.arrivalIssuedAt { return; }
+  if this.IsDead() || scriptInterface.IsMountedToObject() || scriptInterface.IsPlayerInBraindance()
+    || scriptInterface.IsSceneAnimationActive() {
+    this.NCCFlightProbeArrivalFailed("Queued arrival observation refused: player left normal locomotion");
+    return;
+  }
   value = scriptInterface.GetStateVectorParameter(physicsStateValue.Position);
-  if !IsDefined(value) || NotEquals(VariantTypeName(value), n"Vector4") {
+  // A current normal state may briefly have no physics position while its
+  // queued placement is being processed. This is not evidence of arrival.
+  if !IsDefined(value) || Equals(VariantTypeName(value), n"None") {
+    probe.arrivalObservationWait = n"position-unavailable";
+    return;
+  }
+  if NotEquals(VariantTypeName(value), n"Vector4") {
     this.NCCFlightProbeArrivalFailed("Queued arrival observation refused: invalid physics position type");
     return;
   }
@@ -1634,6 +1651,7 @@ private final func NCCFlightProbeArrivalTick(timeDelta: Float, stateContext: ref
     this.NCCFlightProbeArrivalFailed("Queued arrival observation refused: invalid observed coordinates");
     return;
   }
+  probe.arrivalObservationWait = n"None";
   probe.arrivalObservationValid = true;
   probe.arrivalObservedAt = now;
   probe.arrivalObservedState = stateName;
@@ -1752,6 +1770,7 @@ private final func NCCFlightProbeRestoreAt(scriptInterface: ref<StateGameScriptI
     probe.arrivalFailureCallbacks = 0;
     probe.arrivalFailureElapsed = 0.0;
     probe.arrivalObservationValid = false;
+    probe.arrivalObservationWait = n"None";
     probe.arrivalObservedAt = 0.0;
     probe.arrivalObservedState = n"None";
     probe.arrivalObservedMachine = n"None";

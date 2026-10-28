@@ -74,8 +74,8 @@ function fixture(){
   const interactionBoard={GetBool:k=>{s.interactionReads++;return k==='zoom'?s.zoom:s.device;},GetInt:()=>{s.interactionReads++;return s.workspotBB;}};
   const workspots={IsActorInWorkspot:actor=>{assert.equal(actor,p);s.workspotReads++;return s.workspot;}};
   const si={owner:p,executionOwner:p,localBlackboard:interactionBoard,GetWorkspotSystem:()=>workspots,
-    IsMountedToObject:()=>!!s.mounted,IsPlayerInBraindance:()=>false,IsSceneAnimationActive:()=>false,IsOnGround:()=>s.grounded,
-    SetStateVectorParameter(){s.velocity++;return true;},GetStateVectorParameter(k){if(k==='pos')s.positionReads++;return k==='pos'?{type:s.type||'Vector4',value:s.physics}:{type:'Vector4'};},
+    IsMountedToObject:()=>!!s.mounted,IsPlayerInBraindance:()=>!!s.braindance,IsSceneAnimationActive:()=>!!s.scene,IsOnGround:()=>s.grounded,
+    SetStateVectorParameter(){s.velocity++;return true;},GetStateVectorParameter(k){if(k==='pos')s.positionReads++;return k==='pos'?(s.undefinedPosition?undefined:{type:s.type||'Vector4',value:s.physics}):{type:'Vector4'};},
     GetCameraSystem:()=>({GetActiveCameraRight:()=>new Vector4(1,0,0,0),GetActiveCameraForward:()=>new Vector4(0,1,0,0)}),
     NCCFlightWritePosition(v){s.positions++;s.physics=new Vector4(v.X,v.Y,v.Z,1);s.entity=s.physics;return !s.rejectPosition;}};
   const board={GetBool:()=>s.menu,RegisterListenerBool(id,owner,callback){if(s.registrationFails)return null;owner[callback](s.menu);return {};}};
@@ -418,15 +418,70 @@ function nativeEffects(f){return {zero:f.s.zero,positions:f.s.positions,velocity
   f.p.NCCFlightProbeCaptureFilter(f.si,{valid:true},true);assert.equal(f.q.active,false);assert.equal(f.q.restoreUnconfirmed,false);
   assert.equal(f.q.arrivalUnconfirmed,true,'normal collision capture is not queued arrival evidence');
 }
-for(const stale of ['interface','owner','state','capture','zero','dead','machine']){
+for(const stale of ['interface','owner','state','capture','zero','dead','mounted','braindance','scene','machine']){
   const f=queueReturn();f.s.time+=.02;let si=f.si,state='stand',machine='Locomotion';
   if(stale==='interface')si={...f.si};if(stale==='owner')si={...f.si,owner:{}};
   if(stale==='state')f.s.current=false;if(stale==='capture')f.q.capturedFilter={valid:false};
-  if(stale==='zero')f.q.capturedNormal=false;if(stale==='dead')f.s.dead=true;if(stale==='machine')machine='LocomotionLowGravity';
+  if(stale==='zero')f.q.capturedNormal=false;if(['dead','mounted','braindance','scene'].includes(stale))f.s[stale]=true;if(stale==='machine')machine='LocomotionLowGravity';
   const reads=f.s.positionReads,entityReads=f.s.entityReads,effects=nativeEffects(f);
   f.p.NCCFlightProbeArrivalTick(.02,f.sc,si,state,machine);
   assert.equal(f.s.positionReads,reads,stale);assert.equal(f.s.entityReads,entityReads,stale);assert.deepEqual(nativeEffects(f),effects);
-  assert.equal(f.q.arrivalPending,false);assert.equal(f.q.arrivalUnconfirmed,true);
+  assert.equal(f.q.arrivalPending,!['owner','dead','mounted','braindance','scene'].includes(stale));assert.equal(f.q.arrivalUnconfirmed,true);
+}
+// A finishing outgoing callback must not permanently suppress the new state's
+// later observation. This reproduces the live callback1/elapsed0/distance-1
+// signature without assuming that every such signature had the same cause.
+{
+  const f=queueReturn(),effects=nativeEffects(f),reads=f.s.positionReads,entityReads=f.s.entityReads;
+  f.s.current=false;f.tick();
+  assert.equal(f.q.arrivalCallbacks,1);assert.equal(f.q.arrivalElapsed,0);assert.equal(f.q.arrivalDistance,-1);
+  assert.equal(f.q.arrivalObservationWait,'same-time');
+  assert.equal(f.q.arrivalPending,true);assert.equal(f.s.positionReads,reads);assert.equal(f.s.entityReads,entityReads);
+  f.s.time+=.02;f.tick();assert.equal(f.q.arrivalPending,true,'unready outgoing state stays pending after time advances');
+  assert.equal(f.s.positionReads,reads);assert.equal(f.s.entityReads,entityReads);
+  const startedAt=f.q.arrivalPollStartedAt,callbacks=f.q.arrivalCallbacks;
+  for(let i=0;i<3;i++)assert.match(f.start(),/awaiting the queued/);
+  assert.equal(f.q.arrivalPollStartedAt,startedAt);assert.equal(f.q.arrivalCallbacks,callbacks,'commands cannot extend an active poll');
+  f.s.current=true;f.p.NCCFlightProbeCaptureFilter(f.si,{valid:true},true);
+  f.s.physics=f.s.entity=f.q.arrivalDestination;f.s.time+=.02;f.tick();
+  assert.equal(f.q.arrivalUnconfirmed,false);assert.equal(f.q.active,false);assert.equal(f.q.requested,false);
+  assert.equal(f.q.arrivalObservationWait,'None','valid observation clears only the transient wait marker');
+  assert.deepEqual(nativeEffects(f),effects);assert.equal(f.s.teleports.length,1);
+}
+// Missing context/filter capture never permits a physics read. A subsequent
+// normal capture can make the same bounded observer eligible, without rearming.
+for(const missing of ['context','capture']){
+  const f=queueReturn(),effects=nativeEffects(f);f.s.time+=.02;
+  if(missing==='capture')f.q.capturedInterface=null;
+  f.p.NCCFlightProbeArrivalTick(.02,missing==='context'?null:f.sc,f.si,'stand','Locomotion');
+  assert.equal(f.q.arrivalPending,true);assert.equal(f.s.positionReads,0);
+  f.p.NCCFlightProbeCaptureFilter(f.si,{valid:true},true);f.s.physics=f.s.entity=f.q.arrivalDestination;f.s.time+=.02;f.tick();
+  assert.equal(f.q.arrivalUnconfirmed,false);assert.deepEqual(nativeEffects(f),effects);
+}
+// Undefined/None Position is separately mocked, not inferred from the live
+// zero-elapsed failure. Defined wrong types and invalid coordinates stay fatal.
+for(const missing of ['undefined','None']){
+  const f=queueReturn(),effects=nativeEffects(f);f.s.time+=.02;
+  if(missing==='undefined')f.s.undefinedPosition=true;else f.s.type='None';
+  const entityReads=f.s.entityReads;f.tick();assert.equal(f.q.arrivalPending,true);assert.equal(f.s.positionReads,1);
+  assert.equal(f.q.arrivalObservationWait,'position-unavailable');
+  assert.equal(f.s.entityReads,entityReads);assert.equal(f.q.arrivalObservationValid,false);
+  f.s.undefinedPosition=false;f.s.type='Vector4';f.s.physics=f.s.entity=f.q.arrivalDestination;f.s.time+=.02;f.tick();
+  assert.equal(f.q.arrivalUnconfirmed,false);assert.equal(f.q.active,false);assert.deepEqual(nativeEffects(f),effects);
+}
+for(const missing of ['state','capture','None'])for(const limit of ['time','callbacks']){
+  const f=queueReturn(),effects=nativeEffects(f);
+  if(missing==='state')f.s.current=false;if(missing==='capture')f.q.capturedInterface=null;if(missing==='None')f.s.type='None';
+  f.s.time+=.001;f.tick(.001);
+  const wait=missing==='None'?'position-unavailable':'context-or-capture';assert.equal(f.q.arrivalObservationWait,wait);
+  if(limit==='time'){f.s.time=f.q.arrivalIssuedAt+.5;f.tick();}else for(let i=1;i<64;i++){f.s.time+=.001;f.tick(.001);}
+  assert.equal(f.q.arrivalPending,false);assert.equal(f.q.arrivalUnconfirmed,true);assert.match(f.q.arrivalFailureReason,/limit/);
+  assert.equal(f.q.arrivalObservationWait,wait,'timeout retains the last bounded wait cause');
+  const readsAtReport=observationReads(f),report=f.p.NCCFlightProbeStopHere();assert(report.includes('observationWait='+wait));
+  assert.deepEqual(observationReads(f),readsAtReport,'stored wait report adds no queries');
+  const reads=f.s.positionReads;f.s.current=true;f.s.type='Vector4';f.q.capturedInterface=f.si;
+  f.s.physics=f.s.entity=f.q.arrivalDestination;f.s.time+=.02;f.tick();
+  assert.equal(f.s.positionReads,reads,'bounded timeout stops all later observation');assert.deepEqual(nativeEffects(f),effects);
 }
 for(const stale of ['interface','owner','state']){
   const f=fixture().active();f.s.accepted=false;queueReturn(f);let si=f.si;
@@ -448,7 +503,7 @@ for(const arrival of ['sameTime','physicsOnly','entityOnly','wrongDestination','
 for(const invalid of ['regression','NaN','Infinity','dt','W','type']){
   const f=queueReturn();f.s.time+=.02;
   if(invalid==='regression')f.s.time=f.q.arrivalIssuedAt-.1;if(invalid==='NaN')f.s.time=NaN;if(invalid==='Infinity')f.s.time=Infinity;
-  if(invalid==='W')f.s.physics=new Vector4(0,0,0,0);if(invalid==='type')f.s.type='None';
+  if(invalid==='W')f.s.physics=new Vector4(0,0,0,0);if(invalid==='type')f.s.type='Vector3';
   f.tick(invalid==='dt'?NaN:.02);assert.equal(f.q.arrivalPending,false,invalid);assert.equal(f.q.arrivalUnconfirmed,true);
   const reads=f.s.positionReads;f.tick();assert.equal(f.s.positionReads,reads,'refusal stops observation until an explicit recheck');
 }
@@ -598,7 +653,7 @@ function observationReads(f){return {input:f.s.reads,physics:f.s.positionReads,e
   assert.match(report,/control=stop-here queuedExit=0 processingExit=0/,'blocked Stop followed by guard failure is distinct from outgoing exit');
 }
 {
-  const f=queueReturn();f.s.time+=.02;f.s.type='None';f.tick();
+  const f=queueReturn();f.s.time+=.02;f.s.type='Vector3';f.tick();
   const failure=f.q.arrivalFailureReason,callbacks=f.q.arrivalFailureCallbacks,elapsed=f.q.arrivalFailureElapsed;
   assert.match(failure,/invalid physics position type/);f.p.NCCFlightProbeCaptureFilter(f.si,{valid:true},true);
   assert.doesNotMatch(f.q.status,/invalid physics position type/,'normal capture may replace human status');
