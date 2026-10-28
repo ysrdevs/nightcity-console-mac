@@ -38,6 +38,7 @@ class Vector4 {
 }
 class Vector3{constructor(X,Y,Z){Object.assign(this,{X,Y,Z});}}
 const methods={EnsureMenuListener:'',RequestStop:'reason',Pause:'reason',MenuChanged:'value',ObserveInput:'packet',
+  InteractionFlags:'scriptInterface',FinishInteractionYield:'',YieldInteraction:'scriptInterface',CheckInteraction:'scriptInterface',
   Count:'value',BoundedVector:'value,limit',Allowed:'stateName,machineName',OwnsMovement:'scriptInterface',Toggle:'',Prepare:'commandPacket',Return:'',
   StopHere:'',Resume:'commandPacket',Restore:'scriptInterface,reason,allowRecovery',
   RestoreAt:'scriptInterface,destination,facing,move,reason',ObserveExitPosition:'scriptInterface',ProcessExit:'scriptInterface',
@@ -51,6 +52,7 @@ const methods={EnsureMenuListener:'',RequestStop:'reason',Pause:'reason',MenuCha
 const packet=(epoch=3,flags=512)=>epoch*65536+flags;
 function fixture(){
   const s={menu:false,current:true,grounded:true,packet:packet(),time:100,entity:new Vector4(10,20,30,1),physics:new Vector4(10,20,30,1),
+    interactionReads:0,workspotReads:0,zoom:false,device:false,workspotBB:0,workspot:false,
     reads:0,positionReads:0,entityReads:0,sampleAllocations:0,formats:0,normal:0,zero:0,restores:0,restoreArgs:[],velocity:0,positions:0,teleports:[],queries:[],callbacks:[],accepted:true,controls:true};
   const facing={Yaw:0,Pitch:0,Roll:0};
   const defaults=()=>({active:false,requested:false,paused:false,resumeRequested:false,exitRequest:0,preparePending:false,prepared:false,
@@ -61,14 +63,17 @@ function fixture(){
     lastClearFacing:facing,lastClearanceProbePosition:s.entity,positionOriginDelta:new Vector4(),positionLastTarget:s.physics,positionReadbackPending:false,
     positionWritesIssued:0,positionReadbacks:0,positionRefusals:0,ticks:0,filterWrites:0,velocityWrites:0,maxObservedEntityRadius:0,
     maxPositionOriginDivergence:0,maxPositionReadbackDistance:0,elapsed:0,clearanceClock:0,clearanceProbes:0,capsuleHeight:1.8,capsuleRadius:.4});
-  const p={isPlayer:true,nccCollisionFlightProbe:defaults(),GetGame:()=>0,IsDead:()=>!!s.dead,GetWorldPosition:()=>{s.entityReads++;return s.entity;},GetWorldOrientation:()=>facing,
+  const p={isPlayer:true,nccCollisionFlightProbe:defaults(),GetGame:()=>0,GetEntityID:()=>1,IsDead:()=>!!s.dead,GetWorldPosition:()=>{s.entityReads++;return s.entity;},GetWorldOrientation:()=>facing,
     NCCFlightProbeIsFilter:v=>!!v?.valid,NCCFlightProbeIsVelocity:()=>true,NCCFlightProbeZeroVelocity:()=>({}),
     NCCFlightProbeZeroFilter:()=>({valid:true,zero:true}),NCCFlightCameraBefore:()=>false,NCCFlightCameraStartActive:()=>{},
     NCCFlightProbeCameraFacing:()=>facing,NCCFlightInput(){s.reads++;return s.packet;},
     NCCFlightProbeWriteFilter(si,v){if(v.zero){s.zero++;if(s.afterZero)s.afterZero();return true;}s.restores++;s.restoreArgs.push({si,v});return s.accepted;},
     NCCFlightClearanceInitialize(){s.initialized=true;return !s.initFails;},NCCFlightClearanceVerifyControls(si,pos){s.controlPosition=pos;return s.controls;},
     NCCFlightClearanceAt(si,pos){s.queries.push(pos);return s.clear?s.clear(pos):s.controls;}};
-  const si={owner:p,IsMountedToObject:()=>!!s.mounted,IsPlayerInBraindance:()=>false,IsSceneAnimationActive:()=>false,IsOnGround:()=>s.grounded,
+  const interactionBoard={GetBool:k=>{s.interactionReads++;return k==='zoom'?s.zoom:s.device;},GetInt:()=>{s.interactionReads++;return s.workspotBB;}};
+  const workspots={IsActorInWorkspot:actor=>{assert.equal(actor,p);s.workspotReads++;return s.workspot;}};
+  const si={owner:p,executionOwner:p,localBlackboard:interactionBoard,GetWorkspotSystem:()=>workspots,
+    IsMountedToObject:()=>!!s.mounted,IsPlayerInBraindance:()=>false,IsSceneAnimationActive:()=>false,IsOnGround:()=>s.grounded,
     SetStateVectorParameter(){s.velocity++;return true;},GetStateVectorParameter(k){if(k==='pos')s.positionReads++;return k==='pos'?{type:s.type||'Vector4',value:s.physics}:{type:'Vector4'};},
     GetCameraSystem:()=>({GetActiveCameraRight:()=>new Vector4(1,0,0,0),GetActiveCameraForward:()=>new Vector4(0,1,0,0)}),
     NCCFlightWritePosition(v){s.positions++;s.physics=new Vector4(v.X,v.Y,v.Z,1);s.entity=s.physics;return !s.rejectPosition;}};
@@ -78,8 +83,9 @@ function fixture(){
     ArrayPush:(a,v)=>a.push(v),ArraySize:a=>a.length,ToString:v=>{s.formats++;return String(v);},FloatToStringPrec:(v,n)=>{s.formats++;return v.toFixed(n);},
     NCCFlightTransitionTrace:Trace,NCCFlightTransitionSample:class{constructor(){s.sampleAllocations++;}},
     AbsF:Math.abs,MinF:Math.min,MaxF:Math.max,ClampF:(n,a,b)=>Math.max(a,Math.min(n,b)),VariantTypeName:v=>v?.type||'physicsSimulationFilter',NameToString:v=>v,
-    Quaternion:{ToEulerAngles:v=>v},GetAllBlackboardDefs:()=>({UI_System:{IsInMenu:'menu'}}),EngineTime:{ToFloat:v=>v},
-    GameInstance:{GetBlackboardSystem:()=>({Get:()=>board}),GetSimTime:()=>s.time,GetDelaySystem:()=>({DelayCallbackNextFrame:cb=>s.callbacks.push(cb)}),
+    Quaternion:{ToEulerAngles:v=>v},GetAllBlackboardDefs:()=>({UI_System:{IsInMenu:'menu'},PlayerStateMachine:{IsUIZoomDevice:'zoom',IsInteractingWithDevice:'device',IsInWorkspot:'workspot'}}),EngineTime:{ToFloat:v=>v},
+    GameInstance:{GetBlackboardSystem:()=>({Get:()=>board,GetLocalInstanced:()=>s.missingInteractionBoard?null:interactionBoard}),GetWorkspotSystem:()=>workspots,
+      GetSimTime:()=>s.time,GetDelaySystem:()=>({DelayCallbackNextFrame:cb=>s.callbacks.push(cb)}),
       GetTeleportationFacility:()=>({Teleport(owner,pos){assert.equal(owner,p);s.teleports.push(pos);if(!s.deferTeleport){s.entity=pos;s.physics=pos;}}})},
     physicsStateValue:{Position:'pos',LinearVelocity:'vel'},NCCCollisionFlightTransitionWatchdog:class{},
     NCCCollisionFlightProbeState:class{constructor(){Object.assign(this,defaults(),{focusEpochValid:false});}},
@@ -96,8 +102,9 @@ function fixture(){
     SetCollisionFilter(x){assert.equal(x,si);s.normal++;if(!s.captureFails)p.NCCFlightProbeCaptureFilter(si,{valid:true},!s.zeroPreset);if(s.afterCapture)s.afterCapture();}};
   const tick=vm.runInContext(`(function(timeDelta,stateContext,scriptInterface){${body('OnUpdate')}})`,c).bind(transition);
   const exit=vm.runInContext(`(function(stateContext,scriptInterface){${body('OnExit')}})`,c).bind(transition);
+  const forcedExit=vm.runInContext(`(function(stateContext,scriptInterface){${body('OnForcedExit')}})`,c).bind(transition);
   p.nccCollisionFlightProbe.interfaceRef=si;p.nccCollisionFlightProbe.capturedInterface=si;
-  return{s,p,si,sc,get q(){return p.nccCollisionFlightProbe;},tick(dt=.02,x=si){tick(dt,sc,x);},exit(){exit(sc,si);},
+  return{s,p,si,sc,get q(){return p.nccCollisionFlightProbe;},tick(dt=.02,x=si){tick(dt,sc,x);},exit(){exit(sc,si);},forcedExit(){forcedExit(sc,si);},
     trace(){const t=new Trace();t.TraceInitialize();t.running=true;t.stop='running';t.fromState=t.toState='stand';t.fromMachine=t.toMachine='Locomotion';this.q.transitionTrace=t;return t;},
     start(v=packet()){return p.NCCFlightProbePrepare(v);},active(){this.q.active=true;this.q.requested=true;p.NCCFlightProbeEnsureMenuListener();return this;}};
 }
@@ -481,4 +488,79 @@ for(const method of ['EnterCondition','ToSprint','ToCrouchSprint']){
     for(const result of [true,false])assert.deepEqual(dodgeDecision(f,si,machine,result,method),{result,calls:1},method+' '+mode);
   }
 }
-console.log('PASS actual flight lifecycle, scoped dash/sprint gates, bounded trace, immutable queued relocation/normal-collision cleanup and explicit bounded arrival recheck');
+const interactionKinds=['zoom','device','workspotBB','workspot'];
+for(const kind of interactionKinds)for(const flow of ['update','paused','exit','forcedExit','return','restoreAt']){
+  const f=fixture().active();f.s[kind]=kind==='workspotBB'?1:true;f.s.clear=()=>false;
+  f.s.physics=new Vector4(30,20,30,1); // Even inconsistent/blocked placement must never trigger relocation during yield.
+  if(flow==='paused')f.q.paused=true;
+  if(flow==='exit')f.exit();else if(flow==='forcedExit')f.forcedExit();
+  else if(flow==='restoreAt')f.p.NCCFlightProbeRestoreAt(f.si,f.q.start,{Yaw:0,Pitch:0,Roll:0},true,'return');
+  else {if(flow==='return')f.p.NCCFlightProbeReturn();f.tick();}
+  assert.equal(f.q.interactionYield,true,kind+' '+flow);assert.equal(f.q.active,false);assert.equal(f.q.requested,false);
+  assert.equal(f.q.transitionPending,false);assert.equal(f.q.exitRequest,0);assert.equal(f.q.arrivalUnconfirmed,false);
+  assert.equal(f.s.restores,1);assert.equal(f.s.teleports.length,0);assert.equal(f.s.zero,0);assert.equal(f.s.positions,0);
+  assert.equal(f.s.velocity,0,'interaction yield only restores the owned normal filter');assert.equal(f.s.queries.length,0);
+  assert.equal(f.s.positionReads,0);assert.equal(f.s.entityReads,0);assert.equal(f.q.restoreUnconfirmed,false);
+  assert.match(f.p.NCCFlightProbeResume(packet()),/finish the interaction/);assert.match(f.p.NCCFlightProbeReturn(),/no relocation/);
+  const reads={i:f.s.interactionReads,w:f.s.workspotReads,input:f.s.reads},status=f.q.status;
+  for(let i=0;i<3;i++)f.tick();assert.deepEqual({i:f.s.interactionReads,w:f.s.workspotReads,input:f.s.reads},reads);
+  assert.equal(f.q.status,status,'completed interaction yield keeps the idle fast path');
+  assert.match(f.start(),/finish the device/);f.s[kind]=kind==='workspotBB'?0:false;f.s.physics=f.s.entity;f.s.clear=()=>true;
+  assert.match(f.start(),/Requested/);assert.equal(f.q.interactionYield,false);f.tick();f.tick();assert.equal(f.q.active,true);
+}
+for(const kind of interactionKinds)for(const phase of ['beforeStart','preparing','prepared','capture']){
+  const f=fixture();
+  if(phase!=='beforeStart')f.start();if(phase==='prepared')f.tick();
+  if(phase==='capture')f.s.afterCapture=()=>{f.s[kind]=kind==='workspotBB'?1:true;};else f.s[kind]=kind==='workspotBB'?1:true;
+  if(phase==='beforeStart')assert.match(f.start(),/finish the device/);else {f.tick();if(phase==='capture')f.tick();}
+  assert.equal(f.q.requested,false);assert.equal(f.q.active,false);assert.equal(f.s.zero,0);assert.equal(f.s.positions,0);
+  assert.equal(f.s.restores,0,'preparation without flight ownership never writes a restoration filter');assert.equal(f.s.teleports.length,0);
+}
+{
+  const f=fixture().active(),baseline=f.q.baselineFilter;f.s.zoom=true;f.s.accepted=false;f.tick();
+  assert.equal(f.q.interactionYield,true);assert.equal(f.q.active,true);assert.equal(f.q.restoreUnconfirmed,true);
+  f.s.zoom=false;f.q.baselineFilter={valid:true,replaced:true};f.s.physics=new Vector4(12,20,30,1);
+  for(let i=0;i<3;i++){f.tick();f.p.NCCFlightProbeRestore(f.si,'forced state exit',true);}
+  assert.equal(f.s.teleports.length,0);assert.equal(f.s.zero,0);assert.equal(f.s.positions,0);assert.equal(f.s.queries.length,0);
+  for(const call of f.s.restoreArgs){assert.equal(call.si,f.si);assert.equal(call.v,baseline);}
+  f.s.accepted=true;f.tick();assert.equal(f.q.active,false);assert.equal(f.q.restoreUnconfirmed,false);assert.equal(f.q.interactionYield,true);
+}
+for(const normal of [true,false]){
+  const f=fixture().active();f.s.device=true;f.s.accepted=false;f.tick();const restores=f.s.restores;
+  f.s.device=false;f.p.NCCFlightProbeCaptureFilter(f.si,{valid:true,zero:!normal},normal);f.tick();
+  assert.equal(f.s.restores,restores,'new original engine state supersedes old interaction cleanup authority');
+  assert.equal(f.q.active,false);assert.equal(f.q.interfaceRef,null);assert.equal(f.q.restoreUnconfirmed,!normal);
+  assert.equal(f.s.teleports.length,0);assert.equal(f.q.interactionYield,true);
+  if(!normal){assert.match(f.start(),/restoration is unconfirmed/);f.p.NCCFlightProbeCaptureFilter(f.si,{valid:true},true);assert.equal(f.q.restoreUnconfirmed,false);}
+}
+for(const stale of ['interface','owner','executionOwner']){
+  const f=fixture().active();f.s.workspot=true;f.s.accepted=false;f.tick();const effects=nativeEffects(f),reads=f.s.workspotReads;
+  let si={...f.si};if(stale==='owner')si.owner={};if(stale==='executionOwner'){si=f.si;si.executionOwner={};}
+  f.p.NCCFlightProbeCheckInteraction(si);assert.deepEqual(nativeEffects(f),effects);assert.equal(f.s.workspotReads,reads);
+  assert.equal(f.q.restoreUnconfirmed,true);assert.equal(f.q.active,false);assert.equal(f.q.interactionYield,true);
+  const captured=f.q.capturedFilter;f.p.NCCFlightProbeCaptureFilter({...f.si,executionOwner:{}},{valid:true},true);
+  assert.equal(f.q.restoreUnconfirmed,true);assert.equal(f.q.capturedFilter,captured,'foreign execution owner cannot acknowledge cleanup');
+}
+for(const stage of ['command','preparation','active'])for(const missing of ['board','workspots','executionOwner']){
+  const f=fixture();if(stage==='preparation')f.start();if(stage==='active')f.active();
+  if(stage==='command')f.s.missingInteractionBoard=true;
+  else if(missing==='board')f.si.localBlackboard=null;
+  else if(missing==='workspots')f.si.GetWorkspotSystem=()=>null;
+  else f.si.executionOwner={};
+  if(stage==='command')assert.match(f.start(),/interaction state is unavailable/);else f.tick();
+  assert.equal(f.q.requested,false);assert.equal(f.q.active,false);assert.equal(f.s.zero,0);assert.equal(f.s.positions,0);assert.equal(f.s.teleports.length,0);
+}
+{
+  const f=fixture();for(let i=0;i<3;i++){f.tick();f.p.NCCFlightProbeCaptureFilter(f.si,{valid:true},true);}
+  assert.equal(f.s.interactionReads,0);assert.equal(f.s.workspotReads,0);assert.equal(f.s.reads,0,'ordinary idle hooks perform no new polling');
+  f.active();f.s.menu=true;f.p.NCCFlightProbeMenuChanged(true);f.tick();assert.equal(f.q.paused,true);assert.equal(f.q.active,true);
+  assert.equal(f.q.interactionYield,undefined,'ordinary inventory menu retains existing pause behavior');assert.equal(f.s.restores,0);
+}
+{
+  const f=queueReturn(),destination=f.q.arrivalDestination,serial=f.q.arrivalSerial;f.s.zoom=true;f.s.workspot=true;
+  const effects=nativeEffects(f);f.p.NCCFlightProbeMenuChanged(true);f.start();f.p.NCCFlightProbeReturn();f.p.NCCFlightProbeStopHere();
+  f.p.NCCFlightProbeResume(packet());f.p.NCCFlightProbeRestore(f.si,'interaction',true);f.tick();
+  assert.equal(f.q.arrivalUnconfirmed,true);assert.equal(f.q.arrivalPending,true);assert.equal(f.q.arrivalDestination,destination);
+  assert.equal(f.q.arrivalSerial,serial);assert.deepEqual(nativeEffects(f),effects);assert.equal(f.q.interactionYield,undefined);
+}
+console.log('PASS actual flight lifecycle, dash/sprint gates, queued relocation quarantine and interaction yield without relocations, including retries, original ZERO takeover and idle fast paths');

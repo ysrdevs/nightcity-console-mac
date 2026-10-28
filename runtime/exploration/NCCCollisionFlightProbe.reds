@@ -342,6 +342,12 @@ class NCCCollisionFlightProbeState extends IScriptable {
   public let arrivalRestoreCapture: Int32;
   public let arrivalRestoreState: CName;
   public let arrivalRestoreMachine: CName;
+  public let interactionYield: Bool;
+  public let interactionFlags: Int32;
+  public let interactionReason: String;
+  public let interactionRestoreInterface: wref<StateGameScriptInterface>;
+  public let interactionRestoreFilter: Variant;
+  public let interactionRestoreCapture: Int32;
   public let clearanceFailed: Bool;
   public let exitObservedPosition: Vector4;
   public let transitionPending: Bool;
@@ -447,6 +453,111 @@ public final func NCCFlightInput() -> Uint32 {
   // Native exact-function result bridge replaces only this return value.
   // Default blocks movement and lacks READY, so a missing bridge fails closed.
   return 256u;
+}
+
+@addMethod(PlayerPuppet)
+private final func NCCFlightProbeInteractionFlags(scriptInterface: ref<StateGameScriptInterface>) -> Int32 {
+  let board: ref<IBlackboard>;
+  let workspots: ref<WorkspotGameSystem>;
+  let flags = 0;
+  if IsDefined(scriptInterface) {
+    if scriptInterface.owner != this || scriptInterface.executionOwner != this { return -1; }
+    board = scriptInterface.localBlackboard;
+    workspots = scriptInterface.GetWorkspotSystem();
+  } else {
+    board = GameInstance.GetBlackboardSystem(this.GetGame()).GetLocalInstanced(this.GetEntityID(), GetAllBlackboardDefs().PlayerStateMachine);
+    workspots = GameInstance.GetWorkspotSystem(this.GetGame());
+  }
+  if !IsDefined(board) || !IsDefined(workspots) { return -1; }
+  if board.GetBool(GetAllBlackboardDefs().PlayerStateMachine.IsUIZoomDevice) { flags += 1; }
+  if board.GetBool(GetAllBlackboardDefs().PlayerStateMachine.IsInteractingWithDevice) { flags += 2; }
+  if board.GetInt(GetAllBlackboardDefs().PlayerStateMachine.IsInWorkspot) != 0 { flags += 4; }
+  // Device workspot entry sets its blackboard after the native playback call.
+  // This is the same native actor query used by WorkspotDecisions.EnterCondition.
+  if workspots.IsActorInWorkspot(this) { flags += 8; }
+  return flags;
+}
+
+@addMethod(PlayerPuppet)
+private final func NCCFlightProbeFinishInteractionYield() {
+  let probe = this.nccCollisionFlightProbe;
+  if !IsDefined(probe) || !probe.interactionYield || probe.arrivalUnconfirmed { return; }
+  probe.restoreUnconfirmed = false;
+  probe.stopRequested = false;
+  probe.active = false;
+  probe.paused = false;
+  probe.interfaceRef = null;
+  probe.status = "Flight stopped for device/workspot interaction; normal collision restored without relocation";
+}
+
+@addMethod(PlayerPuppet)
+private final func NCCFlightProbeYieldInteraction(scriptInterface: ref<StateGameScriptInterface>) -> Bool {
+  let probe = this.nccCollisionFlightProbe;
+  if !IsDefined(probe) || probe.arrivalUnconfirmed { return false; }
+  if !probe.interactionYield {
+    probe.interactionYield = true;
+    if probe.interactionFlags < 0 {
+      probe.interactionReason = "Current interaction context is unavailable; flight cancels without relocation";
+    } else {
+      probe.interactionReason = "Device/workspot interaction owns player placement; flight will not relocate the player";
+    }
+    probe.interactionRestoreInterface = probe.interfaceRef;
+    probe.interactionRestoreFilter = probe.baselineFilter;
+    probe.interactionRestoreCapture = probe.captureWrites;
+  }
+  // This latch survives flags clearing and failed collision restoration.
+  probe.requested = false;
+  probe.preparePending = false;
+  probe.prepared = false;
+  probe.resumeRequested = false;
+  probe.exitRequest = 0;
+  probe.transitionPending = false;
+  probe.positionReadbackPending = false;
+  if !probe.active {
+    probe.status = "Flight cancelled for device/workspot interaction; no relocation submitted";
+    return !probe.restoreUnconfirmed;
+  }
+  if !IsDefined(scriptInterface) || scriptInterface.owner != this || scriptInterface.executionOwner != this
+    || probe.interfaceRef != scriptInterface || probe.interactionRestoreInterface != scriptInterface
+    || probe.captureWrites != probe.interactionRestoreCapture || probe.capturedInterface != scriptInterface
+    || !probe.capturedNormal || !this.NCCFlightProbeIsFilter(probe.interactionRestoreFilter) {
+    probe.restoreUnconfirmed = true;
+    probe.active = false;
+    probe.interfaceRef = null;
+    probe.status = "Interaction cleanup awaits a fresh normal filter; previous state is no longer owned; no relocation submitted";
+    return false;
+  }
+  if this.NCCFlightProbeWriteFilter(scriptInterface, probe.interactionRestoreFilter) {
+    this.NCCFlightProbeFinishInteractionYield();
+    return true;
+  }
+  probe.restoreUnconfirmed = true;
+  probe.paused = true;
+  probe.stopRequested = true;
+  probe.status = "Interaction cleanup will retry only its owned normal collision filter; no relocation submitted";
+  return false;
+}
+
+@addMethod(PlayerPuppet)
+private final func NCCFlightProbeCheckInteraction(scriptInterface: ref<StateGameScriptInterface>) -> Bool {
+  let probe = this.nccCollisionFlightProbe;
+  if !IsDefined(probe) || probe.arrivalUnconfirmed { return false; }
+  if probe.interactionYield {
+    if probe.active {
+      this.NCCFlightProbeYieldInteraction(scriptInterface);
+      return true;
+    }
+    // Completed cleanup needs no polling or status changes. Existing idle and
+    // read-only validation handling may run; only a new Start clears the latch.
+    return false;
+  }
+  if !probe.active && !probe.requested && !probe.transitionPending { return false; }
+  probe.interactionFlags = this.NCCFlightProbeInteractionFlags(scriptInterface);
+  if probe.interactionFlags != 0 {
+    this.NCCFlightProbeYieldInteraction(scriptInterface);
+    return true;
+  }
+  return false;
 }
 
 @addMethod(PlayerPuppet)
@@ -573,6 +684,13 @@ public final func NCCFlightProbePrepare(commandPacket: Uint32) -> String {
     probe.status = "Read-only arrival recheck requested; after confirmation, press Start again";
     return probe.status;
   }
+  probe.interactionFlags = this.NCCFlightProbeInteractionFlags(null);
+  if probe.interactionFlags < 0 {
+    return "Start refused: current interaction state is unavailable";
+  }
+  if probe.interactionFlags > 0 {
+    return "Start refused: finish the device or workspot interaction first";
+  }
   if probe.active || probe.requested || probe.transitionPending {
     return "Flight already active or preparing; use Stop here, Resume, or Return to start";
   }
@@ -600,6 +718,8 @@ public final func NCCFlightProbePrepare(commandPacket: Uint32) -> String {
   probe.focusEpoch = commandPacket / 65536u;
   probe.focusEpochValid = true;
   probe.stopRequested = false;
+  probe.interactionYield = false;
+  probe.interactionReason = "";
   probe.stopReason = "";
   probe.paused = false;
   probe.pauseReason = "";
@@ -634,6 +754,9 @@ public final func NCCFlightProbeReturn() -> String {
   let probe = this.nccCollisionFlightProbe;
   if IsDefined(probe) && probe.arrivalUnconfirmed {
     return "Return refused: the previous relocation is unresolved; no additional request was submitted";
+  }
+  if IsDefined(probe) && probe.interactionYield {
+    return "Return refused: flight yielded to an interaction; no relocation will be submitted";
   }
   if !IsDefined(probe) || (!probe.active && !probe.transitionPending) {
     return "Return refused: no active flight session";
@@ -673,6 +796,9 @@ public final func NCCFlightProbeResume(commandPacket: Uint32) -> String {
   let probe = this.nccCollisionFlightProbe;
   if IsDefined(probe) && probe.arrivalUnconfirmed {
     return "Resume refused: queued relocation arrival is unresolved; flight will not resume automatically";
+  }
+  if IsDefined(probe) && probe.interactionYield {
+    return "Resume refused: finish the interaction and start a new flight";
   }
   if !IsDefined(probe) || !probe.active || !probe.paused || probe.transitionPending {
     return "Resume refused: flight is not paused in an owned state";
@@ -890,7 +1016,8 @@ private final func NCCFlightProbeCameraFacing(scriptInterface: ref<StateGameScri
 @addMethod(PlayerPuppet)
 public final func NCCFlightProbeCaptureFilter(scriptInterface: ref<StateGameScriptInterface>, value: Variant, normalPreset: Bool) {
   let probe: ref<NCCCollisionFlightProbeState>;
-  if !IsDefined(scriptInterface) || scriptInterface.owner != this || !this.NCCFlightProbeIsFilter(value) {
+  if !IsDefined(scriptInterface) || scriptInterface.owner != this || scriptInterface.executionOwner != this
+    || !this.NCCFlightProbeIsFilter(value) {
     return;
   }
   if !IsDefined(this.nccCollisionFlightProbe) {
@@ -918,6 +1045,35 @@ public final func NCCFlightProbeCaptureFilter(scriptInterface: ref<StateGameScri
       probe.interfaceRef = null;
       probe.restoreUnconfirmed = true;
       this.NCCFlightProbeArrivalFailed("Original zero-preset state replaced queued cleanup ownership");
+    }
+    return;
+  }
+  if !probe.interactionYield && (probe.active || probe.requested || probe.transitionPending) {
+    probe.interactionFlags = this.NCCFlightProbeInteractionFlags(scriptInterface);
+    if probe.interactionFlags != 0 {
+      probe.interactionYield = true;
+      if probe.interactionFlags < 0 {
+        probe.interactionReason = "Current interaction context unavailable during original filter capture; no flight relocation submitted";
+      } else {
+        probe.interactionReason = "Original interaction state took placement control; no flight relocation submitted";
+      }
+    }
+  }
+  if probe.interactionYield {
+    probe.requested = false;
+    probe.preparePending = false;
+    probe.prepared = false;
+    probe.transitionPending = false;
+    probe.resumeRequested = false;
+    probe.exitRequest = 0;
+    probe.positionReadbackPending = false;
+    probe.active = false;
+    probe.interfaceRef = null;
+    if normalPreset {
+      this.NCCFlightProbeFinishInteractionYield();
+    } else {
+      probe.restoreUnconfirmed = true;
+      probe.status = "Interaction engine state owns a zero collision preset; waiting for its next normal filter; no relocation submitted";
     }
     return;
   }
@@ -1036,6 +1192,10 @@ public final func NCCFlightProbeStatus() -> String {
     + "; lastClearValid=" + ToString(probe.lastClearValid)
     + "; checkpointQueries=" + ToString(probe.clearanceProbes)
     + "; recoveryUsed=" + ToString(probe.recoveryUsed)
+    + "; interactionYield=" + ToString(probe.interactionYield)
+    + "; interactionFlagsLastObserved=" + ToString(probe.interactionFlags)
+    + "; interactionReason=" + probe.interactionReason
+    + "; queuedRelocationReason=" + probe.arrivalReason
     + "; arrivalPending=" + ToString(probe.arrivalPending)
     + "; arrivalUnconfirmed=" + ToString(probe.arrivalUnconfirmed)
     + "; arrivalSerial=" + ToString(probe.arrivalSerial)
@@ -1434,6 +1594,9 @@ private final func NCCFlightProbeRestoreAt(scriptInterface: ref<StateGameScriptI
   if IsDefined(probe) && probe.arrivalUnconfirmed {
     return this.NCCFlightProbeRetryQueuedRestore(scriptInterface);
   }
+  if this.NCCFlightProbeCheckInteraction(scriptInterface) {
+    return !probe.active && !probe.restoreUnconfirmed;
+  }
   if !IsDefined(probe) || !probe.active {
     return false;
   }
@@ -1563,6 +1726,7 @@ public final func NCCFlightProbeRestore(scriptInterface: ref<StateGameScriptInte
     this.NCCFlightProbeRetryQueuedRestore(scriptInterface);
     return;
   }
+  if this.NCCFlightProbeCheckInteraction(scriptInterface) { return; }
   if !probe.active {
     probe.requested = false;
     probe.preparePending = false;
@@ -1667,12 +1831,13 @@ public final func NCCFlightProbeSuspendForTransition(scriptInterface: ref<StateG
   if !IsDefined(probe) || !probe.active {
     return;
   }
+  if this.NCCFlightProbeCheckInteraction(scriptInterface) { return; }
   resume = probe.requested;
   wasPaused = probe.paused;
   exitIntent = probe.exitRequest;
   probe.transitionFacing = this.NCCFlightProbeCameraFacing(scriptInterface);
   this.NCCFlightProbeRestore(scriptInterface, "Restored normal collision for locomotion exit", true);
-  if !probe.active && resume && !probe.clearanceFailed && !probe.arrivalUnconfirmed {
+  if !probe.active && resume && !probe.clearanceFailed && !probe.arrivalUnconfirmed && !probe.interactionYield {
     probe.requested = true;
     probe.paused = wasPaused || probe.restoreMoved;
     if probe.restoreMoved {
@@ -1701,6 +1866,7 @@ public final func NCCFlightProbeObserveStateFilter(scriptInterface: ref<StateGam
     return;
   }
   if probe.arrivalUnconfirmed { return; }
+  if this.NCCFlightProbeCheckInteraction(scriptInterface) { return; }
   // A bounded native scope captured the original state method's successful
   // filter write before this callback. The native getter cannot read it back.
   chosenFilter = probe.capturedFilter;
@@ -1791,6 +1957,7 @@ public final func NCCFlightProbePreparationTick(timeDelta: Float, stateContext: 
     this.NCCFlightProbeRestore(scriptInterface, "Preparation refused: owner or collision restoration is unconfirmed", false);
     return 1;
   }
+  if this.NCCFlightProbeCheckInteraction(scriptInterface) { return 1; }
   packet = this.NCCFlightInput();
   this.NCCFlightProbeObserveInput(packet);
   if !IsDefined(probe.menuBlackboard) || !IsDefined(probe.menuListener) {
@@ -1890,6 +2057,7 @@ public final func NCCFlightProbeUpdate(timeDelta: Float, stateContext: ref<State
     this.NCCFlightProbeArrivalTick(timeDelta, stateContext, scriptInterface, stateName, machineName);
     return;
   }
+  if this.NCCFlightProbeCheckInteraction(scriptInterface) { return; }
   if probe.active && (!IsDefined(scriptInterface) || scriptInterface.owner != this
     || probe.interfaceRef != scriptInterface) {
     // Never apply an old state's baseline or ZERO through a different context.
