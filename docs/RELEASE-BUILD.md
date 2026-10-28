@@ -45,7 +45,7 @@ framework payload remains separate from the optional gameplay packages.
 Release staging also deterministically builds Equipment-EX 1.2.9 and
 Cyberware-EX 1.5.6 from the pinned MIT inputs under `native25/optional-mods`.
 The two unpacked mod folders, catalogue and license files are copied to
-`Contents/Resources/optional-mods`. The schema 2 catalogue records every installed
+`Contents/Resources/optional-mods`. The schema 2 catalogue records every bundled
 file hash. No optional-mod ZIP is embedded in the app. Both are optional, unchecked by default,
 and offered only on game 2.5.0. See that directory’s README and source lock
 for provenance, the exact compatibility adaptation and reproduction commands.

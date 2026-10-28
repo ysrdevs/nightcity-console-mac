@@ -1,6 +1,6 @@
 # NightCity Console 1.8.1: Optional Mod Packaging
 
-Installer verification and Apple notarization are in progress.
+The app and DMG are Developer ID signed, notarized by Apple and stapled. The ZIP contains the same stapled app, with no nested ZIP files. Folder installation passed checks using the shipped helper, including all 47 installed file hashes and existing-install detection.
 
 This update packages Equipment-EX and Cyberware-EX as regular folders inside the app so download-site scanners can inspect their contents directly. The app no longer contains the two nested optional-mod ZIPs.
 
