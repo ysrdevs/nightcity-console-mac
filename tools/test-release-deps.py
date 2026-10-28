@@ -87,7 +87,10 @@ class ReleaseInputsTest(unittest.TestCase):
         self.assertEqual(module.digest(self.args.baseline), original)
         manifest = json.loads((self.args.output / "release-inputs.json").read_text())
         self.assertEqual(manifest["files"]["nctool/nctool.dll"], module.digest(self.args.nctool / "nctool.dll"))
-        self.assertEqual(len([p for p in manifest["files"] if p.startswith("optional-mods/")]), 5)
+        expected_optional = module.OPTIONAL["expected_payload"]()
+        self.assertEqual({p.removeprefix("optional-mods/") for p in manifest["files"]
+                          if p.startswith("optional-mods/")}, set(expected_optional))
+        self.assertFalse(any(p.endswith(".zip") for p in expected_optional))
         module.OPTIONAL["verify"](self.args.output / "optional-mods")
 
     def test_public_metadata_contains_only_runtime_identity_and_hashes(self):

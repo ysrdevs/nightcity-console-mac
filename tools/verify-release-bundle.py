@@ -1,14 +1,42 @@
 #!/usr/bin/env python3
 """Check a local release bundle before signing or distribution. Never runs its code."""
 import argparse
+import errno
 import json
 from pathlib import Path
 import plistlib
 import runpy
 import subprocess
+import zipfile
 
 helpers = runpy.run_path(str(Path(__file__).with_name("prepare-release-deps.py")))
 exploration = runpy.run_path(str(Path(__file__).with_name("prepare-exploration.py")))
+
+
+def verify_no_nested_zips(app):
+    """Distribution containers may be ZIPs, but their app payload must not be."""
+    for path in app.rglob("*"):
+        if not path.is_file():
+            continue
+        with path.open("rb") as stream:
+            header = stream.read(4)
+        # is_zipfile only recognizes an end marker. ZIP-processing libraries
+        # contain those constants too, so require a readable central directory.
+        has_zip_directory = False
+        if zipfile.is_zipfile(path):
+            try:
+                with zipfile.ZipFile(path) as archive:
+                    archive.infolist()
+                    has_zip_directory = True
+            except (zipfile.BadZipFile, ValueError):
+                pass
+            except OSError as error:
+                if error.errno != errno.EINVAL:
+                    raise
+        if (path.suffix.lower() in {".zip", ".zipx"}
+                or header in {b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"}
+                or has_zip_directory):
+            raise ValueError(f"nested ZIP in app payload: {path.relative_to(app)}")
 
 
 def verify_exploration(resources, version, manifest, check_inputs=False):
@@ -31,6 +59,8 @@ def verify(app, check_inputs=False):
     version = info["CFBundleShortVersionString"]
     if version != info["CFBundleVersion"] or tuple(map(int, version.split("."))) <= (1, 5, 0):
         raise ValueError("release bundle versions must match and be newer than the public 1.5.0 baseline")
+    if tuple(map(int, version.split("."))) >= (1, 8, 1):
+        verify_no_nested_zips(app)
     manifest = json.loads((resources / "release-inputs.json").read_text())
     if manifest.get("baseline", {}).get("sha256") != helpers["BASELINE_SHA256"]:
         raise ValueError("release-inputs.json does not identify the pinned public baseline")

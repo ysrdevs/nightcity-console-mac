@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 import CryptoKit
 
 enum Const {
-    static let appVersion = "1.8.0"
+    static let appVersion = "1.8.1"
     static let supportedGameVersions = ["2.3.1", "2.5.0"]
     // Payload files that only work on game 2.3.1: the RED4ext AddressLib is a 2.3.1 address list, and on any
     // other version RED4ext would resolve its hashes to the wrong code.
@@ -919,7 +919,7 @@ final class Model: ObservableObject {
                 let mp = "\(modsManifestDir)/\(f)"
                 guard let data = fm.contents(atPath: mp),
                       let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
-                let name = (obj["name"] as? String) ?? (f as NSString).deletingPathExtension
+                let name = OptionalModCatalog.installedDisplayName(manifestFilename: f) ?? (obj["name"] as? String) ?? (f as NSString).deletingPathExtension
                 let files = (obj["files"] as? [String]) ?? []
                 found.append(InstalledMod(name: name, manifestPath: mp, fileCount: files.count))
             }

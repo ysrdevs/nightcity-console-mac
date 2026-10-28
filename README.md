@@ -30,7 +30,7 @@ A native Apple Silicon in-game console, cheat menu, and item browser for Cyberpu
 
 ## Status
 
-**1.8.0 adds built-in noclip flight on Cyberpunk 2077 2.5.0, native macOS Steam.** Fly through geometry, stop at your destination, pause and resume, or return to where the flight began. The launcher installs the flight scripts automatically. See the [1.8.0 release notes](docs/RELEASE-1.8.0-PUBLIC.md) and [flight guide](docs/EXPLORATION.md).
+**1.8.1 updates the packaging of the optional mod installers and retains built-in noclip flight on Cyberpunk 2077 2.5.0, native macOS Steam.** Fly through geometry, stop at your destination, pause and resume, or return to where the flight began. The launcher installs the flight scripts automatically. See the [1.8.1 release notes](docs/RELEASE-1.8.1-PUBLIC.md) and [flight guide](docs/EXPLORATION.md).
 
 The 1.7.1 save-loading fix and the performance improvements, 37-weapon Iconic Weapon Creator, Virtual Atelier, Cyberware-EX and Equipment-EX support remain included. Noclip, Creator weapons, store purchases, outfit switching and dual operating systems passed local player testing in the complete 1.8 installer, including save/relaunch persistence. Console output now uses bounded background reads to keep file access out of the render path. Console commands and existing 2.3.1 compatibility remain part of the app.
 
@@ -79,7 +79,7 @@ No Terminal, no file editing. The app finds your game, installs the runtime file
 
 Updating from an older version: quit the game and the older launcher, replace the app, then click Install once (it reads "Reinstall NightCity Console") and Play. This installs the updated runtime and the flight scripts on supported 2.5 games, while retaining the 1.7.1 loading fix. No need to uninstall first.
 
-The 1.8.0 app and DMG are Developer ID signed and notarized by Apple, with stapled tickets. The ZIP also contains the stapled app.
+The 1.8.1 packaging update is undergoing installer verification and Apple notarization. The existing 1.8.0 release remains signed and notarized.
 
 ### Virtual Atelier, Cyberware-EX and Equipment-EX on 2.5
 

@@ -63,7 +63,7 @@ else
   python3 tools/prepare-exploration.py --output "$APP/Contents/Resources/exploration"
 fi
 
-echo "==> bundling optional Equipment-EX and Cyberware-EX packages"
+echo "==> bundling optional Equipment-EX and Cyberware-EX folders"
 if [ "$MODE" = "release" ]; then
   ditto "$DEPS/optional-mods" "$APP/Contents/Resources/optional-mods"
 else

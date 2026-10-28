@@ -44,11 +44,14 @@ framework payload remains separate from the optional gameplay packages.
 
 Release staging also deterministically builds Equipment-EX 1.2.9 and
 Cyberware-EX 1.5.6 from the pinned MIT inputs under `native25/optional-mods`.
-The two ZIPs, catalogue and license files are copied to
-`Contents/Resources/optional-mods`. Both are optional, unchecked by default,
+The two unpacked mod folders, catalogue and license files are copied to
+`Contents/Resources/optional-mods`. The schema 2 catalogue records every installed
+file hash. No optional-mod ZIP is embedded in the app. Both are optional, unchecked by default,
 and offered only on game 2.5.0. See that directory’s README and source lock
 for provenance, the exact compatibility adaptation and reproduction commands.
-The bundle verifier checks every optional package and rejects extra files.
+The bundle verifier checks every optional package and rejects extra files. For
+1.8.1 and later it also rejects ZIP content anywhere inside the app, including
+ZIPs with renamed extensions. Existing helper and framework binaries are preserved.
 VA and store packages are not distributed; the launcher links to VA and imports
 user-provided ZIPs or folders.
 
