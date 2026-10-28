@@ -1,10 +1,18 @@
 # Exploration development and validation for 1.8
 
-This records the local 1.8 development and gameplay checkpoints based on released 1.7.1. The complete candidate now bundles both scripts and installs them automatically into `r6/scripts/NightCityExploration/` on supported game 2.5, with a separate ownership manifest and integrity checks. Earlier private probes staged the files manually. The candidate passed installation with both files initially absent and preserved the existing mods and native frameworks. Final packaged gameplay acceptance and notarization are still pending.
+This records the local 1.8 development and gameplay checkpoints based on released 1.7.1. The complete candidate now bundles both scripts and installs them automatically into `r6/scripts/NightCityExploration/` on supported game 2.5, with a separate ownership manifest and integrity checks. Earlier private probes staged the files manually. The candidate passed installation with both files initially absent and preserved the existing mods and native frameworks. The complete signed candidate passed the player checks below. The same tested payload was then notarized by Apple and packaged as a stapled app and DMG, plus a ZIP containing the stapled app, without rebuilding or changing its executable signatures.
+
+## Complete installer acceptance, 2026-10-28
+
+The user confirmed the complete 1.8 candidate passed short flight, Stop here and restart, optional Return to start and normal walking; Creator weapon creation, VA purchasing, Equipment-EX outfit switching and second operating-system activation also worked. They separately confirmed saving with flight off, quitting and relaunching, retaining the created/purchased items, outfit and operating systems, and starting/stopping flight after loading. No save contents were inspected.
+
+The latest retained startup segment had all 106 hooks installed and only fault-handler initialization in the fault log. It contained no flight status response, so current package gameplay and persistence acceptance come from the user's explicit report. Earlier probe18 restart and computer-interaction telemetry remains separate evidence. All 331 candidate files still matched the recorded signed build, and both installed flight scripts matched the bundled payload before packaging. Framework binaries were unchanged.
+
+The sections below retain the earlier development checkpoints in chronological context. References to pending checks describe those earlier stages, not a replacement for this complete-installer acceptance. Broader untested geometry and forced player-state transitions are not claimed to be covered.
 
 ## Current travel stage
 
-The travel build removes the prototype's 60-second, 128m and 32,768-update lifetime limits. The native movement bridge retains its finite-coordinate, per-step, current-context, physics/entity agreement and subsequent-readback checks. Diagnostic counters saturate instead of overflowing. Destination stopping and a flight over 75 seconds passed as described below; the remaining travel lifecycle checks are pending.
+The travel build removes the prototype's 60-second, 128m and 32,768-update lifetime limits. The native movement bridge retains its finite-coordinate, per-step, current-context, physics/entity agreement and subsequent-readback checks. Diagnostic counters saturate instead of overflowing. Destination stopping, a flight over 75 seconds, menu/app pause and resume, repeated Stop/Return restarts and computer-interaction restarts passed as described below.
 
 | Control | Behavior |
 | --- | --- |
@@ -13,7 +21,7 @@ The travel build removes the prototype's 60-second, 128m and 32,768-update lifet
 | Resume | Explicitly resume a paused session after closing menus/F1 and releasing movement keys. |
 | Return to start | Request a return to this active flight's original position, if that position is still clear, then restore collision. |
 
-Opening Inventory or losing application focus pauses an active session in place. Closing the menu or returning focus does not resume it automatically. Paused flight still performs the owned physics work needed to hover. Ordinary stopped sessions retain the idle path. Return to start is an explicit choice; normal stopping does not rewind the trip. Stopping in clear air resumes ordinary gravity, so stop over open ground when a fall is unwanted. Do not save during this private test.
+Opening Inventory or losing application focus pauses an active session in place. Closing the menu or returning focus does not resume it automatically. Paused flight still performs the owned physics work needed to hover. Ordinary stopped sessions retain the idle path. Return to start is an explicit choice; normal stopping does not rewind the trip. Stopping in clear air resumes ordinary gravity, so stop over open ground when a fall is unwanted. Stop flight and confirm normal walking before saving.
 
 `NCCFlightClearance.reds` uses the engine's canonical `LocomotionOverlapTest` with a standing capsule envelope and the current owned interface. Native 2.5 analysis confirms this query constructs its own `PlayerBlocker` mask instead of reading the active simulation filter. A clear standing control and a lowered capsule that must hit supporting geometry run before activation, then repeat immediately after ZERO is applied and before the first movement write. A failed control restores normal collision without beginning travel. Query results describe the currently available player-blocking geometry; they do not prove that every distant object has finished streaming.
 
@@ -122,9 +130,9 @@ Preparation permits only one normal setter attempt per request and is bounded by
 - The combined script set compiles with VA, Equipment-EX, Cyberware-EX and the existing plugin scripts.
 - The overlay output reader now runs on a worker with a bounded 128 KiB tail and 400 lines. The render path only consumes completed snapshots; clear operations invalidate older pending output. Sanitizer fixtures cover partial lines, replacement, truncation, special files and concurrent reads.
 
-Static and native fixture checks do not establish gameplay behavior or an FPS improvement. The user has confirmed the narrow camera, movement, barrier, automatic-return, manual-return, restored-collision, speed, menu/focus, main-menu loading and baseline-mod flows above. Camera behavior during other locomotion transitions, broader player lifecycle behavior and new save/relaunch persistence still need acceptance before release.
+Static and native fixture checks do not establish gameplay behavior or an FPS improvement. The user has confirmed the narrow camera, movement, barrier, automatic-return, manual-return, restored-collision, speed, menu/focus, main-menu loading and baseline-mod flows above. The complete candidate also passed the save/relaunch check above. Camera behavior during other locomotion transitions and broader player lifecycle behavior have not all been exercised.
 
-Before production use, validate travel beyond the former range/time limits, destination exits, blocked exits, pause/resume, optional return, player lifecycle, mod compatibility and performance. Configurable bindings and persistent places remain separate work. Manual diagnostic commands currently return script Strings using the existing runtime convention; add explicit native String ownership handling or replace these with primitive results before frequent polling. Do not turn this status command into a frame loop.
+The accepted flows above cover travel beyond the former range/time limits, destination exits, pause/resume, optional return, computer interactions and the tested mod combination. Blocked-exit geometry coverage, broader player lifecycle cases and an isolated FPS comparison remain future validation work. Configurable bindings and persistent places remain separate work. Manual diagnostic commands currently return script Strings using the existing runtime convention; add explicit native String ownership handling or replace these with primitive results before frequent polling. Do not turn this status command into a frame loop.
 
 ## Focused checks
 

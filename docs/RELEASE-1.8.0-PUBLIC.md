@@ -1,6 +1,6 @@
 # NightCity Console 1.8.0: Noclip Flight
 
-Release candidate: final installer testing and Apple notarization are pending.
+The app and DMG are Developer ID signed, notarized by Apple and stapled. The ZIP contains the same stapled app. The complete installer passed local player testing and save/relaunch checks.
 
 Explore Night City with built-in noclip on **Cyberpunk 2077 2.5.0, native macOS Steam**. Fly through geometry, reach a rooftop and stop at your destination. Return to start is optional, with no automatic time limit or return radius.
 

@@ -30,9 +30,9 @@ A native Apple Silicon in-game console, cheat menu, and item browser for Cyberpu
 
 ## Status
 
-**1.7.1 fixes a reported save-loading hang on Cyberpunk 2077 2.5.0, native macOS Steam, and expands Export Diagnostics with an on-demand game thread sample.** The affected player confirmed that the loading fix works. See the [1.7.1 release notes](docs/RELEASE-1.7.1-PUBLIC.md) for details and update instructions.
+**1.8.0 adds built-in noclip flight on Cyberpunk 2077 2.5.0, native macOS Steam.** Fly through geometry, stop at your destination, pause and resume, or return to where the flight began. The launcher installs the flight scripts automatically. See the [1.8.0 release notes](docs/RELEASE-1.8.0-PUBLIC.md) and [flight guide](docs/EXPLORATION.md).
 
-The performance improvements, 37-weapon Iconic Weapon Creator, Virtual Atelier, Cyberware-EX and Equipment-EX support introduced in 1.7.0 are retained. Store browsing and purchases, dual operating systems, wardrobe outfits, and save/relaunch persistence have passed local player testing together. Console commands and existing 2.3.1 compatibility remain part of the app.
+The 1.7.1 save-loading fix and the performance improvements, 37-weapon Iconic Weapon Creator, Virtual Atelier, Cyberware-EX and Equipment-EX support remain included. Noclip, Creator weapons, store purchases, outfit switching and dual operating systems passed local player testing in the complete 1.8 installer, including save/relaunch persistence. Console output now uses bounded background reads to keep file access out of the render path. Console commands and existing 2.3.1 compatibility remain part of the app.
 
 The 2.5 payload includes native macOS RED4ext, TweakXL, ArchiveXL and the Codeware features needed by these tested mods. Codeware support is scoped: this does not make every Codeware-dependent or Windows CET mod compatible. The launcher only stages native declarations for plugins whose game addresses pass its compatibility check.
 
@@ -77,12 +77,9 @@ Prefer a walkthrough? Watch the install and usage video:
 
 No Terminal, no file editing. The app finds your game, installs the runtime files (re-signing the game binary so the console can load), and launches it. Steam Cloud saves keep working.
 
-Updating from an older version: quit the game and the older launcher, replace the app, then click Install once (it reads "Reinstall NightCity Console") and Play. This installs the updated runtime, including the 1.7.1 loading fix. No need to uninstall first.
+Updating from an older version: quit the game and the older launcher, replace the app, then click Install once (it reads "Reinstall NightCity Console") and Play. This installs the updated runtime and the flight scripts on supported 2.5 games, while retaining the 1.7.1 loading fix. No need to uninstall first.
 
-The 1.7.1 app and DMG are Developer ID signed and notarized by Apple, with stapled
-tickets. The ZIP also contains the stapled app.
-
-The 1.8 branch is currently undergoing final installer testing. Its [candidate release notes](docs/RELEASE-1.8.0-PUBLIC.md) describe noclip and the remaining release checks; it is not yet a notarized release.
+The 1.8.0 app and DMG are Developer ID signed and notarized by Apple, with stapled tickets. The ZIP also contains the stapled app.
 
 ### Virtual Atelier, Cyberware-EX and Equipment-EX on 2.5
 
@@ -108,7 +105,7 @@ Use the bundled macOS framework dependencies. Windows `.dll` plugins cannot repl
 
 ### Reporting a problem or performance drop
 
-Click **Export Diagnostics** in the launcher and choose where to save the ZIP. It collects recent launcher/runtime/plugin and compiler diagnostics, relevant crash excerpts, app/game/macOS versions, hardware and graphics settings, installed-versus-bundled runtime hashes, managed script integrity and a bounded installed-mod inventory. Collection runs only when requested; nothing is uploaded automatically.
+Click **Export Diagnostics** in the launcher and choose where to save the ZIP. It collects recent launcher/runtime/plugin and compiler diagnostics, relevant crash excerpts, app/game/macOS versions, hardware and graphics settings, installed-versus-bundled runtime hashes, managed script integrity, bounded flight-state summaries and a bounded installed-mod inventory. Collection runs only when requested; nothing is uploaded automatically.
 
 **For a freeze or loading hang, leave the game open and export before force-quitting it.** The launcher attempts a 3-second thread sample of the game running from the selected folder. This includes thread stacks and loaded binary identities to help locate a blocked operation. The ZIP records the selected process, capture times, any failure or truncation, and dates for older logs and crashes. A closed game cannot be sampled. If macOS prevents sampling, the other diagnostics still export and the launcher tells you; Activity Monitor → select Cyberpunk 2077 → Sample Process is a manual fallback.
 
