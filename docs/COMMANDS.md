@@ -42,6 +42,22 @@ Items whose name string is not known (some records added in game patches) use CE
 | `teleport <x> <y> <z>` | Teleport to absolute coords. |
 | `setfact <name> <value>` | Set a quest fact flag. |
 
+## Noclip flight (1.8, game 2.5 only)
+
+The **Exploration** tab provides these controls. See the [flight guide](EXPLORATION.md) for movement, landing and pause behavior.
+
+| Command | Effect |
+| --- | --- |
+| `flight start` | Prepare automatically from clear, grounded standing/crouching, then start after F1 closes. |
+| `flight stop` | Stop at the current destination when the standing player has enough space. Normal gravity resumes. |
+| `flight resume` | Resume a paused flight after closing menus/F1 and releasing movement keys. |
+| `flight return` | Return to this flight's starting point if clear, restore normal collision and stop. |
+| `flight status` | Report current flight and restoration status in Console. |
+| `flight validate` | Request an optional readiness diagnostic; this is not required before Start. |
+| `flight camera` | Record an optional short camera-input diagnostic for troubleshooting. |
+
+WASD moves, Space ascends, Control descends, Shift boosts and Alt/Option slows for precision. Open **Exploration → Flight speed** to change the base speed. Inventory and app switching pause in place. Stop just above clear ground before saving; stopping in the air resumes falling.
+
 ## Power tools
 | Command | Effect |
 |---|---|

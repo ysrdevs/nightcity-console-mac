@@ -168,7 +168,9 @@ final class Model: ObservableObject {
         let native = native25Root().map { root in
             !native25Active || native25Files(root).allSatisfy { fm.contentsEqual(atPath: "\(red4Dir)/\($0)", andPath: root.appendingPathComponent($0).path) }
         } ?? true
-        return core && (!pluginsSupported || (tweakXL && archiveXL)) && scc && native
+        let exploration = ExplorationScripts.isCurrent(gameRoot: URL(fileURLWithPath: gamePath),
+            resources: resources, enabled: native25Active)
+        return core && (!pluginsSupported || (tweakXL && archiveXL)) && scc && native && exploration
     }
 
     // MARK: - redscript (scc) integration
@@ -522,6 +524,10 @@ final class Model: ObservableObject {
         needsDiskAccess = false
         let fm = FileManager.default
         do {
+            // Exact owned copies only. Conflicts are checked before other payload changes.
+            // Off 2.5 these wrappers must not be compiled against another game's natives.
+            try ExplorationScripts.reconcile(gameRoot: URL(fileURLWithPath: gamePath),
+                resources: res, enabled: native25Active)
             try fm.createDirectory(atPath: red4Dir, withIntermediateDirectories: true)
             // Off 2.5, the 2.5 loader/plugins come out first: on 2.3.1 their plugin files share paths with the
             // parked 2.3.1 ones that restoreParked() moves back.
@@ -576,6 +582,10 @@ final class Model: ObservableObject {
                 : "Installed - click Play. Left in place (not installed by NightCity, built for game 2.3.1): \(leftInPlace.joined(separator: ", ")). Move them out of red4ext/ if the game crashes."
         } catch {
             let msg = error.localizedDescription
+            if error is ExplorationScripts.Conflict {
+                status = "Install failed: \(msg)"
+                return
+            }
             if looksLikePermissionError(msg) || gameOnExternalDrive {
                 needsDiskAccess = true
                 status = "Can't write to your game folder. It's on a second/external drive, which macOS blocks until you grant Full Disk Access. Open Privacy settings below, enable NightCity Console, then click Install again."
@@ -650,6 +660,14 @@ final class Model: ObservableObject {
 
     func uninstall() {
         guard canChangeGameFiles() else { return }
+        guard let resources = Bundle.main.resourceURL else { status = "Bundle resources missing."; return }
+        do {
+            try ExplorationScripts.reconcile(gameRoot: URL(fileURLWithPath: gamePath),
+                resources: resources, enabled: false)
+        } catch {
+            status = "Uninstall stopped: \(error.localizedDescription)"
+            return
+        }
         let fm = FileManager.default
         for f in Const.payload {
             let p = "\(red4Dir)/\(f)"

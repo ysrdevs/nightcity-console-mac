@@ -55,6 +55,14 @@ else
   echo "  [warn] deps/native25 missing (set NATIVE25_DIR for tools/fetch-deps.sh) - on 2.5 only the console installs"
 fi
 
+echo "==> bundling game 2.5 exploration scripts"
+if [ "$MODE" = "release" ]; then
+  python3 tools/prepare-exploration.py --output "$APP/Contents/Resources/exploration" \
+    --release-inputs "$APP/Contents/Resources/release-inputs.json"
+else
+  python3 tools/prepare-exploration.py --output "$APP/Contents/Resources/exploration"
+fi
+
 echo "==> bundling optional Equipment-EX and Cyberware-EX packages"
 if [ "$MODE" = "release" ]; then
   ditto "$DEPS/optional-mods" "$APP/Contents/Resources/optional-mods"

@@ -8,6 +8,16 @@ import runpy
 import subprocess
 
 helpers = runpy.run_path(str(Path(__file__).with_name("prepare-release-deps.py")))
+exploration = runpy.run_path(str(Path(__file__).with_name("prepare-exploration.py")))
+
+
+def verify_exploration(resources, version, manifest, check_inputs=False):
+    if tuple(map(int, version.split("."))) < (1, 8, 0):
+        return
+    expected = exploration["metadata"](resources / "exploration",
+                                        exploration["SOURCE"] if check_inputs else None)
+    if manifest.get("exploration") != expected:
+        raise ValueError("release-inputs.json does not match the bundled exploration source hashes")
 
 
 def verify(app, check_inputs=False):
@@ -24,6 +34,7 @@ def verify(app, check_inputs=False):
     manifest = json.loads((resources / "release-inputs.json").read_text())
     if manifest.get("baseline", {}).get("sha256") != helpers["BASELINE_SHA256"]:
         raise ValueError("release-inputs.json does not identify the pinned public baseline")
+    verify_exploration(resources, version, manifest, check_inputs)
     if check_inputs:
         for relative, expected in manifest["files"].items():
             helpers["runtime_path"](relative)

@@ -46,6 +46,7 @@ Equipment-EX and Cyberware-EX are included as optional installs, unchecked by de
 - Godmode that registers with the engine godmode system and auto-reapplies across scene and vehicle transitions.
 - Invisibility (line-of-sight and detection break), infinite ammo, and world toggles (time of day, slow motion, disable police response).
 - Teleport with saved position bookmarks (save a spot, return to it later).
+- Noclip flight in 1.8 on game 2.5: an Exploration tab with speed presets, pause/resume, stopping at your destination and optional Return to start. See the [flight guide](docs/EXPLORATION.md).
 - A generic `call <Class> <Method>` bridge that can invoke any observed RTTI method, plus quest-fact editing.
 - Action confirmations: every command reports exactly what it did at the bottom of the overlay.
 - Iconic Weapon Creator with 37 base-game weapons, nine categories and search by name or weapon type. Custom names, descriptions and effects persist after saving and reloading. Creation checks the selected base and required Iconic records before writing files; Phantom Liberty is not required for these weapon choices.
@@ -80,6 +81,8 @@ Updating from an older version: quit the game and the older launcher, replace th
 
 The 1.7.1 app and DMG are Developer ID signed and notarized by Apple, with stapled
 tickets. The ZIP also contains the stapled app.
+
+The 1.8 branch is currently undergoing final installer testing. Its [candidate release notes](docs/RELEASE-1.8.0-PUBLIC.md) describe noclip and the remaining release checks; it is not yet a notarized release.
 
 ### Virtual Atelier, Cyberware-EX and Equipment-EX on 2.5
 

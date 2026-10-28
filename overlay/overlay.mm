@@ -1281,7 +1281,7 @@ static void drawQuickTab() {
 
 static void drawExplorationTab() {
     ImGui::TextUnformatted("Noclip flight");
-    ImGui::TextWrapped("Start on clear ground. Stop here restores collision and gravity at your destination when there is enough open space. Do not save during flight.");
+    ImGui::TextWrapped("Start on clear ground. Stop just above a clear surface: Stop here restores collision and gravity, so stopping in the air makes you fall. Stop flight before saving.");
     if (ImGui::Button("Start")) runLabeled("flight start", "Flight requested. Close F1 to prepare and start on clear ground.");
     ImGui::SameLine();
     if (ImGui::Button("Stop here")) runLabeled("flight stop", "Stop at this destination requested. Check Console for the result.");
@@ -1296,6 +1296,7 @@ static void drawExplorationTab() {
         g_explorationInput.setPreset(static_cast<uint32_t>(speedPreset));
     ImGui::TextDisabled("Shift: 12 m/s. Alt (Option): 0.75 m/s.");
     ImGui::TextWrapped("Opening Inventory or switching apps pauses flight in place. Close menus and choose Resume to continue. Opening F1 holds movement while you use these controls.");
+    ImGui::TextWrapped("Using a computer stops flight. Finish the interaction, stand on clear ground and choose Start again.");
     ImGui::TextWrapped("If Stop here is blocked, flight stays paused. Resume to move into open space, or use Return to start to go back to where this flight began.");
     if (ImGui::Button("Check flight status")) runLabeled("flight status", "Flight status requested in Console.");
     if (ImGui::CollapsingHeader("Flight diagnostics")) {

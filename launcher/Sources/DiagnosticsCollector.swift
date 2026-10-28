@@ -327,6 +327,7 @@ final class DiagnosticsCollector {
             for path in ["Contents/Resources/release-inputs.json", "Contents/Resources/native25/BUILD_INFO.json"] where hasTime {
                 collectBuildMetadata(app, path: path, name: "metadata/bundled-" + URL(fileURLWithPath: path).lastPathComponent)
             }
+            collectBuildMetadata(app, path: "Contents/Resources/exploration/manifest.json", name: "metadata/bundled-exploration.json")
         }
         if let game = DiagnosticsDirectory(snapshot.gameRoot) {
             collectLogs(game, directory: "red4ext/logs", prefix: "red4ext", label: "loader")
@@ -353,6 +354,7 @@ final class DiagnosticsCollector {
             collectBinaries(game)
             collectRuntimeIdentity(game)
             collectScriptIntegrity(game)
+            collectExplorationIntegrity(game)
             var caches: [[String: Any]] = []
             for path in ["r6/cache/final.redscripts", "r6/cache/modded/final.redscripts", "r6/cache/final.redscripts.bk"] {
                 if let info = game.information(path) { caches.append(fileDetails(info)) }
@@ -384,7 +386,15 @@ final class DiagnosticsCollector {
             // Export only counts and known operational messages, never that history.
             if hasTime, fresh.contains("cp2077_out.txt"), let data = temp.read("cp2077_out.txt", maximum: limits.textBytes) {
                 if let info = temp.information("cp2077_out.txt") { logIndex.append(fileDetails(info)) }
-                let lines = String(decoding: data, as: UTF8.self).split(separator: "\n")
+                let output = String(decoding: data, as: UTF8.self)
+                let lines = output.split(separator: "\n")
+                var flight = FlightDiagnosticSummary.parse(output)
+                if let info = temp.information("cp2077_out.txt") {
+                    flight["source_file"] = fileDetails(info)
+                    flight["source_tail_truncated"] = info.size > Int64(data.count)
+                }
+                flight["session_note"] = "Bounded console-output tail may contain earlier sessions. File modification time does not identify the session of each entry. Compare with the reproduced failure and process metadata."
+                json("logs/flight-summary.json", flight)
                 let categories: [(String, String)] = [
                     ("TweakXL is not loaded", "tweakxl_unavailable"), ("TweakXL.Reload is not registered", "tweakxl_unavailable"),
                     ("cannot find the local player", "player_unavailable"), ("not captured gameTransactionSystem", "inventory_unavailable"),
@@ -543,6 +553,45 @@ final class DiagnosticsCollector {
         json("script-integrity.json", ["status": "checked", "files": files, "rejected_entries": rejected,
              "manifest_entries": hashes.count, "bounded_listing": true,
              "note": "Checks managed plugin scripts against their install manifest. No script contents are included."])
+    }
+    private func collectExplorationIntegrity(_ root: DiagnosticsDirectory) {
+        guard hasTime else { return }
+        let names: Set<String> = ["NCCCollisionFlightProbe.reds", "NCCFlightClearance.reds"]
+        func manifest(_ directory: DiagnosticsDirectory?, _ path: String) -> [String: String]? {
+            guard let directory, let data = directory.read(path, maximum: 8192, tail: false),
+                  let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  value["schema"] as? Int == 1, value["game_version"] as? String == "2.5.0",
+                  let files = value["files"] as? [String: String], Set(files.keys) == names,
+                  files.values.allSatisfy(validHash) else { return nil }
+            return files
+        }
+        let app = DiagnosticsDirectory(snapshot.appBundle)
+        let bundled = manifest(app, "Contents/Resources/exploration/manifest.json")
+        let installed = manifest(root, "red4ext/nightcity-exploration.json")
+        var files: [[String: Any]] = []
+        for name in names.sorted() where hasTime {
+            let path = "r6/scripts/NightCityExploration/" + name
+            var entry: [String: Any] = ["path": path]
+            if let expected = bundled?[name] { entry["bundled_manifest_sha256"] = expected }
+            var bundledHash: String?
+            if let app, let (actual, _) = measuredHash(app, "Contents/Resources/exploration/" + name) {
+                bundledHash = actual
+                entry["bundled_sha256"] = actual
+                if let expected = bundled?[name] { entry["bundled_matches_manifest"] = actual == expected.lowercased() }
+            }
+            if let expected = installed?[name] { entry["installed_manifest_sha256"] = expected }
+            if root.information(path) == nil { entry["status"] = "missing_or_not_regular" }
+            else if let (actual, _) = measuredHash(root, path) {
+                entry["actual_sha256"] = actual
+                if let bundledHash { entry["matches_bundled"] = actual == bundledHash }
+                if let expected = installed?[name] { entry["matches_install_manifest"] = actual == expected.lowercased() }
+                entry["status"] = "hashed"
+            } else { entry["status"] = "size_or_time_budget" }
+            files.append(entry)
+        }
+        json("exploration-integrity.json", ["enabled_for_selected_game": snapshot.native25,
+            "bundled_manifest_valid": bundled != nil, "installed_manifest_valid": installed != nil,
+            "files": files, "note": "Only the two known Exploration files are hashed. Script contents and arbitrary manifest paths are not exported."])
     }
     private func collectConfiguration(_ root: DiagnosticsDirectory) {
         guard hasTime else { return }

@@ -72,7 +72,16 @@ struct DiagnosticsCollectorTests {
         try write(game, "r6/scripts/personal.txt", "DOCUMENT_MUST_NOT_BE_READ")
         try write(game, "r6/scripts/Example/password=FILENAME_PRIVATE.reds", "SOURCE_MUST_NOT_BE_READ")
         try write(temp, "cp2077_overlay.log", "frametime: avg=16ms\nsubmitted: print('COMMAND_PRIVATE')\n")
-        try write(temp, "cp2077_out.txt", "queued: print('COMMAND_PRIVATE')\nUSER_PRINT_PRIVATE\nCreator: FAILED: private weapon name\nCreator: FAILED: Creator cannot find the local player. Load a save first.\n")
+        try write(temp, "cp2077_out.txt", """
+        [Flight] Normal collision restored; queued arrival remains unconfirmed; Start can request a read-only recheck; active=false; arrivalPending=false; arrivalUnconfirmed=true; restoreUnconfirmed=false; recoveryUsed=true
+        ==== MINI-CET v3 (universal call + perks/attrs/relic) ready ====
+        queued: print('COMMAND_PRIVATE')
+        USER_PRINT_PRIVATE
+        Creator: FAILED: private weapon name
+        Creator: FAILED: Creator cannot find the local player. Load a save first.
+        [Flight] Queued relocation arrival observed with normal collision; press Start again for a new flight; active=false; arrivalPending=false; arrivalUnconfirmed=false; restoreUnconfirmed=false; recoveryUsed=false; arrivalSerial=3; arrivalCallbacks=2/64; arrivalElapsed=0.0234/0.5; arrivalDistance=0
+        [Flight] TOKEN=FLIGHT_SECRET_PRIVATE; active=true; arrivalPending=true; arrivalUnconfirmed=true; restoreUnconfirmed=true; recoveryUsed=true
+        """)
         try write(temp, "cp2077_perf.json", "{\"schema_version\":1,\"frame_count\":120,\"avg_ms\":16.7}")
         try write(temp, "cp2077_cmd.txt", "COMMAND_INPUT_PRIVATE")
         try write(home, "Library/Logs/DiagnosticReports/Cyberpunk2077-test.ips", "GAME_CRASH\n" + privateText)
@@ -131,6 +140,14 @@ struct DiagnosticsCollectorTests {
             "Codeware/Missing.reds": abcHash, "Codeware/Directory.reds": abcHash, "Codeware/Link.reds": abcHash, "Codeware/Pipe.reds": abcHash,
             "../outside-secret.txt": abcHash, "Codeware/Bad.reds": "invalid-hash"]
         try writeJSON(game, "red4ext/nightcity-plugin-scripts.json", scriptManifest)
+        let explorationNames = ["NCCCollisionFlightProbe.reds", "NCCFlightClearance.reds"]
+        let explorationManifest: [String: Any] = ["schema": 1, "game_version": "2.5.0",
+            "files": Dictionary(uniqueKeysWithValues: explorationNames.map { ($0, abcHash) })]
+        try writeJSON(snapshot.appBundle, "Contents/Resources/exploration/manifest.json", explorationManifest)
+        try writeJSON(game, "red4ext/nightcity-exploration.json", explorationManifest)
+        for name in explorationNames { try write(snapshot.appBundle, "Contents/Resources/exploration/" + name, "abc") }
+        try write(game, "r6/scripts/NightCityExploration/" + explorationNames[0], "abc")
+        try write(game, "r6/scripts/NightCityExploration/" + explorationNames[1], "EXPLORATION_SOURCE_PRIVATE")
 
         let report = collect()
         let all = report.entries.map { String(decoding: $0.data, as: UTF8.self) }.joined(separator: "\n")
@@ -148,6 +165,19 @@ struct DiagnosticsCollectorTests {
             precondition(!all.contains(secret), "New diagnostic collection leaked \(secret)")
         }
         precondition(!report.entries.contains { $0.name.contains("sources.lock") })
+        let flightSummary = try object(report, "logs/flight-summary.json")
+        let flightEntries = flightSummary["entries"] as! [[String: Any]]
+        precondition(flightEntries.count == 1 && flightEntries[0]["category"] as? String == "arrival_confirmed")
+        precondition(flightEntries[0]["arrivalUnconfirmed"] as? Bool == false && flightEntries[0]["arrivalSerial"] as? Int == 3)
+        precondition(flightSummary["source_file"] != nil && flightSummary["session_note"] is String)
+        precondition(flightSummary["boundary_found"] as? Bool == true && flightSummary["source_tail_truncated"] as? Bool == false)
+        precondition(!all.contains("FLIGHT_SECRET_PRIVATE") && !all.contains("[Flight]"))
+        precondition(!all.contains("EXPLORATION_SOURCE_PRIVATE"))
+        let exploration = try object(report, "exploration-integrity.json")
+        let explorationFiles = exploration["files"] as! [[String: Any]]
+        precondition(exploration["bundled_manifest_valid"] as? Bool == true && exploration["installed_manifest_valid"] as? Bool == true)
+        precondition(explorationFiles.first { ($0["path"] as? String)?.hasSuffix(explorationNames[0]) == true }?["matches_bundled"] as? Bool == true)
+        precondition(explorationFiles.first { ($0["path"] as? String)?.hasSuffix(explorationNames[1]) == true }?["matches_install_manifest"] as? Bool == false)
         let runtime = try array(report, "runtime-files.json")
         precondition(runtime.first { ($0["path"] as? String)?.hasSuffix("red4ext_hooks.js") == true }?["matches_bundled"] as? Bool == true)
         precondition(runtime.first { ($0["path"] as? String)?.hasSuffix("FridaGadget.config") == true }?["matches_bundled"] as? Bool == false)
@@ -173,6 +203,8 @@ struct DiagnosticsCollectorTests {
         }
         print("PASS recent scoped logs, native hash, metadata-only mod inventory and selected graphics settings; excluded saves, sources, unrelated apps and console history")
         print("PASS runtime digests, typed config allowlist, source-provenance exclusion and actual staged-script integrity")
+        print("PASS packaged and installed Exploration hashes distinguish modified scripts without exporting contents")
+        print("PASS typed flight summary retains current log-segment evidence without command history or raw status messages")
 
         try write(game, "red4ext/logs/red4ext-large.log", String(repeating: "x", count: 100_000) + "TAIL_MARKER")
         let tail = scope.read("red4ext/logs/red4ext-large.log", maximum: 128)!
@@ -283,6 +315,11 @@ struct DiagnosticsCollectorTests {
         let malformedIntegrity = try object(collect(), "script-integrity.json")
         precondition(malformedIntegrity["status"] as? String == "manifest_missing_or_invalid")
         try writeJSON(game, "red4ext/nightcity-plugin-scripts.json", scriptManifest)
+        try writeJSON(game, "red4ext/nightcity-exploration.json", ["schema": 1, "game_version": "2.5.0", "files": ["../outside-secret.txt": abcHash]])
+        let invalidExploration = try object(collect(), "exploration-integrity.json")
+        precondition(invalidExploration["installed_manifest_valid"] as? Bool == false)
+        precondition((invalidExploration["files"] as! [[String: Any]]).count == 2)
+        try writeJSON(game, "red4ext/nightcity-exploration.json", explorationManifest)
         var noHashBudget = DiagnosticsLimits(); noHashBudget.hashBytes = 2
         let limitedIntegrity = try object(collect(noHashBudget), "script-integrity.json")
         let limitedFiles = limitedIntegrity["files"] as! [[String: Any]]
