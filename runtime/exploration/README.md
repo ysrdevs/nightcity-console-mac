@@ -1,6 +1,6 @@
-# Exploration prototype for 1.8
+# Exploration development and validation for 1.8
 
-This is an experimental, local test checkpoint based on released 1.7.1. It is not a release build. The launcher does not install these scripts automatically; they are staged explicitly into `r6/scripts/NightCityExploration/` in an isolated game copy. The existing native framework payload is unchanged.
+This records the local 1.8 development and gameplay checkpoints based on released 1.7.1. The complete candidate now bundles both scripts and installs them automatically into `r6/scripts/NightCityExploration/` on supported game 2.5, with a separate ownership manifest and integrity checks. Earlier private probes staged the files manually. The candidate passed installation with both files initially absent and preserved the existing mods and native frameworks. Final packaged gameplay acceptance and notarization are still pending.
 
 ## Current travel stage
 
