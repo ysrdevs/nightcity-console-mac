@@ -1,0 +1,179 @@
+diff --git a/_tools/nctool/Program.cs b/_tools/nctool/Program.cs
+index cc8808d..0e2dc05 100644
+--- a/_tools/nctool/Program.cs
++++ b/_tools/nctool/Program.cs
+@@ -34,6 +34,8 @@ var _matValFilter = "";  // meshmatarc: dump full material values for entries wh
+ Action<double, string> progressSink = null;
+ void Prog(double f, string label) => Console.WriteLine($"[PROGRESS] {f:0.000} {label}");
+ 
++try
++{
+ switch (mode)
+ {
+     case "unpack":
+@@ -91,9 +93,17 @@ switch (mode)
+         Console.Error.WriteLine($"unknown mode {mode}");
+         return 1;
+ }
++}
++catch (Exception e)
++{
++    // Keep conversion failures as ordinary CLI errors so verification's finally
++    // blocks run and remove temporary output before returning to the launcher.
++    Console.Error.WriteLine($"[FAIL] {e.Message}");
++    return 2;
++}
+ return 0;
+ 
+-int Unpack(string archivePath, string looseDir)
++int Unpack(string archivePath, string looseDir, Dictionary<ulong, string> extractedFiles = null)
+ {
+     var reader = new ArchiveReader();
+     if (reader.ReadArchive(archivePath, hash, out var ar) != ArchiveErr.NoError)
+@@ -102,13 +112,16 @@ int Unpack(string archivePath, string looseDir)
+     int count = 0, fail = 0;
+     foreach (var f in ar.Files.Values.OfType<FileEntry>())
+     {
+-        var rel = f.Name.Replace('\\', '/');                 // depot path
++        // FileName supplies <original hash>.bin when the depot path is unknown.
++        // Name supplies only the number, which ArchiveWriter silently skips.
++        var rel = f.FileName.Replace('\\', '/');
+         var outPath = Path.Combine(looseDir, rel);
+         Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
+         try
+         {
+             using var fs = File.Create(outPath);
+             f.Extract(fs);
++            extractedFiles?.Add(f.NameHash64, outPath);
+             count++;
+         }
+         catch (Exception e)
+@@ -119,17 +132,57 @@ int Unpack(string archivePath, string looseDir)
+         progressSink?.Invoke((double)(count + fail) / Math.Max(1, (int)ar.FileCount) * 0.45, "Unpacking");
+     }
+     Console.WriteLine($"[UNPACK] {archivePath}\n  -> {looseDir}\n  extracted={count} failed={fail} total={ar.FileCount}");
++    ar.ReleaseFileHandle();
++    if (extractedFiles != null && (fail != 0 || count != ar.FileCount))
++        throw new InvalidOperationException("Archive extraction was incomplete; refusing to repack.");
+     return count;
+ }
+ 
+-void Pack(string looseDir, string outArchive)
++void Pack(string looseDir, string outArchive, Dictionary<ulong, string> sourceFiles = null)
+ {
+     Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outArchive))!);
+-    using var fs = File.Create(outArchive);
+-    var writer = new ArchiveWriter(hash, log);
+-    var ok = writer.WriteArchive(new DirectoryInfo(looseDir), fs);
+-    fs.Flush();
+-    Console.WriteLine($"[PACK] {looseDir} -> {outArchive}  WriteArchive={ok}  size={fs.Length}");
++    var expected = sourceFiles ?? Directory.EnumerateFiles(looseDir, "*", SearchOption.AllDirectories)
++        .ToDictionary(path =>
++        {
++            var relative = Path.GetRelativePath(looseDir, path);
++            var match = System.Text.RegularExpressions.Regex.Match(relative, @"^(\d+)\.");
++            return match.Success ? ulong.Parse(match.Groups[1].Value) :
++                WolvenKit.Common.FNV1A.FNV1A64HashAlgorithm.HashString(ResourcePath.SanitizePath(relative));
++        }, path => path);
++    // A failed conversion must not replace an already installed archive. Verify
++    // both identity and extracted bytes before publishing the sibling temp file.
++    var temporary = outArchive + "." + Guid.NewGuid().ToString("N") + ".tmp";
++    try
++    {
++        using (var fs = File.Create(temporary))
++        {
++            var writer = new ArchiveWriter(hash, log);
++            if (!writer.WriteArchive(new DirectoryInfo(looseDir), fs))
++                throw new InvalidOperationException("ArchiveWriter refused the archive.");
++        }
++        var reader = new ArchiveReader();
++        if (reader.ReadArchive(temporary, hash, out var packed) != ArchiveErr.NoError)
++            throw new InvalidOperationException("Could not re-read the packed archive.");
++        try
++        {
++            if (packed.FileCount != expected.Count || !expected.Keys.ToHashSet().SetEquals(packed.Files.Keys))
++                throw new InvalidOperationException($"Packed resource hashes differ: expected {expected.Count}, got {packed.FileCount}.");
++            foreach (var entry in packed.Files.Values.OfType<FileEntry>())
++            {
++                using var actual = new MemoryStream();
++                entry.Extract(actual);
++                actual.Position = 0;
++                using var original = File.OpenRead(expected[entry.NameHash64]);
++                if (!System.Security.Cryptography.SHA256.HashData(actual).SequenceEqual(
++                        System.Security.Cryptography.SHA256.HashData(original)))
++                    throw new InvalidOperationException($"Packed resource bytes differ for hash {entry.NameHash64}.");
++            }
++        }
++        finally { packed.ReleaseFileHandle(); }
++        File.Move(temporary, outArchive, true);
++        Console.WriteLine($"[PACK] {looseDir} -> {outArchive}  verified={expected.Count} resource hashes and contents  size={new FileInfo(outArchive).Length}");
++    }
++    finally { if (File.Exists(temporary)) File.Delete(temporary); }
+ }
+ 
+ // ---------------------------------------------------------------------------
+@@ -142,15 +195,18 @@ void Pack(string looseDir, string outArchive)
+ // ---------------------------------------------------------------------------
+ int RawRepack(string srcArchive, string looseDir, string outArchive)
+ {
+-    Unpack(srcArchive, looseDir);
++    if (Directory.Exists(looseDir) && Directory.EnumerateFileSystemEntries(looseDir).Any())
++        throw new InvalidOperationException("rawrepack requires an empty loose directory; use a new working folder.");
++    var sourceFiles = new Dictionary<ulong, string>();
++    Unpack(srcArchive, looseDir, sourceFiles);
+ 
+     // Render-buffer-bearing resource types. Meshes are the SIGTRAP source for clothing;
+     // morphtargets carry GPU blobs too. Other CR2W (.ent/.app/.mi) are loaded by the
+     // entity/material systems, not the render-blob decompressor, so we leave them as-is.
+     var exts = new[] { ".mesh", ".morphtarget" };
+     int reser = 0, skipped = 0, failed = 0;
+-    var renderFiles = Directory.EnumerateFiles(looseDir, "*", SearchOption.AllDirectories)
+-                               .Where(p => exts.Any(e => p.EndsWith(e, StringComparison.OrdinalIgnoreCase))).ToList();
++    var renderFiles = sourceFiles.Values.Where(p =>
++        exts.Any(e => p.EndsWith(e, StringComparison.OrdinalIgnoreCase)) || IsHashNamedRenderResource(p)).ToList();
+     int renderTotal = renderFiles.Count;
+     foreach (var path in renderFiles)
+     {
+@@ -177,10 +233,15 @@ int RawRepack(string srcArchive, string looseDir, string outArchive)
+         }
+     }
+     Console.WriteLine($"[RAWREPACK] re-serialized {reser} render file(s) (skipped {skipped}, failed {failed})");
++    if (skipped != 0 || failed != 0)
++    {
++        Console.Error.WriteLine("[RAWREPACK] Render conversion incomplete; output archive was not replaced.");
++        return 2;
++    }
+ 
+     // verify: no mesh in the loose tree still carries a KARK internal buffer
+     int karkLeft = 0, meshCount = 0;
+-    foreach (var path in Directory.EnumerateFiles(looseDir, "*.mesh", SearchOption.AllDirectories))
++    foreach (var path in renderFiles)
+     {
+         meshCount++;
+         if (ContainsKark(File.ReadAllBytes(path))) karkLeft++;
+@@ -188,11 +249,24 @@ int RawRepack(string srcArchive, string looseDir, string outArchive)
+     Console.WriteLine($"[RAWREPACK] {meshCount} mesh(es); still KARK after re-serialize: {karkLeft} (want 0)");
+ 
+     progressSink?.Invoke(0.95, "Packing");
+-    Pack(looseDir, outArchive);
++    Pack(looseDir, outArchive, sourceFiles);
+     progressSink?.Invoke(1.0, "Packing");
+     return (failed > 0 && reser == 0) ? 2 : 0;
+ }
+ 
++static bool IsHashNamedRenderResource(string path)
++{
++    if (!path.EndsWith(".bin", StringComparison.OrdinalIgnoreCase) ||
++        !ulong.TryParse(Path.GetFileNameWithoutExtension(path), out _)) return false;
++    using var stream = File.OpenRead(path);
++    if (stream.Length < 4) return false;
++    using var reader = new CR2WReader(stream);
++    if (reader.ReadFileInfo(out var info) != ArchiveErr.NoError || info == null || info.ExportInfo.Length == 0)
++        return false;
++    var rootType = info.StringDict[info.NameInfo[info.ExportInfo[0].className].offset];
++    return rootType is "CMesh" or "MorphTargetMesh";
++}
++
+ static bool ContainsKark(byte[] b)
+ {
+     for (int i = 0; i + 4 <= b.Length; i++)

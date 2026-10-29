@@ -38,7 +38,7 @@ adaptations do not add extra installed script files.
 ## Source/build inputs
 
 To reproduce the helper changes, check out the pinned `cyberpunk-savekit-mac`
-base, apply `nctool-compat.patch`, populate `_refs/WolvenKit` at its recorded
+base, apply `nctool-compat.patch` and then `archive-repack.patch`, populate `_refs/WolvenKit` at its recorded
 commit and apply `wolvenkit-raw-buffers.patch`. The latter patch predates this
 release. Use the preserved native universal `libkraken.dylib` input with the
 recorded SHA-256 and .NET 8:
@@ -55,6 +55,20 @@ WolvenKit's GPLv3 notice, the helper's MIT notice and the mod notices are retain
 the source snapshot and patch are included for review and redistribution.
 
 ## Isolated checks
+
+Generic archive repacking preserves the original resource hashes, including
+resources whose depot paths are unknown. Every output resource is extracted
+again and compared with the staged bytes before the output archive is replaced.
+Incomplete extraction or mesh conversion fails without replacing an existing
+output. `rawrepack` requires an empty working directory.
+
+The archive regression runner accepts explicit local input paths and keeps all
+downloads untouched. It covers ordinary and hash-named resources, mesh conversion,
+the accepted VA conversion, and failed-output preservation:
+
+```sh
+python3 tools/test-archive-repack.py --help
+```
 
 ```sh
 python3 tools/test-modcompat.py --dotnet /path/to/dotnet \
