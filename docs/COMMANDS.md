@@ -17,6 +17,11 @@ Item IDs are the same `Items.*` TweakDB names CET uses, so codes you find online
 Items whose name string is not known (some records added in game patches) use CET's hashed form, e.g.
 `give <TDBID:7495DECE:17> 1`; the Items tab lists them that way.
 
+Creator weapon designs belong to the game installation, while the inventory copy belongs to a save.
+Loading an older save does not remove the design or free its name. To add an existing design to that
+save, use `give <record ID shown when the weapon was created> 1` in Console. Creating another design
+with the same name is blocked to preserve the original weapon's definition and effects.
+
 ## Character
 | Command | Effect |
 |---|---|

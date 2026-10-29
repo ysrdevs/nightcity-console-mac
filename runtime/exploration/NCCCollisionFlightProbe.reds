@@ -325,6 +325,8 @@ class NCCCollisionFlightProbeState extends IScriptable {
   public let clearanceProbes: Int32;
   public let recoveryUsed: Bool;
   public let restoreMoved: Bool;
+  public let carHitEventsSeen: Int32;
+  public let carHitEventsSuppressed: Int32;
   public let arrivalUnconfirmed: Bool;
   public let arrivalPending: Bool;
   public let arrivalOwner: wref<PlayerPuppet>;
@@ -1258,6 +1260,8 @@ public final func NCCFlightProbeStatus() -> String {
     + "; lastClearValid=" + ToString(probe.lastClearValid)
     + "; checkpointQueries=" + ToString(probe.clearanceProbes)
     + "; recoveryUsed=" + ToString(probe.recoveryUsed)
+    + "; carHitEventsSeen=" + ToString(probe.carHitEventsSeen)
+    + "; carHitEventsSuppressed=" + ToString(probe.carHitEventsSuppressed)
     + "; interactionYield=" + ToString(probe.interactionYield)
     + "; interactionFlagsLastObserved=" + ToString(probe.interactionFlags)
     + "; interactionReason=" + probe.interactionReason
@@ -1432,6 +1436,48 @@ public const final func NCCFlightProbeOwnsMovement(const scriptInterface: ref<St
   return IsDefined(probe) && probe.active && IsDefined(scriptInterface)
     && scriptInterface.owner == this && IsDefined(probe.interfaceRef)
     && probe.interfaceRef == scriptInterface;
+}
+
+@addMethod(PlayerPuppet)
+private final func NCCFlightProbeSuppressCarHit() -> Bool {
+  let probe = this.nccCollisionFlightProbe;
+  let scriptInterface: ref<StateGameScriptInterface>;
+  if !IsDefined(probe) || !probe.active || !probe.requested || probe.preparePending
+    || probe.validationRequested || probe.transitionPending || probe.stopRequested
+    || probe.exitRequest != 0 || probe.processingExitRequest != 0
+    || probe.arrivalPending || probe.arrivalUnconfirmed || probe.interactionYield
+    || probe.restoreUnconfirmed || probe.ownFilterWrite || probe.clearanceFailed {
+    return false;
+  }
+  scriptInterface = probe.interfaceRef;
+  if !IsDefined(scriptInterface) || scriptInterface.owner != this || scriptInterface.executionOwner != this
+    || probe.capturedInterface != scriptInterface || !probe.capturedNormal || probe.captureWrites <= 0
+    || !this.NCCFlightProbeIsFilter(probe.baselineFilter) || !this.NCCFlightProbeIsFilter(probe.capturedFilter)
+    || !this.NCCFlightProbeAllowed(probe.stateName, probe.machineName) {
+    return false;
+  }
+  if this.IsDead() || scriptInterface.IsMountedToObject() || scriptInterface.IsPlayerInBraindance()
+    || scriptInterface.IsSceneAnimationActive() {
+    return false;
+  }
+  return this.NCCFlightProbeInteractionFlags(scriptInterface) == 0;
+}
+
+@wrapMethod(PlayerPuppet)
+protected cb func OnCarHitPlayer(evt: ref<OnCarHitPlayer>) -> Bool {
+  let probe = this.nccCollisionFlightProbe;
+  if IsDefined(probe) {
+    // The car-hit callback queues damage and a separation impulse independently
+    // of the simulation filter. Only owned active flight suppresses that path.
+    // These saturating counters survive the bounded transition recorder and
+    // successive flights on this player; formatting stays in manual Status.
+    probe.carHitEventsSeen = this.NCCFlightProbeCount(probe.carHitEventsSeen);
+    if IsDefined(evt) && this.NCCFlightProbeSuppressCarHit() {
+      probe.carHitEventsSuppressed = this.NCCFlightProbeCount(probe.carHitEventsSuppressed);
+      return false;
+    }
+  }
+  return wrappedMethod(evt);
 }
 
 @wrapMethod(LocomotionTransition)

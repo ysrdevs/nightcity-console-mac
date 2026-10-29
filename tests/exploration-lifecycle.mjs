@@ -40,7 +40,7 @@ class Vector3{constructor(X,Y,Z){Object.assign(this,{X,Y,Z});}}
 const methods={EnsureMenuListener:'',RequestStop:'reason',Pause:'reason',MenuChanged:'value',ObserveInput:'packet',
   StoredVector:'value',StoredArrivalReport:'message',
   InteractionFlags:'scriptInterface',FinishInteractionYield:'',YieldInteraction:'scriptInterface',CheckInteraction:'scriptInterface',
-  Count:'value',BoundedVector:'value,limit',Allowed:'stateName,machineName',OwnsMovement:'scriptInterface',Toggle:'',Prepare:'commandPacket',Return:'',
+  Count:'value',BoundedVector:'value,limit',Allowed:'stateName,machineName',OwnsMovement:'scriptInterface',SuppressCarHit:'',Toggle:'',Prepare:'commandPacket',Return:'',
   StopHere:'',Resume:'commandPacket',Restore:'scriptInterface,reason,allowRecovery',
   RestoreAt:'scriptInterface,destination,facing,move,reason',ObserveExitPosition:'scriptInterface',ProcessExit:'scriptInterface',
   PositionRefused:'scriptInterface,reason',CaptureFilter:'scriptInterface,value,normalPreset',SuspendForTransition:'scriptInterface',
@@ -59,6 +59,7 @@ function fixture(){
   const defaults=()=>({active:false,requested:false,paused:false,resumeRequested:false,exitRequest:0,preparePending:false,prepared:false,
     prepareCallbacks:0,prepareElapsed:0,transitionPending:false,transitionSerial:4,stopRequested:false,stopReason:'',restoreUnconfirmed:false,processingExitRequest:0,
     focusEpochValid:true,focusEpoch:3,lastInputPacket:packet(),inputChecks:0,captureWrites:0,baselineFilter:{valid:true},capturedFilter:{valid:true},capturedNormal:true,
+    carHitEventsSeen:0,carHitEventsSuppressed:0,
     arrivalUnconfirmed:false,arrivalPending:false,arrivalSerial:0,arrivalElapsed:0,arrivalCallbacks:0,stateName:'stand',machineName:'Locomotion',
     ownFilterWrite:false,start:new Vector4(0,0,0,1),startFacing:facing,target:s.entity,lastClearValid:true,lastClearPosition:new Vector4(8,20,30,1),
     lastClearFacing:facing,lastClearanceProbePosition:s.entity,positionOriginDelta:new Vector4(),positionLastTarget:s.physics,positionReadbackPending:false,
@@ -239,6 +240,86 @@ for(const unsafe of ['scene','mounted','dead','timeout']){
   f.p.NCCFlightProbeObserveStateFilter(f.si,'aimWalk','Locomotion',true);
   assert.equal(f.q.active,false,unsafe);assert.equal(f.s.zero,0);assert.equal(f.s.teleports.length,0);
 }
+function vehicleFixture() {
+  const f=fixture().active();
+  // Production activation follows a successful original normal-filter capture;
+  // prepared remains true during active flight and is not a pending request.
+  f.q.captureWrites=1;f.q.prepared=true;
+  return f;
+}
+function vehicleHit(f, originalResult=true, event=Object.freeze({carId:42,hitDirection:Object.freeze({X:1,Y:0,Z:0}),seperationImpulse:Object.freeze({X:2,Y:0,Z:0})})) {
+  const calls=[],beforeEvent=JSON.stringify(event);
+  const c=vm.createContext({IsDefined:v=>v!==null&&v!==undefined,
+    wrappedMethod:(...args)=>{calls.push(args);return originalResult;}});
+  const callback=vm.runInContext(`(function(evt){${body('OnCarHitPlayer')}})`,c);
+  const before={reads:f.s.reads,positionReads:f.s.positionReads,entityReads:f.s.entityReads,zero:f.s.zero,restores:f.s.restores,
+    positions:f.s.positions,velocity:f.s.velocity,teleports:f.s.teleports.length,formats:f.s.formats,samples:f.s.sampleAllocations};
+  const result=callback.call(f.p,event);
+  assert.deepEqual({reads:f.s.reads,positionReads:f.s.positionReads,entityReads:f.s.entityReads,zero:f.s.zero,restores:f.s.restores,
+    positions:f.s.positions,velocity:f.s.velocity,teleports:f.s.teleports.length,formats:f.s.formats,samples:f.s.sampleAllocations},before,
+    'vehicle-event guard does not poll input/position, write physics, enqueue relocation, allocate trace samples or format diagnostics');
+  assert.equal(JSON.stringify(event),beforeEvent,'vehicle event is not modified');
+  for(const args of calls){assert.equal(args.length,1);assert.equal(args[0],event,'fallback forwards the original event');}
+  return {result,calls:calls.length};
+}
+for(const paused of [false,true]){
+  const f=vehicleFixture();f.q.paused=paused;
+  // This receipt must work after the old 30-second recorder expires.
+  const trace=f.trace();trace.running=false;trace.stop='time-limit';f.q.elapsed=43;
+  for(let i=0;i<3;i++)assert.deepEqual(vehicleHit(f),{result:false,calls:0});
+  assert.equal(f.q.carHitEventsSeen,3);assert.equal(f.q.carHitEventsSuppressed,3);
+  assert.equal(f.q.active,true);assert.equal(f.q.requested,true);assert.equal(f.q.paused,paused);
+  assert.equal(f.q.arrivalUnconfirmed,false);assert.equal(trace.stop,'time-limit');
+}
+{
+  // Negative control: bypassing the new guard leaves the active player's event
+  // on the original car-hit path, as it was before this prevention candidate.
+  const f=vehicleFixture();f.p.NCCFlightProbeSuppressCarHit=()=>false;
+  assert.deepEqual(vehicleHit(f),{result:true,calls:1});
+  assert.equal(f.q.carHitEventsSeen,1);assert.equal(f.q.carHitEventsSuppressed,0);
+}
+const vehicleFailureGates={
+  missingProbe:f=>{f.p.nccCollisionFlightProbe=null;},inactive:f=>{f.q.active=false;},notRequested:f=>{f.q.requested=false;},
+  preparePending:f=>{f.q.preparePending=true;},validationRequested:f=>{f.q.validationRequested=true;},
+  transitionPending:f=>{f.q.transitionPending=true;},stopRequested:f=>{f.q.stopRequested=true;},
+  exitRequested:f=>{f.q.exitRequest=1;},exitProcessing:f=>{f.q.processingExitRequest=2;},
+  arrivalPending:f=>{f.q.arrivalPending=true;},arrivalUnconfirmed:f=>{f.q.arrivalUnconfirmed=true;},
+  interactionYield:f=>{f.q.interactionYield=true;},restoreUnconfirmed:f=>{f.q.restoreUnconfirmed=true;},
+  ownFilterWrite:f=>{f.q.ownFilterWrite=true;},clearanceFailed:f=>{f.q.clearanceFailed=true;},
+  missingInterface:f=>{f.q.interfaceRef=null;},foreignOwner:f=>{f.si.owner={};},foreignExecutionOwner:f=>{f.si.executionOwner={};},
+  staleCapture:f=>{f.q.capturedInterface={};},missingCapture:f=>{f.q.capturedInterface=null;},zeroPreset:f=>{f.q.capturedNormal=false;},
+  noCaptureWrite:f=>{f.q.captureWrites=0;},badBaseline:f=>{f.q.baselineFilter={valid:false};},badCapture:f=>{f.q.capturedFilter={valid:false};},
+  unsupportedState:f=>{f.q.stateName='vehicleKnockdown';},otherMachine:f=>{f.q.machineName='Scene';},
+  dead:f=>{f.s.dead=true;},mounted:f=>{f.s.mounted=true;},braindance:f=>{f.s.braindance=true;},scene:f=>{f.s.scene=true;},
+  deviceZoom:f=>{f.s.zoom=true;},deviceInteraction:f=>{f.s.device=true;},workspotBoard:f=>{f.s.workspotBB=1;},workspotActor:f=>{f.s.workspot=true;},
+  missingInteractionBoard:f=>{f.si.localBlackboard=null;},missingWorkspotSystem:f=>{f.si.GetWorkspotSystem=()=>null;},
+};
+for(const [name,change] of Object.entries(vehicleFailureGates))for(const originalResult of [false,true]){
+  const f=vehicleFixture();change(f);
+  assert.deepEqual(vehicleHit(f,originalResult),{result:originalResult,calls:1},name);
+  if(f.q){assert.equal(f.q.carHitEventsSeen,1,name);assert.equal(f.q.carHitEventsSuppressed,0,name);}
+}
+{
+  const f=vehicleFixture();const before=f.s.interactionReads;
+  assert.deepEqual(vehicleHit(f,true,null),{result:true,calls:1},'undefined event retains original behavior');
+  assert.equal(f.s.interactionReads,before);assert.equal(f.q.carHitEventsSeen,1);assert.equal(f.q.carHitEventsSuppressed,0);
+  f.q.carHitEventsSeen=f.q.carHitEventsSuppressed=2147483647;
+  assert.deepEqual(vehicleHit(f),{result:false,calls:0});
+  assert.equal(f.q.carHitEventsSeen,2147483647);assert.equal(f.q.carHitEventsSuppressed,2147483647);
+}
+for(const action of ['stop','return']){
+  const f=vehicleFixture();assert.deepEqual(vehicleHit(f),{result:false,calls:0});
+  if(action==='stop')f.p.NCCFlightProbeStopHere();else f.p.NCCFlightProbeReturn();
+  assert.deepEqual(vehicleHit(f),{result:true,calls:1},'accepted exit intent immediately restores original vehicle handling');
+  f.tick();assert.equal(f.q.active,false);
+  if(action==='return'){f.s.time+=.02;f.tick();assert.equal(f.q.arrivalUnconfirmed,false);}
+  assert.deepEqual(vehicleHit(f,false),{result:false,calls:1},'completed '+action+' preserves ordinary callback result');
+  f.start();f.tick();f.tick();assert.equal(f.q.active,true);
+  assert.deepEqual(vehicleHit(f),{result:false,calls:0},'new explicit flight regains scoped protection');
+  assert.equal(f.q.carHitEventsSeen,4);assert.equal(f.q.carHitEventsSuppressed,2,'numeric receipt survives flight restart');
+}
+assert.match(body('NCCFlightProbeStatus'),/carHitEventsSeen=.*ToString\(probe\.carHitEventsSeen\)/);
+assert.match(body('NCCFlightProbeStatus'),/carHitEventsSuppressed=.*ToString\(probe\.carHitEventsSuppressed\)/);
 function dodgeDecision(f, si=f.si, machine='Locomotion', originalResult=true, method='WantsToDodge') {
   const calls=[];
   const c=vm.createContext({IsDefined:v=>v!==null&&v!==undefined,Equals:(a,b)=>a===b,AsPlayer:v=>v?.isPlayer?v:null,
@@ -675,4 +756,4 @@ function observationReads(f){return {input:f.s.reads,physics:f.s.positionReads,e
   const f=fixture();const normal=f.start();assert(!normal.includes('[Stored relocation]'));f.tick();f.tick();
   const formats=f.s.formats;f.tick();assert.equal(f.s.formats,formats,'normal frames never format the new stored report');
 }
-console.log('PASS actual flight lifecycle and bounded command-time relocation evidence, preserving immutable cause/intent, retained failure, native behavior and idle fast paths');
+console.log('PASS actual flight lifecycle, scoped car-hit prevention and bounded relocation evidence, preserving immutable cause/intent, retained failure, native behavior and idle fast paths');

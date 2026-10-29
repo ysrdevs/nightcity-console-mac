@@ -12,6 +12,23 @@ The sections below retain the earlier development checkpoints in chronological c
 
 ## Current travel stage
 
+### Private vehicle-impact candidate, 2026-10-29
+
+During the private native mod-support test, a deliberate truck collision stopped flight and left a
+queued recovery arrival unconfirmed. Normal collision was restored and no position writes were
+refused, but subsequent starts could only recheck the unresolved destination. The transition trace
+expired after 30 seconds; the failure occurred after about 43 seconds, so it did not capture the
+incoming impact state. Earlier simple flight and mod compatibility checks passed in that session;
+the requested new-save/relaunch test was not completed.
+
+The game's `PlayerPuppet.OnCarHitPlayer` callback queues car-hit damage and a separation impulse
+independently of the simulation filter. The candidate suppresses that callback only during owned,
+active flight with a verified normal filter and no pending cleanup, relocation or interaction.
+Normal inactive, unsupported or uncertain states retain the original callback. Saturating event
+counters appear in manually requested status and remain available after the transition recorder
+expires. Queued relocation guards are unchanged. A focused truck test is still required before
+claiming that this prevents the reported failure; it cannot unlock an already unresolved session.
+
 The travel build removes the prototype's 60-second, 128m and 32,768-update lifetime limits. The native movement bridge retains its finite-coordinate, per-step, current-context, physics/entity agreement and subsequent-readback checks. Diagnostic counters saturate instead of overflowing. Destination stopping, a flight over 75 seconds, menu/app pause and resume, repeated Stop/Return restarts and computer-interaction restarts passed as described below.
 
 | Control | Behavior |
