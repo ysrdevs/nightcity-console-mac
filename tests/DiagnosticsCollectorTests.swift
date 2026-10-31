@@ -63,6 +63,13 @@ struct DiagnosticsCollectorTests {
         try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -30 * 86400)], ofItemAtPath: game.appendingPathComponent("red4ext/logs/red4ext-old.log").path)
         try write(game, "red4ext/logs/unrelated.log", "UNRELATED_LOG_SECRET")
         try write(game, "red4ext/RED4ext.dylib", "abc")
+        try write(game, "red4ext/plugins/input_loader/input_loader.log", "INPUT_MERGE_OK\n" + privateText)
+        try write(game, "red4ext/plugins/ModSettings/ModSettings.log", "SETTINGS_INIT_OK\n" + privateText)
+        try write(game, "red4ext/plugins/input_loader/input_loader.dylib", "abc")
+        try write(game, "red4ext/plugins/ModSettings/ModSettings.dylib", "abc")
+        try write(game, "r6/input/Example.xml", "INPUT_SOURCE_PRIVATE")
+        try write(game, "r6/cache/inputContexts.xml", "INPUT_CACHE_PRIVATE")
+        try write(game, "engine/config/platform/mac/input_loader.ini", "INPUT_CONFIG_PRIVATE")
         try write(game, "red4ext/logs/hookstats.json", "{\"schema\":1,\"hooks\":[{\"name\":\"test_hook\",\"hits\":27}],\"password=KEY_PRIVATE\":\"metadata\",\"token\":\"JSON_PRIVATE_TOKEN\",\"commandLine\":[\"JSON_PRIVATE_COMMAND\"]}")
         try write(game, "red4ext/logs/milestones.log", "CHECK bootstrap pass")
         try write(game, "r6/scripts/Example/main.reds", "SOURCE_MUST_NOT_BE_READ")
@@ -160,6 +167,20 @@ struct DiagnosticsCollectorTests {
         precondition(summary["launcher_version"] as? String == "1.7.0.0", "Four-component version fields are not IP addresses")
         precondition(all.contains("Example/main.reds") && all.contains("Example.archive"), "Inventory lists names without reading content")
         precondition(all.contains("archive/pc/mod/WindowsLayout.archive"), "Windows-style archive placement must remain visible in inventory")
+        precondition(all.contains("INPUT_MERGE_OK") && all.contains("SETTINGS_INIT_OK"))
+        precondition(all.contains("r6/input/Example.xml"))
+        for secret in ["INPUT_SOURCE_PRIVATE", "INPUT_CACHE_PRIVATE", "INPUT_CONFIG_PRIVATE"] {
+            precondition(!all.contains(secret), "Input diagnostics must not export configuration contents")
+        }
+        let input = try object(report, "input-configuration.json")
+        let inputFiles = input["files"] as! [[String: Any]]
+        precondition(input["contents_omitted"] as? Bool == true)
+        precondition(inputFiles.first { $0["path"] as? String == "r6/cache/inputContexts.xml" }?["status"] as? String == "hashed")
+        precondition(inputFiles.first { $0["path"] as? String == "r6/cache/inputUserMappings.xml" }?["status"] as? String == "missing_or_not_regular")
+        let native = try array(report, "native-binaries.json")
+        for plugin in ["input_loader/input_loader", "ModSettings/ModSettings"] {
+            precondition(native.first { $0["path"] as? String == "<GAME>/red4ext/plugins/" + plugin + ".dylib" }?["sha256"] as? String == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        }
         for secret in ["PC_ARCHIVE_CONTENT_PRIVATE", "RUNTIME_JS_SOURCE_PRIVATE", "PRIVATE_SOURCE_LOCK_MUST_NOT_EXPORT", "PRIVATE_REPOSITORY_PROVENANCE",
                        "private-implementation.cpp", "CONFIG_COMMENT_PRIVATE", "CONFIG_UNKNOWN_PRIVATE", "CONFIG_MOD_NAME_PRIVATE", "CONFIG_HOOK_NAME_PRIVATE", "CONFIG_SECTION_PRIVATE", "FRIDA_PRIVATE"] {
             precondition(!all.contains(secret), "New diagnostic collection leaked \(secret)")

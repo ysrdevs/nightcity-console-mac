@@ -331,7 +331,7 @@ final class DiagnosticsCollector {
         }
         if let game = DiagnosticsDirectory(snapshot.gameRoot) {
             collectLogs(game, directory: "red4ext/logs", prefix: "red4ext", label: "loader")
-            for plugin in ["Codeware", "ArchiveXL", "TweakXL"] {
+            for plugin in ["Codeware", "ArchiveXL", "TweakXL", "input_loader", "ModSettings"] {
                 collectLogs(game, directory: "red4ext/plugins/\(plugin)", prefix: plugin, label: plugin)
             }
             collectLogs(game, directory: "r6/logs", prefix: "redscript", label: "redscript")
@@ -361,6 +361,7 @@ final class DiagnosticsCollector {
             }
             json("script-caches.json", caches)
             collectConfiguration(game)
+            collectInputConfiguration(game)
             collectInventory(game)
         } else { omissions.append("Game folder is unavailable; game files were skipped.") }
         if hasTime, let temp = DiagnosticsDirectory(snapshot.temporaryRoot) {
@@ -469,7 +470,8 @@ final class DiagnosticsCollector {
         var entries: [[String: Any]] = []
         let app = DiagnosticsDirectory(snapshot.appBundle)
         let paths = ["red4ext/RED4ext.dylib", "red4ext/plugins/Codeware/Codeware.dylib", "red4ext/plugins/ArchiveXL/ArchiveXL.dylib",
-                     "red4ext/plugins/TweakXL/TweakXL.dylib", "red4ext/libcyberconsole_overlay.dylib", "red4ext/FridaGadget.dylib"]
+                     "red4ext/plugins/TweakXL/TweakXL.dylib", "red4ext/plugins/input_loader/input_loader.dylib",
+                     "red4ext/plugins/ModSettings/ModSettings.dylib", "red4ext/libcyberconsole_overlay.dylib", "red4ext/FridaGadget.dylib"]
         for path in paths where hasTime {
             let native = path == "red4ext/RED4ext.dylib" || path.hasPrefix("red4ext/plugins/")
             let bundled = (native && snapshot.native25 ? "native25/" : "") + String(path.dropFirst("red4ext/".count))
@@ -629,6 +631,23 @@ final class DiagnosticsCollector {
         }
         json("runtime-config.json", output)
     }
+    private func collectInputConfiguration(_ root: DiagnosticsDirectory) {
+        guard hasTime else { return }
+        var files: [[String: Any]] = []
+        for path in ["engine/config/platform/mac/input_loader.ini", "r6/config/inputContexts.xml",
+                     "r6/config/inputUserMappings.xml", "r6/cache/inputContexts.xml", "r6/cache/inputUserMappings.xml"] where hasTime {
+            var entry: [String: Any] = ["path": path]
+            if let info = root.information(path), !info.directory {
+                entry.merge(fileDetails(info)) { current, _ in current }
+                if let (hash, _) = measuredHash(root, path) {
+                    entry["sha256"] = hash
+                    entry["status"] = "hashed"
+                } else { entry["status"] = "size_or_time_budget" }
+            } else { entry["status"] = "missing_or_not_regular" }
+            files.append(entry)
+        }
+        json("input-configuration.json", ["files": files, "contents_omitted": true])
+    }
     private func collectRuntimeStatus(_ temp: DiagnosticsDirectory) {
         let path = "cp2077_runtime_diagnostics.json"
         guard let info = temp.information(path), let data = temp.read(path, maximum: 8192, tail: false),
@@ -655,7 +674,7 @@ final class DiagnosticsCollector {
     private func collectInventory(_ root: DiagnosticsDirectory) {
         guard hasTime else { return }
         var inventory: [[String: Any]] = [], visited = 0
-        let roots = ["archive/Mac/mod", "archive/pc/mod", "r6/scripts", "r6/tweaks", "red4ext/plugins"]
+        let roots = ["archive/Mac/mod", "archive/pc/mod", "r6/scripts", "r6/tweaks", "r6/input", "red4ext/plugins"]
         var queue = roots.map { ($0, 0) }
         while !queue.isEmpty && hasTime && visited < limits.directoryEntries && inventory.count < limits.inventoryEntries {
             let (folder, depth) = queue.removeFirst()
@@ -665,7 +684,8 @@ final class DiagnosticsCollector {
                 let leaf = URL(fileURLWithPath: entry.relative).lastPathComponent.lowercased()
                 if entry.directory {
                     if depth < 5 && !["saves", "screenshots", "cache", "logs"].contains(leaf) { queue.append((entry.relative, depth + 1)) }
-                } else if ["archive", "xl", "reds", "yaml", "yml", "tweak", "dylib"].contains(URL(fileURLWithPath: leaf).pathExtension) {
+                } else if ["archive", "xl", "reds", "yaml", "yml", "tweak", "dylib"].contains(URL(fileURLWithPath: leaf).pathExtension) ||
+                            (entry.relative.hasPrefix("r6/input/") && leaf.hasSuffix(".xml")) {
                     inventory.append(["path": entry.relative, "bytes": entry.size])
                 }
                 if inventory.count >= limits.inventoryEntries { break }
