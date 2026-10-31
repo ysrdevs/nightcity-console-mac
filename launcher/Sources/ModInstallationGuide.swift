@@ -8,7 +8,8 @@ struct ModInstallationGuide: View {
             Text("Mod Installation Guide").font(.title2.bold())
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    guideSection("Start with Add Mod", text: "Quit the game, then use Add Mod to choose a downloaded ZIP or extracted mod folder. You can select several mods together, or drag them onto the launcher. Click Play after installation finishes.")
+                    guideSection("Start with Add Mod", text: "Quit the game, then use Add Mod to choose downloaded ZIPs or extracted mod folders, or drag them onto the launcher. Review detected requirements, issues and files before clicking Install. Cancel leaves your game unchanged. Click Play after installation and script compilation finish.")
+                    guideSection("Resolve import issues", text: "Missing requirements, unsupported components and conflicting files block installation. Existing files are not overwritten. Follow the mod author's removal instructions before replacing an older version. You can select a required gameplay mod in the same import.")
                     guideSection("Optional mods", text: "Open Optional Mods to choose Equipment-EX or Cyberware-EX. Both are optional. Existing installations stay in place. Download Virtual Atelier from its official page and import it, then add a separate Atelier store mod.")
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Where files go").font(.headline)
@@ -17,8 +18,9 @@ struct ModInstallationGuide: View {
                         pathRow("archive/Mac/mod", detail: "Compatible archives; verified VA / Equipment .archive.xl files stay beside them")
                         pathRow("r6/scripts", detail: "Redscript mod folders and .reds files")
                         pathRow("r6/tweaks", detail: "TweakXL data files")
+                        pathRow("r6/input", detail: "Input Loader XML bindings")
                     }
-                    guideSection("Check compatibility", text: "Use the supported mod version and its listed dependencies. Windows .dll plugins and CET Lua mods are not supported by this launcher. NightCity Console supplies native ArchiveXL, TweakXL and Codeware components. The included Codeware build supports a limited set of features; other Codeware mods may not work.")
+                    guideSection("Check compatibility", text: "The preview detects some requirements, but cannot certify an arbitrary mod or infer every required version. Check the author's requirements. Windows .dll plugins and CET Lua mods are not supported. Keep NightCity's managed native frameworks; other Codeware-dependent mods still need compatibility testing.")
                     guideSection("If a mod does not load", text: "Read the launcher’s status message and check the mod’s required version. Use the trash button to remove mods installed through Add Mod. Back up your saves before changing gameplay mods. Export Diagnostics creates a local support ZIP when you need help.")
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

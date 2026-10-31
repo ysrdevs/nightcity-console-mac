@@ -18,6 +18,8 @@ if (args.Length < 1)
     Console.Error.WriteLine("  nctool factories <archive> <looseDir> <outConfig>    (dump factory CSV entityName->root.ent pairs)");
     Console.Error.WriteLine("  nctool loc <archive> <looseDir> <outJson>            (dump onscreens localization secondaryKey->text, fnv32+fnv64 keyed; merges)");
     Console.Error.WriteLine("  nctool install <mod .zip|folder> <gameDir>          (one-step: rawrepack + deploy a mod to the macOS game dirs)");
+    Console.Error.WriteLine("  nctool prepare-import <mod .zip|folder> <gameDir> <workspace> (read-only game preview)");
+    Console.Error.WriteLine("  nctool commit-import <batchRequest.json>             (install reviewed prepared files)");
     Console.Error.WriteLine("  nctool regen <gameDir>                               (self-contained: regenerate all 5 /tmp handoffs from installed mods)");
     Console.Error.WriteLine("  nctool stageplugins <gameDir>                        (copy each plugin's Scripts/*.reds into r6/scripts; run before every compile)");
     Console.Error.WriteLine("  nctool compat25 <gameDir>                            (apply tested mod script compatibility for native game 2.5)");
@@ -53,6 +55,10 @@ switch (mode)
         break;
     case "install":
         return Install(args[1], args[2], args.Length > 3 ? args[3] : null);
+    case "prepare-import":
+        return ModImport.Prepare(args[1], args[2], args[3], Install);
+    case "commit-import":
+        return ModImport.Commit(args[1]);
     case "compat25":
         return NightCityModCompatibility.UpgradeGame(args[1]);
     case "regen":
@@ -99,7 +105,7 @@ catch (Exception e)
     // Keep conversion failures as ordinary CLI errors so verification's finally
     // blocks run and remove temporary output before returning to the launcher.
     Console.Error.WriteLine($"[FAIL] {e.Message}");
-    return 2;
+    return e is ModImport.RollbackNeedsAttentionException ? 3 : 2;
 }
 return 0;
 
@@ -115,7 +121,7 @@ int Unpack(string archivePath, string looseDir, Dictionary<ulong, string> extrac
         // FileName supplies <original hash>.bin when the depot path is unknown.
         // Name supplies only the number, which ArchiveWriter silently skips.
         var rel = f.FileName.Replace('\\', '/');
-        var outPath = Path.Combine(looseDir, rel);
+        var outPath = ModImport.SafeExtractionPath(looseDir, rel);
         Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
         try
         {
@@ -869,13 +875,21 @@ int Install(string src, string gameDir, string manifestOut)
             File.Copy(path, dst, true); deployed.Add(dst); scripts++; continue;
         }
 
+        int mi = lower.IndexOf("r6/input/", StringComparison.Ordinal);
+        if (mi >= 0)
+        {
+            var dst = Path.Combine(gameDir, "r6", "input", rel.Substring(mi + "r6/input/".Length));
+            Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
+            File.Copy(path, dst, true); deployed.Add(dst); scripts++; continue;
+        }
+
         // c) red4ext/plugins/** CONFIG (not native binaries - mods ship Windows .dll, useless on mac).
         int mp = lower.IndexOf("red4ext/plugins/", StringComparison.Ordinal);
         if (mp >= 0)
         {
             var pluginPath = rel.Substring(mp + "red4ext/plugins/".Length);
             var pluginName = pluginPath.Split('/')[0];
-            if (native25 && new[] { "Codeware", "ArchiveXL", "TweakXL" }.Contains(pluginName, StringComparer.OrdinalIgnoreCase))
+            if (native25 && new[] { "Codeware", "ArchiveXL", "TweakXL", "ModSettings", "mod_settings", "input_loader", "InputLoader" }.Contains(pluginName, StringComparer.OrdinalIgnoreCase))
             {
                 Console.WriteLine($"[INSTALL] {pluginName} is supplied by NightCity Console for native 2.5; preserving its tested files.");
                 skipped++; continue;

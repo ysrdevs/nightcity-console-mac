@@ -42,6 +42,7 @@ struct OptionalModsView: View {
                             let ids = availableSelection
                             selected.removeAll()
                             model.installOptionalMods(ids: ids)
+                            dismiss()
                         }
                         .disabled(availableSelection.isEmpty || !model.canInstallOptionalMods || changesDisabled)
                     }
@@ -116,6 +117,7 @@ struct OptionalModsView: View {
         ModFilePicker.choose(message: "Select the Virtual Atelier ZIP or extracted mod folder", multiple: false) { urls in
             guard !model.busy, !model.gameIsRunning else { return }
             model.importVirtualAtelier(from: urls)
+            dismiss()
         }
     }
 }

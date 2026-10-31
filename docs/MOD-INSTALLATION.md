@@ -63,6 +63,11 @@ errors as well.
 
 ## Adding other mods
 
+The **1.9 development build** adds a review step before installation. See
+[Mod import preview](IMPORT-PREVIEW.md) for dependency checks, conflict handling
+and the current detection limits. Existing files are not overwritten by this
+workflow; remove the previous package according to its instructions first.
+
 Use **Add Mod** to select one or more ZIPs or extracted folders, or drop them on
 the Mods area. The launcher installs them in sequence, prepares supported files
 and compiles scripts before launch. Do not point it at your entire Downloads

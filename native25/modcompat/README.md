@@ -38,7 +38,7 @@ adaptations do not add extra installed script files.
 ## Source/build inputs
 
 To reproduce the helper changes, check out the pinned `cyberpunk-savekit-mac`
-base, apply `nctool-compat.patch` and then `archive-repack.patch`, populate `_refs/WolvenKit` at its recorded
+base, apply `nctool-compat.patch`, `archive-repack.patch`, and then `import-preview.patch`, populate `_refs/WolvenKit` at its recorded
 commit and apply `wolvenkit-raw-buffers.patch`. The latter patch predates this
 release. Use the preserved native universal `libkraken.dylib` input with the
 recorded SHA-256 and .NET 8:
@@ -85,3 +85,70 @@ installation, and actual VA 1.6.0 ZIP installation/resource validation. VA has
 optional Equipment imports that must not require an installed Equipment core. The Cyberware bundle fixture is synthesized from the pristine
 pinned source; it is not claimed to be a downloaded Nexus ZIP test. The installed
 game is never opened or changed by this test.
+
+## Prepared mod imports
+
+`nctool prepare-import <zip-or-folder> <gameDir> <new-workspace>` snapshots the
+source into `workspace/source`, filters unsupported components, and runs the
+existing installer against `workspace/game`. Only the selected game's
+Info.plist is copied; installed scripts are validated read-only. The schema 1
+`report.json` lists exact converted files, SHA-256 hashes, source inventory,
+skipped files, and blocking issues. Preparation writes nothing into the game.
+Case and Unicode aliases cannot place the workspace inside the source/game.
+
+The report uses `files[].source` relative to the workspace and
+`files[].destination` relative to the game. `sourceFiles[].path` is relative to
+`workspace/source`. `sourceFingerprint` hashes the sorted source records, not
+the external ZIP's filename. Later external source edits do not replace the
+reviewed snapshot. ZIP and source snapshots reject traversal, symlinks, special
+files, duplicate/case-colliding paths, more than 20,000 files, files over 8 GiB,
+or totals over 16 GiB. These bounds do not claim to limit all intermediate
+resource expansion inside the existing archive converter.
+
+`nctool commit-import <request.json>` accepts:
+
+```json
+{
+  "gameRoot": "/path/to/Cyberpunk 2077",
+  "packages": [{
+    "workspace": "/path/to/preview",
+    "reportSHA256": "hash-of-the-reviewed-report-json",
+    "receiptName": "my-mod.json"
+  }]
+}
+```
+
+Commit revalidates the entire batch, prepared source/payload inventories, game
+version/Info.plist, destination containment, and all receipt paths before game
+writes. It refuses while the game is running. Every existing destination or
+receipt blocks this initial import workflow; remove the old mod first. Native
+and CET components block a package; recognized bundled foundation components
+are skipped with an explanation. Foundation scripts/plugins and their exact companion archive names are protected,
+while ordinary XL companions can use ArchiveXL's Bundle directory. Input Loader
+XML files under `r6/input` are supported.
+
+Only reviewed files are copied with create-new semantics, followed by receipts
+under `red4ext/nightcity/mods`. Failures roll back files and empty directories
+created by that transaction. Exit 2 means refusal or completed rollback; exit 3
+means rollback needs attention. A transaction that reached game writes records
+its outcome in each workspace's `commit-result.json`. Keep that workspace for
+recovery instead of retrying a failed approval. Dependency policy and player
+approval remain in the launcher; this helper does not infer gameplay support.
+
+```sh
+python3 tools/test-mod-import.py --dotnet /path/to/dotnet \
+  --nctool /path/to/nctool.dll \
+  --va-zip /path/to/Virtual_Atelier_1.6.0.zip \
+  --equipment-zip /path/to/Equipment-EX-1.2.9.zip \
+  --rippers-folder /path/to/Immersive-Rippers/extracted
+```
+
+The offline tests use disposable game folders, including mid-transaction
+failure/rollback, stale approvals, malformed packages, native blockers,
+foundation preservation, `r6/input`, and exact reviewed payload deployment.
+The running-game refusal check compiles a tiny sleeping process with the game's
+process name; it never launches Cyberpunk. For an isolated incremental build,
+compile the current Program.cs, ModImport.cs and NightCityModCompatibility.cs
+against the accepted helper's WolvenKit.RED4/Common/Core assemblies. Copy the
+complete accepted helper directory and replace only `nctool.dll`; preserve its
+apphost, deps/runtimeconfig files, native Kraken library and other dependencies.

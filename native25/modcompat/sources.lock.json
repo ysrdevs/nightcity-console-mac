@@ -7,7 +7,8 @@
     "source_directory": "_tools/nctool",
     "patch": "nctool-compat.patch",
     "additional_patches": [
-      "archive-repack.patch"
+      "archive-repack.patch",
+      "import-preview.patch"
     ]
   },
   "wolvenkit": {
@@ -27,15 +28,17 @@
     "EquipmentEx-MIT.txt": "abbe8d2050ded0d446f3a8b3b8efe3a35b0f392392f61d75f49fe59bd56d84e1",
     "Kraken-NOTICE.txt": "17e9dd1f7c09b7c36254eaaff602c7b16e7c750a50890700550cb268f04d434e",
     "NightCityModCompatibility.cs": "708e15c9c48264c6f18cc67f274d41f5a1d729b7b853c12a534ee60175ec2dd7",
-    "README.md": "b5251f71153c48810a2050a7bf977953568c2018aabd9a8484d05d447c659623",
+    "README.md": "085cd62d7032f3416c0ba08023ba1afaf1143c8274554e8cb17c432c90988e24",
     "WolvenKit-GPL3.txt": "589ed823e9a84c56feb95ac58e7cf384626b9cbf4fda2a907bc36e103de1bad2",
-    "nctool/Program.cs": "e0016a9a4516d1ada370453406c40d0ccf3e65e3951283b38b088b2112d55930",
+    "nctool/Program.cs": "4cb5054b7d9cbdb9b26d714af68f7bd18bc999cf3379ad42c0008e92302c94b1",
     "nctool/nctool.csproj": "c8a33b96440d4614ba412b9b4d5e013fb66738ab5c57110210dd5f0d1e2ac576",
     "nctool-MIT.txt": "8de40d8f10661db83b166e74effba7c5fa370c6b8ed45b494a032c77f732ae43",
     "nctool-compat.patch": "07fcc0f25f358a844983e36faa2abc9b2ebe7b301b4e18f443130eaf1c384c21",
     "nightcity-mod-compat.json": "630ca9def1b1d2d85bca0e49ba5fa5f3efc99c2ebc986db7c115ab0d9e2cef5e",
     "va-package-verification.json": "f3f12fadf1396bdcc2236ccb10da0f76642731e2380dd7c1b8940b77d58abed3",
     "wolvenkit-raw-buffers.patch": "3cbbc064162bb1de569d0048b24d675f35673f31509be6b412c67e6c2b4cbeaa",
-    "archive-repack.patch": "9b434cf197624d32207e89fbb405a506bc12f3a4f5e1f36dceb0ec6c58cc9437"
+    "archive-repack.patch": "9b434cf197624d32207e89fbb405a506bc12f3a4f5e1f36dceb0ec6c58cc9437",
+    "nctool/ModImport.cs": "66ca6f7407ab7fc8f3a3700bff0017012ebe6ef003e9fa6f2ae0d9a9d1b036cc",
+    "import-preview.patch": "40b05053dbeb4bf3472f78f604779511fbca1a798eeea77320c671dfaf3e4d8e"
   }
 }

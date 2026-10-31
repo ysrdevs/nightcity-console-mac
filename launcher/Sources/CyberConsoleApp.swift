@@ -872,6 +872,8 @@ final class Model: ObservableObject {
     @Published var busy: Bool = false          // an install/remove is running on a background thread
     @Published var busyDetail: String = ""     // live per-step progress shown in the drop zone
     @Published var progress: Double = 0         // 0..1 for the determinate bar (nil-ish when 0 at start)
+    @Published var importPreview: ModImportPreviewSession?
+    private var importWorkspaceRoot: URL?
 
     // Parse a "[PROGRESS] <fraction> <label>" line emitted by nctool. Returns nil for any other line.
     private func parseProgress(_ line: String) -> (frac: Double, label: String)? {
@@ -980,12 +982,13 @@ final class Model: ObservableObject {
         installMods(from: urls)
     }
 
-    // A single queue handles every selected ZIP/folder, then compiles the complete set once.
-    // Freeze the destination while busy; changing it midway could deploy or compile into another game.
+    // Prepare in a private temporary folder first. The game is read-only until
+    // the player reviews the complete batch and explicitly clicks Install.
     func installMod(from url: URL) { installMods(from: [url]) }
 
     func installMods(from urls: [URL]) {
         guard canChangeGameFiles() else { return }
+        guard importPreview == nil else { status = "Finish reviewing the selected mods first."; return }
         guard !urls.isEmpty else { return }
         do { try ModImportPlan.validate(urls) }
         catch { status = error.localizedDescription; return }
@@ -994,31 +997,108 @@ final class Model: ObservableObject {
         guard fullyInstalled() else { status = "Install NightCity Console first, then add mods."; return }
         guard nctoolPath() != nil else { status = "nctool helper missing from the app bundle."; return }
         let destination = gamePath
-        let manifestRoot = modsManifestDir
-        busy = true; progress = 0; busyDetail = "Reading mods…"; status = "Installing mods…"
+        let workspace = FileManager.default.temporaryDirectory.appendingPathComponent("nightcity-import-\(UUID().uuidString)", isDirectory: true)
+        importWorkspaceRoot = workspace
+        busy = true; progress = 0; busyDetail = "Preparing import preview…"; status = "Checking mods. Your game files are unchanged."
         DispatchQueue.global(qos: .userInitiated).async {
-            var completed: [String] = []
-            var failure: String?
-            for (index, url) in urls.enumerated() {
-                let base = ModImportPlan.manifestBase(for: url)
-                let manifest = "\(manifestRoot)/\(base).json"
-                DispatchQueue.main.async { self.busyDetail = "Installing \(base) (\(index + 1)/\(urls.count))…" }
-                let r = self.runNctoolStreaming(["install", url.path, destination, manifest]) { line in
-                    if let p = self.parseProgress(line) {
-                        DispatchQueue.main.async {
-                            self.progress = (Double(index) + min(1, max(0, p.frac))) / Double(urls.count) * 0.8
-                            if !p.label.isEmpty { self.busyDetail = p.label + "…" }
+            do {
+                try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: false)
+                var prepared: [ModPreparedImport] = []
+                var approvals: [ModImportApproval] = []
+                for (index, url) in urls.enumerated() {
+                    let packageWorkspace = workspace.appendingPathComponent("package-\(index)", isDirectory: true)
+                    let name = ModImportPlan.manifestBase(for: url)
+                    DispatchQueue.main.async { self.busyDetail = "Checking \(name) (\(index + 1)/\(urls.count))…" }
+                    let result = self.runNctoolStreaming(["prepare-import", url.path, destination, packageWorkspace.path]) { line in
+                        if let p = self.parseProgress(line) {
+                            DispatchQueue.main.async {
+                                self.progress = (Double(index) + min(1, max(0, p.frac))) / Double(urls.count)
+                            }
                         }
-                    } else if let msg = self.friendlyProgress(line) {
-                        DispatchQueue.main.async { self.busyDetail = msg }
                     }
+                    let reportURL = packageWorkspace.appendingPathComponent("report.json")
+                    guard let size = try? reportURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+                          size > 0, size <= 16 * 1024 * 1024 else {
+                        throw ModImportPreviewError.message("Couldn't check \(name): \(self.lastLine(result.out))")
+                    }
+                    let data = try Data(contentsOf: reportURL)
+                    let report = try JSONDecoder().decode(ModImportPreparationReport.self, from: data)
+                    prepared.append(ModPreparedImport(report: report, workspace: packageWorkspace, receiptName: name + ".json"))
+                    approvals.append(ModImportApproval(workspace: packageWorkspace.path,
+                        reportSHA256: SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined(),
+                        receiptName: name + ".json"))
                 }
-                guard r.ok else { failure = "Couldn't install \(base): \(self.lastLine(r.out))"; break }
-                completed.append(base)
+                let review = ModImportReview.analyze(prepared, gameRoot: URL(fileURLWithPath: destination))
+                let session = ModImportPreviewSession(gameRoot: destination, workspace: workspace,
+                    prepared: prepared, approvals: approvals, review: review)
+                DispatchQueue.main.async {
+                    self.busy = false; self.busyDetail = ""; self.progress = 0
+                    self.importPreview = session
+                    self.status = review.canInstall ? "Review the selected mods before installing." : "Resolve the issues shown in the import preview."
+                }
+            } catch {
+                try? FileManager.default.removeItem(at: workspace)
+                DispatchQueue.main.async {
+                    self.importWorkspaceRoot = nil
+                    self.busy = false; self.busyDetail = ""; self.progress = 0
+                    self.status = "Import preview failed: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    func cancelModImportPreview() {
+        guard !busy, importWorkspaceRoot != nil else { return }
+        importPreview = nil
+        if let workspace = importWorkspaceRoot { try? FileManager.default.removeItem(at: workspace) }
+        importWorkspaceRoot = nil
+        status = "Import cancelled. No game files changed."
+    }
+
+    func confirmModImport(_ session: ModImportPreviewSession) {
+        guard importPreview?.id == session.id, canChangeGameFiles(), session.review.canInstall else { return }
+        guard gamePath == session.gameRoot, fullyInstalled() else {
+            status = "The game installation changed. Cancel this preview and select the mods again."
+            return
+        }
+        busy = true; busyDetail = "Rechecking the import…"; progress = 0
+        DispatchQueue.global(qos: .userInitiated).async {
+            // Dependencies may have changed outside the launcher while the preview was open.
+            let current = ModImportReview.analyze(session.prepared, gameRoot: URL(fileURLWithPath: session.gameRoot))
+            guard current.canInstall else {
+                DispatchQueue.main.async {
+                    self.busy = false; self.busyDetail = ""
+                    self.importPreview = ModImportPreviewSession(id: session.id, gameRoot: session.gameRoot, workspace: session.workspace,
+                        prepared: session.prepared, approvals: session.approvals, review: current)
+                    self.status = "The installation changed. Review the updated issues."
+                }
+                return
+            }
+            let requestURL = session.workspace.appendingPathComponent("commit.json")
+            let result: (ok: Bool, out: String)
+            do {
+                let request = ModImportCommitRequest(gameRoot: session.gameRoot, packages: session.approvals)
+                try JSONEncoder().encode(request).write(to: requestURL, options: .atomic)
+                result = self.runNctoolStreaming(["commit-import", requestURL.path]) { _ in }
+            } catch { result = (false, error.localizedDescription) }
+            guard result.ok else {
+                DispatchQueue.main.async {
+                    // Preserve the prepared workspace if recovery needs inspection.
+                    // Close the stale approval instead of offering an unsafe retry.
+                    self.importPreview = nil; self.importWorkspaceRoot = nil
+                    self.busy = false; self.busyDetail = ""
+                    self.refreshMods()
+                    self.status = "Import stopped: \(self.lastLine(result.out)) Prepared files were kept for troubleshooting. Select the mods again for a fresh check."
+                }
+                return
+            }
+            DispatchQueue.main.async {
+                self.importPreview = nil
+                self.busyDetail = "Preparing installed mods…"; self.progress = 0.8
             }
             var gameData = (ok: true, out: "")
             if self.pluginsSupported {
-                gameData = self.runNctoolStreaming(["regen", destination]) { line in
+                gameData = self.runNctoolStreaming(["regen", session.gameRoot]) { line in
                     if let p = self.parseProgress(line) {
                         DispatchQueue.main.async {
                             self.progress = 0.8 + p.frac * 0.19
@@ -1027,7 +1107,6 @@ final class Model: ObservableObject {
                     }
                 }
             }
-            // Even a partial batch needs its successfully installed scripts prepared.
             var scriptWarning: String?
             if (self.native25Active || self.hasScripts()) && FileManager.default.isExecutableFile(atPath: self.sccGamePath) {
                 DispatchQueue.main.async { self.progress = 0.99; self.busyDetail = "Compiling scripts…" }
@@ -1035,19 +1114,18 @@ final class Model: ObservableObject {
             } else if self.native25Active {
                 scriptWarning = "The script compiler is missing. Click Install again."
             }
-            let installedNames = completed.joined(separator: ", ")
-            let problem = failure
+            let installedNames = session.review.packages.map(\.name).joined(separator: ", ")
             let warning = scriptWarning
             let dataResult = gameData
+            try? FileManager.default.removeItem(at: session.workspace)
             DispatchQueue.main.async {
+                self.importWorkspaceRoot = nil
                 self.busy = false; self.busyDetail = ""; self.progress = 0
                 self.refreshMods()
-                var messages: [String] = []
-                if !completed.isEmpty { messages.append("Installed \(installedNames).") }
-                if let problem { messages.append(problem) }
+                var messages: [String] = ["Installed \(installedNames)."]
                 if let warning { messages.append("Scripts need attention before Play: \(warning)") }
                 if !dataResult.ok { messages.append("Game-data warning: \(self.lastLine(dataResult.out))") }
-                if problem == nil && warning == nil && dataResult.ok { messages.append("Click Play.") }
+                if warning == nil && dataResult.ok { messages.append("Click Play.") }
                 self.status = messages.joined(separator: " ")
             }
         }
@@ -1057,18 +1135,26 @@ final class Model: ObservableObject {
     // thread so the regen doesn't beachball the window.
     func removeMod(_ mod: InstalledMod) {
         guard canChangeGameFiles() else { return }
+        let destination = gamePath
         busy = true; progress = 0; busyDetail = "Removing \(mod.name)…"; status = "Removing \(mod.name)…"
         DispatchQueue.global(qos: .userInitiated).async {
             let fm = FileManager.default
-            if let data = fm.contents(atPath: mod.manifestPath),
-               let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-               let files = obj["files"] as? [String] {
-                for f in files where fm.fileExists(atPath: f) { try? fm.removeItem(atPath: f) }
+            do {
+                let receipt = URL(fileURLWithPath: mod.manifestPath)
+                let files = try ModRemovalPlan.validatedFiles(manifest: receipt, gameRoot: URL(fileURLWithPath: destination))
+                for file in files { try fm.removeItem(at: file) }
+                try fm.removeItem(at: receipt)
+            } catch {
+                DispatchQueue.main.async {
+                    self.busy = false; self.busyDetail = ""; self.progress = 0
+                    self.refreshMods()
+                    self.status = "Removal stopped: \(error.localizedDescription) The installation receipt was kept."
+                }
+                return
             }
-            try? fm.removeItem(atPath: mod.manifestPath)
             DispatchQueue.main.async { self.busyDetail = "Updating game data…" }
             if self.pluginsSupported {
-                self.runNctoolStreaming(["regen", self.gamePath]) { line in
+                self.runNctoolStreaming(["regen", destination]) { line in
                     if let p = self.parseProgress(line) {
                         DispatchQueue.main.async { self.progress = p.frac; if !p.label.isEmpty { self.busyDetail = p.label + "…" } }
                     }
@@ -1104,7 +1190,7 @@ struct ContentView: View {
     @State private var showModGuide = false
     @State private var resolvingDrop = false
 
-    private var changesDisabled: Bool { m.busy || m.gameIsRunning || resolvingDrop }
+    private var changesDisabled: Bool { m.busy || m.gameIsRunning || resolvingDrop || m.importPreview != nil }
 
     var versionMismatch: Bool {
         guard let v = m.gameVersion else { return false }
@@ -1231,6 +1317,9 @@ struct ContentView: View {
         .frame(width: 620, height: 640)
         .sheet(isPresented: $showOptionalMods) { OptionalModsView(model: m) }
         .sheet(isPresented: $showModGuide) { ModInstallationGuide() }
+        .sheet(item: $m.importPreview, onDismiss: { m.cancelModImportPreview() }) { session in
+            ModImportPreviewView(model: m, session: session)
+        }
     }
 
     func exportDiagnostics() {

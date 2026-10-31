@@ -1,0 +1,465 @@
+diff --git a/_tools/nctool/Program.cs b/_tools/nctool/Program.cs
+--- a/_tools/nctool/Program.cs
++++ b/_tools/nctool/Program.cs
+@@ -18,6 +18,8 @@
+     Console.Error.WriteLine("  nctool factories <archive> <looseDir> <outConfig>    (dump factory CSV entityName->root.ent pairs)");
+     Console.Error.WriteLine("  nctool loc <archive> <looseDir> <outJson>            (dump onscreens localization secondaryKey->text, fnv32+fnv64 keyed; merges)");
+     Console.Error.WriteLine("  nctool install <mod .zip|folder> <gameDir>          (one-step: rawrepack + deploy a mod to the macOS game dirs)");
++    Console.Error.WriteLine("  nctool prepare-import <mod .zip|folder> <gameDir> <workspace> (read-only game preview)");
++    Console.Error.WriteLine("  nctool commit-import <batchRequest.json>             (install reviewed prepared files)");
+     Console.Error.WriteLine("  nctool regen <gameDir>                               (self-contained: regenerate all 5 /tmp handoffs from installed mods)");
+     Console.Error.WriteLine("  nctool stageplugins <gameDir>                        (copy each plugin's Scripts/*.reds into r6/scripts; run before every compile)");
+     Console.Error.WriteLine("  nctool compat25 <gameDir>                            (apply tested mod script compatibility for native game 2.5)");
+@@ -53,6 +55,10 @@
+         break;
+     case "install":
+         return Install(args[1], args[2], args.Length > 3 ? args[3] : null);
++    case "prepare-import":
++        return ModImport.Prepare(args[1], args[2], args[3], Install);
++    case "commit-import":
++        return ModImport.Commit(args[1]);
+     case "compat25":
+         return NightCityModCompatibility.UpgradeGame(args[1]);
+     case "regen":
+@@ -99,7 +105,7 @@
+     // Keep conversion failures as ordinary CLI errors so verification's finally
+     // blocks run and remove temporary output before returning to the launcher.
+     Console.Error.WriteLine($"[FAIL] {e.Message}");
+-    return 2;
++    return e is ModImport.RollbackNeedsAttentionException ? 3 : 2;
+ }
+ return 0;
+ 
+@@ -115,7 +121,7 @@
+         // FileName supplies <original hash>.bin when the depot path is unknown.
+         // Name supplies only the number, which ArchiveWriter silently skips.
+         var rel = f.FileName.Replace('\\', '/');
+-        var outPath = Path.Combine(looseDir, rel);
++        var outPath = ModImport.SafeExtractionPath(looseDir, rel);
+         Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
+         try
+         {
+@@ -869,13 +875,21 @@
+             File.Copy(path, dst, true); deployed.Add(dst); scripts++; continue;
+         }
+ 
++        int mi = lower.IndexOf("r6/input/", StringComparison.Ordinal);
++        if (mi >= 0)
++        {
++            var dst = Path.Combine(gameDir, "r6", "input", rel.Substring(mi + "r6/input/".Length));
++            Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
++            File.Copy(path, dst, true); deployed.Add(dst); scripts++; continue;
++        }
++
+         // c) red4ext/plugins/** CONFIG (not native binaries - mods ship Windows .dll, useless on mac).
+         int mp = lower.IndexOf("red4ext/plugins/", StringComparison.Ordinal);
+         if (mp >= 0)
+         {
+             var pluginPath = rel.Substring(mp + "red4ext/plugins/".Length);
+             var pluginName = pluginPath.Split('/')[0];
+-            if (native25 && new[] { "Codeware", "ArchiveXL", "TweakXL" }.Contains(pluginName, StringComparer.OrdinalIgnoreCase))
++            if (native25 && new[] { "Codeware", "ArchiveXL", "TweakXL", "ModSettings", "mod_settings", "input_loader", "InputLoader" }.Contains(pluginName, StringComparer.OrdinalIgnoreCase))
+             {
+                 Console.WriteLine($"[INSTALL] {pluginName} is supplied by NightCity Console for native 2.5; preserving its tested files.");
+                 skipped++; continue;
+diff --git a/_tools/nctool/ModImport.cs b/_tools/nctool/ModImport.cs
+new file mode 100644
+--- /dev/null
++++ b/_tools/nctool/ModImport.cs
+@@ -0,0 +1,396 @@
++using System.Diagnostics;
++using System.IO.Compression;
++using System.Security.Cryptography;
++using System.Runtime.InteropServices;
++using System.Text;
++using System.Text.Json;
++
++// Preparation never installs into the selected game. The old installer remains
++// the only archive converter; commit only copies its reviewed, hashed output.
++public static class ModImport
++{
++    const int MaxFiles = 20000;
++    const long MaxFile = 8L * 1024 * 1024 * 1024, MaxTotal = 16L * 1024 * 1024 * 1024;
++    const string Info = "Cyberpunk2077.app/Contents/Info.plist";
++    const string Receipts = "red4ext/nightcity/mods/";
++    static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true };
++    static readonly HashSet<string> Foundations = new(new[] { "codeware", "archivexl", "tweakxl", "modsettings", "mod_settings", "input_loader", "inputloader", "red4ext", "redscript", "nightcity", "nightcityconsole", "nightcityexploration" }, StringComparer.OrdinalIgnoreCase);
++    public sealed record SourceFile(string Path, string Sha256, long Size);
++    public sealed record Payload(string Source, string Destination, string Sha256, long Size);
++    public sealed record Skipped(string Path, string Reason, bool Blocking);
++    public sealed record Issue(string Code, string Message, bool Blocking);
++    public sealed class Report
++    {
++        public int Schema { get; set; } = 1;
++        public string PackageName { get; set; } = "";
++        public string SourceName { get; set; } = "";
++        public string SourceFingerprint { get; set; } = "";
++        public string GameRoot { get; set; } = "";
++        public string GameInfoSHA256 { get; set; } = "";
++        public string GameVersion { get; set; } = "";
++        public DateTime PreparedAt { get; set; } = DateTime.UtcNow;
++        public List<Payload> Files { get; set; } = new();
++        public List<SourceFile> SourceFiles { get; set; } = new();
++        public List<Skipped> Skipped { get; set; } = new();
++        public List<Issue> Issues { get; set; } = new();
++    }
++    public sealed record Package(string Workspace, string ReportSHA256, string ReceiptName);
++    public sealed record Request(string GameRoot, List<Package> Packages);
++    public sealed class RollbackNeedsAttentionException : IOException
++    { public RollbackNeedsAttentionException(string message, Exception inner) : base(message, inner) { } }
++    static string Hash(string path) { using var f = File.OpenRead(path); return Convert.ToHexString(SHA256.HashData(f)).ToLowerInvariant(); }
++    static string Digest(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
++    static string Fingerprint(IEnumerable<SourceFile> files) => Digest(string.Join("\n", files.OrderBy(x => x.Path, StringComparer.Ordinal).Select(x => JsonSerializer.Serialize(x, Json))));
++    static bool Exists(string path) => File.Exists(path) || Directory.Exists(path) || new FileInfo(path).LinkTarget != null;
++    static void Fail(string message) => throw new InvalidOperationException(message);
++    [DllImport("libSystem.B.dylib", EntryPoint = "lstat", SetLastError = true)]
++    static extern int LStat(string path, byte[] buffer);
++    static void Regular(string path)
++    {
++        // Darwin stat: dev_t is 4 bytes, followed by the 16-bit mode_t.
++        // Reject FIFOs/devices/sockets before opening them, avoiding blocking reads.
++        var stat = new byte[512];
++        if (LStat(path, stat) != 0) throw new IOException("Cannot inspect package file: " + path);
++        if ((BitConverter.ToUInt16(stat, 4) & 0xF000) != 0x8000) Fail("Package contains a link or special file: " + path);
++    }
++    public static string SafeExtractionPath(string root, string relative) => Checked(Path.GetFullPath(root), relative);
++    static void Names(IEnumerable<string> paths)
++    {
++        var prefixes = new Dictionary<string, string>();
++        foreach (var path in paths)
++        {
++            var prefix = "";
++            foreach (var part in Relative(path).Split('/'))
++            {
++                prefix = prefix.Length == 0 ? part : prefix + "/" + part;
++                var key = Key(prefix);
++                if (prefixes.TryGetValue(key, out var earlier) && earlier != prefix) Fail("Case/normalization-colliding path: " + path);
++                prefixes[key] = prefix;
++            }
++        }
++    }
++
++    // Normalize only at explicitly selected roots (e.g. macOS /var -> /private/var).
++    // Every path below these roots must be an ordinary directory/file, never a link.
++    static string Root(string path)
++    {
++        var full = Path.GetFullPath(path); var result = Path.GetPathRoot(full)!;
++        foreach (var part in full[result.Length..].Split('/', StringSplitOptions.RemoveEmptyEntries))
++        {
++            result = Path.Combine(result, part);
++            var item = new DirectoryInfo(result);
++            if (item.LinkTarget != null) result = item.ResolveLinkTarget(true)?.FullName ?? throw new IOException("Broken root link.");
++        }
++        return Path.TrimEndingDirectorySeparator(result);
++    }
++    static string Relative(string value)
++    {
++        if (string.IsNullOrWhiteSpace(value) || value.Length > 4096 || value.StartsWith('/') || value.Contains('\\') || value.Contains(':') || value.Any(char.IsControl)) Fail("Unsafe package path: " + value);
++        var parts = value.Split('/');
++        if (parts.Length > 40 || parts.Any(p => p.Length == 0 || p is "." or ".." || p.Length > 255)) Fail("Unsafe package path: " + value);
++        return value;
++    }
++    static string Checked(string root, string rel)
++    {
++        Relative(rel); string current = root;
++        if (new DirectoryInfo(root).LinkTarget != null) Fail("A selected root became a symlink.");
++        foreach (var part in rel.Split('/'))
++        {
++            current = Path.Combine(current, part);
++            if (new FileInfo(current).LinkTarget != null || ((File.Exists(current) || Directory.Exists(current) ? File.GetAttributes(current) : 0) & FileAttributes.ReparsePoint) != 0) Fail("Symlink/reparse path refused: " + rel);
++        }
++        return current;
++    }
++    static string Key(string rel) => rel.Normalize(NormalizationForm.FormC).ToUpperInvariant();
++    static bool Within(string path, string root)
++    {
++        var key = Key(Path.TrimEndingDirectorySeparator(path));
++        var parent = Key(Path.TrimEndingDirectorySeparator(root));
++        return key == parent || key.StartsWith(parent + "/", StringComparison.Ordinal);
++    }
++    static IEnumerable<string> Walk(string root)
++    {
++        var stack = new Stack<string>(); stack.Push(root); int count = 0;
++        while (stack.Count > 0)
++            foreach (var path in Directory.EnumerateFileSystemEntries(stack.Pop()).OrderBy(p => p, StringComparer.Ordinal))
++            {
++                if (++count > MaxFiles * 2) Fail("Package has too many entries.");
++                var rel = Path.GetRelativePath(root, path); Checked(root, rel);
++                var attr = File.GetAttributes(path);
++                if ((attr & FileAttributes.Directory) != 0) stack.Push(path); else { Regular(path); yield return path; }
++            }
++    }
++    static List<SourceFile> Inventory(string root)
++    {
++        var result = new List<SourceFile>(); var keys = new HashSet<string>(); long total = 0;
++        foreach (var path in Walk(root))
++        {
++            var rel = Relative(Path.GetRelativePath(root, path)); var size = new FileInfo(path).Length;
++            if (!keys.Add(Key(rel))) Fail("Duplicate or case-colliding package path: " + rel);
++            if (size > MaxFile || (total += size) > MaxTotal || result.Count >= MaxFiles) Fail("Package exceeds import limits.");
++            result.Add(new(rel, Hash(path), size));
++        }
++        Names(result.Select(x => x.Path));
++        return result.OrderBy(x => x.Path, StringComparer.Ordinal).ToList();
++    }
++    static void CopyBounded(Stream input, string output, long expected)
++    {
++        Directory.CreateDirectory(Path.GetDirectoryName(output)!);
++        using var dest = new FileStream(output, FileMode.CreateNew, FileAccess.Write);
++        var buffer = new byte[128 * 1024]; long total = 0; int n;
++        while ((n = input.Read(buffer, 0, buffer.Length)) > 0)
++        { total += n; if (total > expected || total > MaxFile) Fail("File expanded beyond its declared size."); dest.Write(buffer, 0, n); }
++        if (total != expected) Fail("Source changed or is truncated.");
++    }
++    static void Snapshot(string source, string dest)
++    {
++        Directory.CreateDirectory(dest);
++        if (Directory.Exists(source))
++        {
++            var before = Inventory(source);
++            foreach (var file in before)
++            { using var input = File.OpenRead(Checked(source, file.Path)); CopyBounded(input, Checked(dest, file.Path), file.Size); }
++            if (Fingerprint(before) != Fingerprint(Inventory(dest)) || Fingerprint(before) != Fingerprint(Inventory(source))) Fail("Source changed while preparing; try again.");
++            return;
++        }
++        if (!source.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) Fail("Choose a ZIP or an unpacked mod folder.");
++        Regular(source);
++        var beforeHash = Hash(source); long total = 0; var keys = new HashSet<string>();
++        using (var zip = ZipFile.OpenRead(source))
++        {
++            if (zip.Entries.Count > MaxFiles) Fail("ZIP has too many entries.");
++            Names(zip.Entries.Select(x => x.FullName.TrimEnd('/')));
++            foreach (var entry in zip.Entries)
++            {
++                var rel = entry.FullName.TrimEnd('/'); Relative(rel);
++                var unixType = (entry.ExternalAttributes >> 16) & 0xF000;
++                if (unixType != 0 && unixType != 0x8000 && unixType != 0x4000) Fail("ZIP contains a link or special file: " + rel);
++                if ((entry.ExternalAttributes & (int)FileAttributes.ReparsePoint) != 0) Fail("ZIP contains a reparse point.");
++                if (!keys.Add(Key(rel))) Fail("ZIP contains duplicate or case-colliding paths: " + rel);
++                var output = Checked(dest, rel);
++                if (entry.FullName.EndsWith('/')) { Directory.CreateDirectory(output); continue; }
++                if (entry.Length > MaxFile || (total += entry.Length) > MaxTotal || (entry.Length > 1024 * 1024 && entry.Length / Math.Max(1, entry.CompressedLength) > 1000)) Fail("ZIP exceeds import limits.");
++                using var input = entry.Open(); CopyBounded(input, output, entry.Length);
++            }
++        }
++        if (beforeHash != Hash(source)) Fail("ZIP changed while preparing; try again.");
++    }
++    static string Version(string game)
++    {
++        var info = Checked(game, Info);
++        var start = new ProcessStartInfo("/usr/bin/plutil") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
++        foreach (var a in new[] { "-extract", "CFBundleShortVersionString", "raw", "-o", "-", info }) start.ArgumentList.Add(a);
++        using var process = Process.Start(start)!; var result = process.StandardOutput.ReadToEnd().Trim(); process.StandardError.ReadToEnd(); process.WaitForExit();
++        if (process.ExitCode != 0 || result.Length == 0) Fail("Cannot read the selected game's version.");
++        return result;
++    }
++    static int Marker(string path, string marker)
++    {
++        var lower = path.ToLowerInvariant();
++        return lower.StartsWith(marker) ? 0 : lower.IndexOf("/" + marker, StringComparison.Ordinal) is var i && i >= 0 ? i + 1 : -1;
++    }
++    static bool Protected(string rel)
++    {
++        if (FoundationArchive(rel)) return true;
++        foreach (var marker in new[] { "red4ext/plugins/", "r6/scripts/", "r6/input/" })
++        {
++            var at = Marker(rel, marker); if (at < 0) continue;
++            var name = rel[(at + marker.Length)..].Split('/')[0];
++            if (Foundations.Contains(name) || Foundations.Contains(Path.GetFileNameWithoutExtension(name)) || Foundations.Any(x => name.StartsWith(x + ".", StringComparison.OrdinalIgnoreCase))) return true;
++        }
++        return false;
++    }
++    static bool FoundationArchive(string rel)
++    {
++        var name = Path.GetFileName(rel);
++        var suffix = name.EndsWith(".archive.xl", StringComparison.OrdinalIgnoreCase) ? 11 :
++                     name.EndsWith(".archive", StringComparison.OrdinalIgnoreCase) ? 8 : 0;
++        return suffix > 0 && Foundations.Contains(name[..^suffix]);
++    }
++    static bool Native(string rel) => new[] { ".dll", ".dylib", ".so", ".exe", ".asi", ".bundle" }.Contains(Path.GetExtension(rel), StringComparer.OrdinalIgnoreCase);
++    static string Destination(string rel, string source)
++    {
++        if (Marker(rel, "archive/") >= 0)
++        {
++            var name = Path.GetFileName(rel);
++            if (name.EndsWith(".archive", StringComparison.OrdinalIgnoreCase)) return "archive/Mac/mod/" + name;
++            if (name.EndsWith(".xl", StringComparison.OrdinalIgnoreCase))
++            {
++                var pair = Checked(source, rel[..^3]);
++                var native = File.Exists(pair) && (NightCityModCompatibility.IsKnownNativeArchive(pair) || NightCityModCompatibility.KnownRepackResources(pair) != null);
++                return (native ? "archive/Mac/mod/" : "red4ext/plugins/ArchiveXL/Bundle/") + name;
++            }
++        }
++        foreach (var marker in new[] { "r6/scripts/", "r6/tweaks/", "r6/input/", "r6/config/redsuserhints/", "red4ext/plugins/" })
++        {
++            var at = Marker(rel, marker);
++            if (at >= 0) return (marker == "r6/config/redsuserhints/" ? "r6/config/redsUserHints/" : marker) + rel[(at + marker.Length)..];
++        }
++        return "";
++    }
++    static bool Allowed(string dest)
++    {
++        Relative(dest);
++        if (Native(dest) || FoundationArchive(dest) || dest.EndsWith(".lua", StringComparison.OrdinalIgnoreCase)) return false;
++        if (dest.StartsWith("red4ext/plugins/ArchiveXL/Bundle/", StringComparison.Ordinal) && dest.EndsWith(".xl", StringComparison.OrdinalIgnoreCase) && dest.Split('/').Length == 5) return true;
++        if (Protected(dest)) return false;
++        return new[] { "archive/Mac/mod/", "r6/scripts/", "r6/tweaks/", "r6/input/", "r6/config/redsUserHints/", "red4ext/plugins/" }.Any(dest.StartsWith);
++    }
++    static void WriteReport(string workspace, Report report) => File.WriteAllText(Path.Combine(workspace, "report.json"), JsonSerializer.Serialize(report, Json));
++
++    public static int Prepare(string source, string game, string workspace, Func<string, string, string, int> install)
++    {
++        game = Root(game); source = Path.TrimEndingDirectorySeparator(Path.GetFullPath(source));
++        if (new FileInfo(source).LinkTarget != null) Fail("Choose the ordinary source file/folder, not a symlink.");
++        source = Path.Combine(Root(Path.GetDirectoryName(source)!), Path.GetFileName(source));
++        workspace = Path.Combine(Root(Path.GetDirectoryName(Path.GetFullPath(workspace))!), Path.GetFileName(workspace));
++        if (Exists(workspace)) Fail("Preparation requires a new workspace.");
++        if (Within(workspace, game) || Within(workspace, source) || Within(source, game)) Fail("Use a workspace and downloaded source outside the game.");
++        var sourceName = Path.GetFileName(source);
++        var packageName = File.Exists(source) && sourceName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ? sourceName[..^4] : sourceName;
++        var report = new Report { PackageName = packageName, SourceName = sourceName, GameRoot = game, GameVersion = Version(game), GameInfoSHA256 = Hash(Checked(game, Info)) };
++        Directory.CreateDirectory(workspace);
++        var raw = Path.Combine(workspace, "source"); Snapshot(source, raw);
++        report.SourceFiles = Inventory(raw); report.SourceFingerprint = Fingerprint(report.SourceFiles);
++        var selected = Path.Combine(workspace, "install-source"); Directory.CreateDirectory(selected);
++        var destinations = new HashSet<string>();
++        foreach (var file in report.SourceFiles)
++        {
++            if (Protected(file.Path)) { report.Skipped.Add(new(file.Path, "NightCity supplies this native foundation; its installed files are preserved.", false)); continue; }
++            if (Native(file.Path) || Marker(file.Path, "bin/x64/plugins/cyber_engine_tweaks/") >= 0 || file.Path.EndsWith(".lua", StringComparison.OrdinalIgnoreCase))
++            { report.Skipped.Add(new(file.Path, "Native Windows/CET components cannot be installed by this importer.", true)); continue; }
++            var dest = Destination(file.Path, raw);
++            if (dest.Length == 0) { report.Skipped.Add(new(file.Path, "Not a supported game mod file.", false)); continue; }
++            if (!Allowed(dest)) { report.Skipped.Add(new(file.Path, "Protected or unsupported destination.", true)); continue; }
++            if (!destinations.Add(Key(dest))) { report.Issues.Add(new("duplicateDestination", "Multiple source files target " + dest, true)); continue; }
++            var output = Checked(selected, file.Path); Directory.CreateDirectory(Path.GetDirectoryName(output)!); File.Copy(Checked(raw, file.Path), output);
++        }
++        try
++        {
++            if (report.GameVersion == "2.5.0")
++            {
++                var realScripts = Checked(game, "r6/scripts");
++                if (Directory.Exists(realScripts)) Inventory(realScripts); // Validate before recursive compatibility reads.
++                NightCityModCompatibility.Plan(realScripts);
++            }
++            var staged = Path.Combine(workspace, "game"); Directory.CreateDirectory(Path.GetDirectoryName(Checked(staged, Info))!); File.Copy(Checked(game, Info), Checked(staged, Info));
++            var receipt = Path.Combine(workspace, "install-receipt.json");
++            if (destinations.Count == 0) report.Issues.Add(new("emptyPackage", "No supported mod files were found.", true));
++            else if (install(selected, staged, receipt) != 0) report.Issues.Add(new("conversionFailed", "Mod conversion or compatibility preparation failed. See the helper output.", true));
++            else
++            {
++                using var manifest = JsonDocument.Parse(File.ReadAllText(receipt));
++                foreach (var item in manifest.RootElement.GetProperty("files").EnumerateArray())
++                {
++                    var rel = Relative(Path.GetRelativePath(staged, item.GetString()!));
++                    if (!Allowed(rel)) Fail("Installer produced an unsupported destination: " + rel);
++                    var path = Checked(staged, rel); report.Files.Add(new("game/" + rel, rel, Hash(path), new FileInfo(path).Length));
++                    if (Exists(Checked(game, rel))) report.Issues.Add(new("existingDestination", "Remove the existing mod before importing: " + rel, true));
++                }
++            }
++        }
++        catch (Exception e) { report.Issues.Add(new("preparationFailed", e.Message, true)); }
++        WriteReport(workspace, report);
++        Console.WriteLine("[IMPORT] report -> " + Path.Combine(workspace, "report.json"));
++        return report.Issues.Any(x => x.Blocking) || report.Skipped.Any(x => x.Blocking) ? 2 : 0;
++    }
++
++    public static int Commit(string requestPath)
++    {
++        void RequireGameClosed()
++        {
++            foreach (var process in Process.GetProcesses())
++                using (process)
++                    if (process.ProcessName.StartsWith("Cyberpunk2077", StringComparison.OrdinalIgnoreCase)) Fail("Quit Cyberpunk 2077 before installing mods.");
++        }
++        RequireGameClosed();
++        var request = JsonSerializer.Deserialize<Request>(File.ReadAllText(requestPath), Json) ?? throw new IOException("Missing import request.");
++        if (request.Packages == null || request.Packages.Count is < 1 or > 100) Fail("Invalid import batch.");
++        var game = Root(request.GameRoot); var version = Version(game); var infoHash = Hash(Checked(game, Info));
++        var writes = new List<(string Source, string Destination, string Hash, long Size)>();
++        var receipts = new List<(string Path, byte[] Bytes)>(); var targets = new HashSet<string>();
++        var workspaces = new List<string>();
++        bool AddTarget(string relative)
++        {
++            var key = Key(relative);
++            if (targets.Any(x => x.StartsWith(key + "/", StringComparison.Ordinal) || key.StartsWith(x + "/", StringComparison.Ordinal))) return false;
++            return targets.Add(key);
++        }
++        foreach (var package in request.Packages)
++        {
++            var workspace = Root(package.Workspace); var reportPath = Checked(workspace, "report.json");
++            if (Within(workspace, game)) Fail("Prepared workspace must be outside the game.");
++            workspaces.Add(workspace);
++            if (Hash(reportPath) != package.ReportSHA256) Fail("The import preview changed; prepare it again.");
++            var report = JsonSerializer.Deserialize<Report>(File.ReadAllText(reportPath), Json)!;
++            if (report == null || report.Schema != 1 || report.GameRoot != game || report.GameVersion != version || report.GameInfoSHA256 != infoHash || report.Files.Count == 0 || report.Issues.Any(x => x.Blocking) || report.Skipped.Any(x => x.Blocking)) Fail("This package is blocked or the selected game changed.");
++            var sourceInventory = Inventory(Checked(workspace, "source"));
++            if (Fingerprint(sourceInventory) != report.SourceFingerprint || Fingerprint(report.SourceFiles) != report.SourceFingerprint) Fail("Prepared source files changed.");
++            var staged = Inventory(Checked(workspace, "game"));
++            var expected = report.Files.Select(x => new SourceFile(x.Destination, x.Sha256, x.Size)).Append(new SourceFile(Info, infoHash, new FileInfo(Checked(game, Info)).Length));
++            if (Fingerprint(staged) != Fingerprint(expected)) Fail("Prepared payload inventory changed.");
++            foreach (var file in report.Files)
++            {
++                if (file.Source != "game/" + file.Destination || !Allowed(file.Destination)) Fail("Unsafe prepared destination.");
++                var target = Checked(game, file.Destination); var src = Checked(workspace, file.Source);
++                if (!AddTarget(file.Destination) || Exists(target)) Fail("Import destination exists or collides: " + file.Destination);
++                if (Hash(src) != file.Sha256 || new FileInfo(src).Length != file.Size) Fail("Prepared payload changed.");
++                writes.Add((src, target, file.Sha256, file.Size));
++            }
++            Relative(package.ReceiptName);
++            if (package.ReceiptName.Contains('/') || !package.ReceiptName.EndsWith(".json", StringComparison.Ordinal)) Fail("Invalid import receipt name.");
++            var receiptRel = Receipts + package.ReceiptName; var receipt = Checked(game, receiptRel);
++            if (!AddTarget(receiptRel) || Exists(receipt)) Fail("Import receipt already exists or collides.");
++            receipts.Add((receipt, JsonSerializer.SerializeToUtf8Bytes(new { name = report.PackageName, source = report.SourceName, files = report.Files.Select(x => Path.Combine(game, x.Destination)).ToArray() }, Json)));
++        }
++        // No game mutation occurs before the entire batch passes validation.
++        Names(writes.Select(x => Path.GetRelativePath(game, x.Destination)));
++        var created = new List<string>(); var directories = new List<string>();
++        void Recovery(string status, string message)
++        {
++            foreach (var workspace in workspaces)
++                try { File.WriteAllText(Checked(workspace, "commit-result.json"), JsonSerializer.Serialize(new { status, message, gameRoot = game, createdFiles = created, remainingFiles = created.Where(Exists).ToArray() }, Json)); }
++                catch (Exception e) { Console.Error.WriteLine("[IMPORT] Could not write recovery record: " + e.Message); }
++        }
++        void Parents(string path)
++        {
++            var missing = new Stack<string>(); var parent = Path.GetDirectoryName(path)!;
++            while (!Directory.Exists(parent)) { if (Exists(parent)) Fail("A destination parent is not a directory."); missing.Push(parent); parent = Path.GetDirectoryName(parent)!; }
++            while (missing.Count > 0) { var p = missing.Pop(); Checked(game, Path.GetRelativePath(game, p)); Directory.CreateDirectory(p); directories.Add(p); }
++        }
++        try
++        {
++            RequireGameClosed();
++            foreach (var file in writes)
++            {
++                Checked(game, Path.GetRelativePath(game, file.Destination)); Parents(file.Destination);
++                using (var output = new FileStream(file.Destination, FileMode.CreateNew, FileAccess.Write))
++                { created.Add(file.Destination); using var input = File.OpenRead(file.Source); input.CopyTo(output); }
++                if (Hash(file.Destination) != file.Hash || new FileInfo(file.Destination).Length != file.Size) Fail("Prepared file changed during installation.");
++            }
++            foreach (var receipt in receipts)
++            {
++                Checked(game, Path.GetRelativePath(game, receipt.Path)); Parents(receipt.Path);
++                using var output = new FileStream(receipt.Path, FileMode.CreateNew, FileAccess.Write); created.Add(receipt.Path); output.Write(receipt.Bytes);
++            }
++        }
++        catch (Exception original)
++        {
++            var failures = new List<string>();
++            foreach (var path in created.AsEnumerable().Reverse())
++                try { Checked(game, Path.GetRelativePath(game, path)); File.Delete(path); } catch (Exception e) { failures.Add(path + ": " + e.Message); }
++            foreach (var path in directories.AsEnumerable().Reverse())
++                try { Checked(game, Path.GetRelativePath(game, path)); if (Directory.Exists(path) && !Directory.EnumerateFileSystemEntries(path).Any()) Directory.Delete(path); } catch (Exception e) { failures.Add(path + ": " + e.Message); }
++            if (failures.Count != 0)
++            {
++                var message = "Import failed; rollback needs attention. Keep the preview workspace and export diagnostics before retrying. Recovery: " + string.Join(", ", workspaces.Select(x => Path.Combine(x, "commit-result.json"))) + ". " + string.Join("; ", failures);
++                Recovery("rollbackNeedsAttention", message);
++                throw new RollbackNeedsAttentionException(message, original);
++            }
++            Recovery("rolledBack", original.Message);
++            throw new IOException("Import failed; created files were rolled back. " + original.Message, original);
++        }
++        Recovery("committed", "Import completed.");
++        Console.WriteLine($"[IMPORT] committed {request.Packages.Count} package(s), {writes.Count} files."); return 0;
++    }
++}
