@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "commands": ["prepare-import", "commit-import"],
+  "files": {
+    "nctool.dll": "c06797e12fb0acb54258a9a564ac8fb62c191537fba710789a46fe2df0036e99"
+  }
+}

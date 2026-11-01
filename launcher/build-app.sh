@@ -19,7 +19,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp launcher/Info.plist "$APP/Contents/Info.plist"
 
 echo "==> compiling launcher"
-swiftc -O -parse-as-library -target arm64-apple-macos12 \
+swiftc -O -parse-as-library -target arm64-apple-macos15.5 \
   -o "$APP/Contents/MacOS/NightCityConsole" \
   launcher/Sources/*.swift
 
@@ -129,6 +129,12 @@ echo "==> ad-hoc signing"
 # On exFAT/FAT volumes macOS writes "._*" AppleDouble sidecars next to every file; codesign treats them as unsigned
 # nested code and refuses the bundle.
 find "$APP" -name '._*' -delete
-codesign -s - --deep --force "$APP" >/dev/null
+if [ "$MODE" = "release" ]; then
+  # Retain the pinned legacy libraries' valid Developer ID signatures byte-for-byte.
+  # Final release signing handles new nested code through sign-notarize.sh.
+  codesign -s - --force "$APP" >/dev/null
+else
+  codesign -s - --deep --force "$APP" >/dev/null
+fi
 echo "built $APP"
 echo "Run it:  open \"$APP\"   (first launch may need right-click -> Open until notarized)"

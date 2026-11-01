@@ -20,9 +20,17 @@ BASELINE_SHA256 = "19f83a8546819cf09091bb836e585940eaed23a87447009184249d5d2f031
 REDSCRIPT_SHA256 = "b9df6cc0144d786dff9590eb6db913d20744055ab694e52fc8c4584eaee39a8a"
 ARCHIVEXL_SHA256 = "6c638dc1108a565ff4806835a17f704cbb2ab2afeb8ccf700080797c3f70591c"
 PLUGINS = ("TweakXL", "ArchiveXL")  # Preserved public 2.3.1 payload.
-NATIVE25_PLUGINS = (*PLUGINS, "Codeware")
+NATIVE25_PLUGINS = (*PLUGINS, "Codeware", "input_loader", "ModSettings")
+NATIVE25_SCRIPT_PLUGINS = (*PLUGINS, "Codeware", "ModSettings")
 REPO = Path(__file__).resolve().parent.parent
 ACCEPTED_PAYLOAD = REPO / "native25/accepted-payload.json"
+ACCEPTED_HELPER = REPO / "native25/modcompat/accepted-helper.json"
+HELPER_SOURCES = REPO / "native25/modcompat/sources.lock.json"
+LEGACY_BASELINE = REPO / "native25/legacy-baseline.json"
+LEGACY_NATIVE_FILES = {"RED4ext.dylib"} | {
+    f"plugins/{plugin}/{name}" for plugin in PLUGINS
+    for name in (f"{plugin}.dylib", "libfmt.12.dylib", "libspdlog.1.17.dylib", "libyaml-cpp.0.9.dylib")
+}
 OPTIONAL = runpy.run_path(str(REPO / "tools/prepare-optional-mods.py"))
 NATIVE_LICENSES = (
     ("TweakXL-MIT.txt", "plugins/TweakXL/LICENSE"),
@@ -35,6 +43,11 @@ NATIVE_METADATA = {"accepted-payload.json", "BUILD_INFO.json"}
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx",
                    ".m", ".mm", ".inl", ".inc", ".patch", ".diff", ".cmake",
                    ".cs", ".swift", ".py"}
+PRIVATE_PAYLOAD_NAMES = {
+    "input-settings-test", "nightcityinputsettingssmoke", "nightcityimportsmoke",
+    "nightcity-input-settings-smoke.xml", "nightcity-import-smoke.xml",
+    "codeware_test_build.json", "macos.md", "config-startup-2.5.md",
+}
 
 
 def digest(path):
@@ -50,6 +63,25 @@ def require(path):
         raise ValueError(f"required nonempty file missing: {path}")
 
 
+def legacy_baseline():
+    manifest = json.loads(LEGACY_BASELINE.read_text())
+    if (manifest.get("schema") != 1 or manifest.get("game_version") != "2.3.1"
+            or manifest.get("baseline_sha256") != BASELINE_SHA256
+            or set(manifest.get("files", {})) != LEGACY_NATIVE_FILES):
+        raise ValueError("legacy baseline must identify the exact pinned 2.3.1 runtime files")
+    return manifest
+
+
+def validate_legacy_baseline(root):
+    """Historical 2.3.1 binaries keep their original signed bytes and OS targets."""
+    manifest = legacy_baseline()
+    for relative, entry in manifest["files"].items():
+        require(root / relative)
+        if digest(root / relative) != entry["sha256"]:
+            raise ValueError(f"legacy runtime differs from the pinned signed baseline: {relative}")
+    return manifest
+
+
 def runtime_path(relative):
     path = PurePosixPath(relative)
     if not relative or path.is_absolute() or ".." in path.parts or "\\" in relative:
@@ -59,6 +91,8 @@ def runtime_path(relative):
             or any(part.lower() in {".git", "patches", "development", "source", "sources", "include", "headers"}
                    for part in path.parts)):
         raise ValueError(f"native source or private build recipe must not ship: {relative}")
+    if any(part.lower() in PRIVATE_PAYLOAD_NAMES for part in path.parts):
+        raise ValueError(f"private test fixture or development note must not ship: {relative}")
     return relative
 
 
@@ -167,6 +201,7 @@ def extract_prefix(archive, prefix, dest):
 def validate_payload(root):
     for path in root.rglob("*"):
         runtime_path(path.relative_to(root).as_posix())
+    validate_legacy_baseline(root)
     accepted = json.loads(ACCEPTED_PAYLOAD.read_text())
     validate_native_runtime(root / "native25", accepted)
     validate_native_metadata(root / "native25", accepted)
@@ -186,9 +221,15 @@ def validate_payload(root):
         require(root / f"plugins/{plugin}/{plugin}.dylib")
     for plugin in NATIVE25_PLUGINS:
         require(root / f"native25/plugins/{plugin}/{plugin}.dylib")
+    for plugin in NATIVE25_SCRIPT_PLUGINS:
         if not list((root / f"native25/plugins/{plugin}/Scripts").rglob("*.reds")):
             raise ValueError(f"native25 {plugin} scripts missing")
     require(root / "native25/plugins/ArchiveXL/Bundle/ArchiveXL.archive")
+    for name in ("ModSettings.archive", "ModSettings.archive.xl"):
+        require(root / "native25/plugins/ArchiveXL/Bundle" / name)
+    for name in ("plugins/input_loader/license.md", "plugins/input_loader/LICENSES/pugixml.txt",
+                 "plugins/input_loader/LICENSES/spdlog.txt", "plugins/ModSettings/LICENSE.md"):
+        require(root / "native25" / name)
     global_script = (root / "native25/plugins/Codeware/Scripts/Codeware.Global.reds").read_text()
     if global_script.count("public native func ForgetItemID(itemID: ItemID) -> Bool") != 1:
         raise ValueError("Codeware must include exactly one verified wardrobe native declaration")
@@ -197,10 +238,27 @@ def validate_payload(root):
             raise ValueError(f"helper is not executable: {name}")
     if digest(root / "nctool/nightcity-mod-compat.json") != digest(REPO / "native25/modcompat/nightcity-mod-compat.json"):
         raise ValueError("nctool compatibility catalog differs from the checked release source")
+    accepted_helper = json.loads(ACCEPTED_HELPER.read_text())
+    if accepted_helper.get("schema") != 1 or accepted_helper.get("commands") != ["prepare-import", "commit-import"]:
+        raise ValueError("accepted helper manifest does not identify the reviewed import implementation")
+    for relative, expected in accepted_helper["files"].items():
+        runtime_path(relative)
+        require(root / "nctool" / relative)
+        if digest(root / "nctool" / relative) != expected:
+            raise ValueError(f"nctool input differs from the accepted import helper: {relative}")
 
 
 def prepare(args):
     accepted = public_native_manifest(json.loads(ACCEPTED_PAYLOAD.read_text()))
+    require(args.config)
+    if digest(args.config) != accepted["files"].get("config.ini"):
+        raise ValueError("native loader configuration differs from the accepted runtime")
+    # Signing changes Mach-O bytes later. Verify the exact source-built Kraken
+    # input here, before copying, instead of comparing post-signing libraries.
+    kraken = args.nctool / "libkraken.dylib"
+    require(kraken)
+    if digest(kraken) != json.loads(HELPER_SOURCES.read_text())["kraken"]["input_sha256"]:
+        raise ValueError("Kraken input differs from the pinned source-built runtime")
     # Release staging promotes verified prebuilt runtime inputs. Native port
     # sources and build recipes are not required or included in this process.
     for relative, expected in accepted["files"].items():
@@ -209,10 +267,17 @@ def prepare(args):
             raise ValueError(f"accepted native25 file missing: {relative}")
         if digest(path) != expected:
             raise ValueError(f"native25 input differs from accepted checkpoint: {relative}")
+    license_inputs = {destination: REPO / "native25/licenses" / source
+                      for source, destination in NATIVE_LICENSES}
     for plugin in NATIVE25_PLUGINS:
         for path in (args.native25 / "plugins" / plugin).rglob("*"):
-            if path.is_file() and str(path.relative_to(args.native25)) not in accepted["files"]:
-                raise ValueError(f"unrecorded native25 plugin file: {path.relative_to(args.native25)}")
+            if path.is_file():
+                relative = path.relative_to(args.native25).as_posix()
+                if relative in accepted["files"]:
+                    continue
+                if relative in license_inputs and digest(path) == digest(license_inputs[relative]):
+                    continue
+                raise ValueError(f"unrecorded native25 plugin file: {relative}")
     output = args.output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".release-deps-", dir=output.parent) as temp:

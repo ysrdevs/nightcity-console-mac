@@ -1,0 +1,43 @@
+{
+  "baseline_sha256": "19f83a8546819cf09091bb836e585940eaed23a87447009184249d5d2f031151",
+  "files": {
+    "RED4ext.dylib": {
+      "minimum_macos": "27.0",
+      "sha256": "ae94730a81d7b9ece32579dec5922198f6b0b9064396b6aaf52037d2753f09da"
+    },
+    "plugins/ArchiveXL/ArchiveXL.dylib": {
+      "minimum_macos": "27.0",
+      "sha256": "231f94bf7fddb9cf73b5bd8076ab9f3ab36fc0dcba0d2b59fc922d7469cda701"
+    },
+    "plugins/ArchiveXL/libfmt.12.dylib": {
+      "minimum_macos": "26.0",
+      "sha256": "62cfecbc7fb353f4e81b0c967c7d273f8801998331624c742472f094dc921c0f"
+    },
+    "plugins/ArchiveXL/libspdlog.1.17.dylib": {
+      "minimum_macos": "26.0",
+      "sha256": "927219f4f094087e493feb069dfa9aef05d8486b0b1adb32b0e3f7ae26653197"
+    },
+    "plugins/ArchiveXL/libyaml-cpp.0.9.dylib": {
+      "minimum_macos": "26.0",
+      "sha256": "2072712da9b4e85dbf7270c521336dfa43b2a93ff9c72d050a5828f727701c83"
+    },
+    "plugins/TweakXL/TweakXL.dylib": {
+      "minimum_macos": "27.0",
+      "sha256": "8599e7de0cea311ac697e3b866044f10ca411f590b6fa6052a80393f9e41b9ee"
+    },
+    "plugins/TweakXL/libfmt.12.dylib": {
+      "minimum_macos": "26.0",
+      "sha256": "088a2532f72674ead68af58733b4e14056c852c2ec7ce12e2889653303abc255"
+    },
+    "plugins/TweakXL/libspdlog.1.17.dylib": {
+      "minimum_macos": "26.0",
+      "sha256": "62a70a830e58bf6922f032a154c61c8e58b46067177bbe5c846845eaac1f8705"
+    },
+    "plugins/TweakXL/libyaml-cpp.0.9.dylib": {
+      "minimum_macos": "26.0",
+      "sha256": "a6d5e200ca578b3b3e77e93a90a3060be3ba86a89d1622a6bc8648dc173cf53d"
+    }
+  },
+  "game_version": "2.3.1",
+  "schema": 1
+}

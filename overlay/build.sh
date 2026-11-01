@@ -48,7 +48,7 @@ if [ ! -f "$LUA_LIB" ]; then
   ( cd "$LUA_DIR/src"
     for f in *.c; do
       case "$f" in lua.c|luac.c|print.c) continue;; esac   # skip the lua/luac executable mains
-      clang -arch arm64 -O2 -DLUA_USE_POSIX -DLUA_DL_DLOPEN -isysroot "$LSDK" -c "$f"
+      clang -arch arm64 -mmacosx-version-min=15.5 -O2 -DLUA_USE_POSIX -DLUA_DL_DLOPEN -isysroot "$LSDK" -c "$f"
     done
     ar rcs liblua5.1.a *.o )
 fi
@@ -58,7 +58,7 @@ SRC="overlay.mm \
   $IMGUI/imgui.cpp $IMGUI/imgui_draw.cpp $IMGUI/imgui_tables.cpp $IMGUI/imgui_widgets.cpp \
   $IMGUI/backends/imgui_impl_metal.mm"
 
-clang++ -ObjC++ -fobjc-arc -std=c++17 -O2 -arch arm64 -dynamiclib \
+clang++ -ObjC++ -fobjc-arc -std=c++17 -O2 -arch arm64 -mmacosx-version-min=15.5 -dynamiclib \
   -install_name @rpath/libcyberconsole_overlay.dylib \
   -I "$IMGUI" -I "$IMGUI/backends" -I "$LUA_DIR/src" \
   -isysroot "$SDK" \

@@ -5,12 +5,42 @@ import errno
 import json
 from pathlib import Path
 import plistlib
+import re
 import runpy
 import subprocess
 import zipfile
 
 helpers = runpy.run_path(str(Path(__file__).with_name("prepare-release-deps.py")))
 exploration = runpy.run_path(str(Path(__file__).with_name("prepare-exploration.py")))
+MINIMUM_SUPPORTED_MACOS = "15.5"
+
+
+def version_tuple(value):
+    if not re.fullmatch(r"[0-9]+(?:\.[0-9]+){0,2}", value):
+        raise ValueError(f"invalid macOS deployment target: {value}")
+    return tuple(int(part) for part in value.split(".")) + (0,) * (3 - len(value.split(".")))
+
+
+def validate_macho_target(load_commands, relative, maximum=MINIMUM_SUPPORTED_MACOS):
+    """Validate arm64 load-command output, not the SDK used to build the binary."""
+    targets = []
+    for block in load_commands.split("Load command "):
+        if re.search(r"^\s*cmd LC_BUILD_VERSION\s*$", block, re.M):
+            platform = re.search(r"^\s*platform (\S+)\s*$", block, re.M)
+            target = re.search(r"^\s*minos (\S+)\s*$", block, re.M)
+            if not platform or platform[1].lower() not in {"1", "macos"} or not target:
+                raise ValueError(f"missing or non-macOS deployment target in {relative}")
+            targets.append(target[1])
+        elif re.search(r"^\s*cmd LC_VERSION_MIN_MACOSX\s*$", block, re.M):
+            target = re.search(r"^\s*version (\S+)\s*$", block, re.M)
+            if not target:
+                raise ValueError(f"missing macOS deployment target in {relative}")
+            targets.append(target[1])
+    if not targets:
+        raise ValueError(f"missing macOS deployment target in {relative}")
+    for target in targets:
+        if version_tuple(target) > version_tuple(maximum):
+            raise ValueError(f"{relative} requires macOS {target}, above the supported {maximum} floor")
 
 
 def verify_no_nested_zips(app):
@@ -51,6 +81,7 @@ def verify_exploration(resources, version, manifest, check_inputs=False):
 def verify(app, check_inputs=False):
     resources = app / "Contents/Resources"
     helpers["validate_payload"](resources)
+    legacy_files = helpers["legacy_baseline"]()["files"]
     helpers["require"](app / "Contents/MacOS/NightCityConsole")
     helpers["require"](resources / "libcyberconsole_overlay.dylib")
     for name in ("red4ext_hooks.js", "FridaGadget.config", "cet_catalog.tsv", "cybermodman_names.json"):
@@ -59,6 +90,9 @@ def verify(app, check_inputs=False):
     version = info["CFBundleShortVersionString"]
     if version != info["CFBundleVersion"] or tuple(map(int, version.split("."))) <= (1, 5, 0):
         raise ValueError("release bundle versions must match and be newer than the public 1.5.0 baseline")
+    check_os_floor = tuple(map(int, version.split("."))) >= (1, 9, 0)
+    if check_os_floor and version_tuple(info.get("LSMinimumSystemVersion", "")) != version_tuple(MINIMUM_SUPPORTED_MACOS):
+        raise ValueError(f"release 1.9+ must declare the game-supported macOS {MINIMUM_SUPPORTED_MACOS} floor")
     if tuple(map(int, version.split("."))) >= (1, 8, 1):
         verify_no_nested_zips(app)
     manifest = json.loads((resources / "release-inputs.json").read_text())
@@ -90,6 +124,13 @@ def verify(app, check_inputs=False):
             continue
         if "arm64" not in kind:
             raise ValueError(f"native binary has no arm64 slice: {path}")
+        if check_os_floor:
+            commands = subprocess.check_output(["otool", "-arch", "arm64", "-l", str(path)], text=True)
+            relative = path.relative_to(resources).as_posix() if path.is_relative_to(resources) else None
+            # validate_payload already checked the original signed byte hashes
+            # for these nine legacy files. No wildcard path exception.
+            maximum = legacy_files[relative]["minimum_macos"] if relative in legacy_files else MINIMUM_SUPPORTED_MACOS
+            validate_macho_target(commands, path.relative_to(app).as_posix(), maximum)
         identities = {
             line.strip() for line in subprocess.check_output(["otool", "-D", str(path)], text=True).splitlines()
             if line.strip() and not line.rstrip().endswith(":")

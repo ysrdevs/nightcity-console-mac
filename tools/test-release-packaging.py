@@ -7,7 +7,8 @@ import tempfile
 import unittest
 import zipfile
 
-verify = runpy.run_path(str(Path(__file__).with_name("verify-release-bundle.py")))["verify_no_nested_zips"]
+helpers = runpy.run_path(str(Path(__file__).with_name("verify-release-bundle.py")))
+verify = helpers["verify_no_nested_zips"]
 
 
 class NestedArchiveChecks(unittest.TestCase):
@@ -66,6 +67,35 @@ class NestedArchiveChecks(unittest.TestCase):
         path.write_bytes(data)
         self.assertTrue(zipfile.is_zipfile(path))
         verify(self.root)
+
+
+class DeploymentTargetChecks(unittest.TestCase):
+    def verify(self, commands):
+        helpers["validate_macho_target"](commands, "Resources/plugin.dylib")
+
+    def test_current_sdk_with_supported_minos_passes(self):
+        self.verify("Load command 7\n cmd LC_BUILD_VERSION\n cmdsize 32\n platform 1\n minos 15.5\n sdk 27.0\n")
+
+    def test_older_legacy_deployment_command_passes(self):
+        self.verify("Load command 4\n cmd LC_VERSION_MIN_MACOSX\n cmdsize 16\n version 11.0\n sdk 14.2\n")
+
+    def test_future_minos_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "requires macOS 27.0"):
+            self.verify("Load command 7\n cmd LC_BUILD_VERSION\n platform 1\n minos 27.0\n sdk 27.0\n")
+
+    def test_future_legacy_target_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "requires macOS 26.0"):
+            self.verify("Load command 7\n cmd LC_VERSION_MIN_MACOSX\n version 26.0\n sdk 27.0\n")
+
+    def test_other_platform_and_missing_target_are_rejected(self):
+        for commands in ("Load command 7\n cmd LC_BUILD_VERSION\n platform 2\n minos 15.0\n sdk 27.0\n",
+                         "Load command 7\n cmd LC_BUILD_VERSION\n platform 1\n sdk 27.0\n",
+                         "Load command 7\n cmd LC_LOAD_DYLIB\n"):
+            with self.subTest(commands=commands), self.assertRaises(ValueError):
+                self.verify(commands)
+
+    def test_normalized_target_versions_are_equivalent(self):
+        self.verify("Load command 7\n cmd LC_BUILD_VERSION\n platform MACOS\n minos 15.5.0\n sdk 27.0\n")
 
 
 if __name__ == "__main__":

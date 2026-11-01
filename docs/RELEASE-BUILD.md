@@ -5,12 +5,13 @@ source and combines them with explicit prebuilt dependencies. Use Apple Silicon,
 Xcode command line tools and Python 3.10 or later. Network access is used for the
 pinned overlay dependencies and release archives.
 
-The current macOS RED4ext/SDK, TweakXL, ArchiveXL and Codeware adaptations are
+The current macOS RED4ext/SDK, TweakXL, ArchiveXL, Codeware, Input Loader and
+Mod Settings adaptations are
 maintained separately and are not included as implementation source here.
 Separate repositories are planned. Assemble with the accepted native runtime
 input below; this is not a public source-build recipe for those frameworks.
 
-The public 1.5.0 ZIP is the 2.3.1 compatibility baseline. Its payload differs from
+The public 1.5.0 app ZIP from release `v1.5.0-beta.2` is the 2.3.1 compatibility baseline. Its payload differs from
 the source tag and from the current installed game. Release builds preserve its
 loader, Frida Gadget, plugin libraries, address database and configuration.
 They never import dependencies from the live game or overwrite developer `deps/`.
@@ -33,13 +34,22 @@ NCTOOL_PUBLISH_DIR=/path/to/nctool-publish \
 
 `NATIVE25_DIR` must contain `RED4ext.dylib`, `config.ini`, `bin/red4ext_plugin_check`,
 `bin/x64/cyberpunk2077_addresses.json` identifying 2.5.0, and complete
-`plugins/TweakXL`, `plugins/ArchiveXL` and `plugins/Codeware` directories including
+`plugins/TweakXL`, `plugins/ArchiveXL`, `plugins/Codeware`, `plugins/input_loader`
+and `plugins/ModSettings` directories including
 their scripts, resources and license notices. Every accepted runtime input must
 match `native25/accepted-payload.json`; unknown plugin files are rejected. This
-manifest identifies the prebuilt Codeware UI/wardrobe profile and the other
+manifest identifies the prebuilt Codeware profile and the other
 tested native dependencies. A signed app's libraries may differ from these input
 hashes, so a release extraction is not automatically a valid build input.
-Private test metadata and CET-Lua development plugins are excluded. The native
+Input Loader has no plugin scripts. Its MIT and dependency notices are required.
+Mod Settings includes its scripts and license, with `ModSettings.archive` and
+`ModSettings.archive.xl` placed in ArchiveXL's `Bundle` directory. This is the
+tested automatic resource route; an external manual asset installation is not
+required.
+
+Private test metadata, test-key fixtures, native build recipes and CET-Lua
+development plugins are rejected. Private Input Loader development notes and
+upstream Windows installation instructions are not release inputs. The native
 framework payload remains separate from the optional gameplay packages.
 
 Release staging also deterministically builds Equipment-EX 1.2.9 and
@@ -57,9 +67,12 @@ user-provided ZIPs or folders.
 
 The nctool input is an explicit self-contained `osx-arm64` publish directory with
 its .NET runtime and universal/arm64 `libkraken.dylib`. Use the version with the
-`stageplugins` and `compat25` commands and the checked
+`stageplugins`, `compat25`, `prepare-import` and `commit-import` commands and the checked
 `nightcity-mod-compat.json` adapter manifest. The older public helper predates
-these commands.
+these commands. `native25/modcompat/accepted-helper.json` pins the accepted
+managed installer implementation; staging refuses an older or different helper
+even if its filenames match. The remaining publish inputs are recorded in the
+release inventory.
 The helper source snapshot, compatibility code, pinned WolvenKit input and
 raw-buffer patch are documented in
 [`native25/modcompat/README.md`](../native25/modcompat/README.md). That recipe
@@ -80,6 +93,22 @@ Keep `Const.appVersion`, both version fields in `launcher/Info.plist`, and relea
 notes aligned. A new stable version must exceed the preceding public release. The updater checks
 GitHub's latest stable release and offers its DMG as a manual download; no update
 feed or automatic installation service is involved.
+
+For 1.9 and later, the app declares macOS 15.5, matching the native game's floor.
+The launcher, overlay and its Lua static library build with an explicit 15.5
+deployment target. Bundle validation checks the arm64 minimum OS of every Mach-O,
+including the archive helper. The build SDK may be newer; new runtime binaries
+whose minimum OS is newer than 15.5 are rejected. Such inputs need tested source
+rebuilds, not patched load commands.
+
+The sole exception is the exact nine historical 2.3.1 loader/plugin binaries
+from the pinned baseline. `native25/legacy-baseline.json` records each path,
+original signed hash and existing minimum OS (26.0 or 27.0). Those existing
+Developer ID signatures are preserved byte-for-byte; neither assembly nor final
+signing replaces them. A changed or additional file cannot use this exception.
+They are not installed on game 2.5. This retains the earlier 2.3.1 payload without
+claiming new low-OS compatibility or a fresh gameplay test for that old game
+version. The 15.5 floor applies to the game 2.5 runtime and new 1.9 features.
 
 Validate without running the app:
 

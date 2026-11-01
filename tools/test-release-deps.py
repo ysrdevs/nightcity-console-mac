@@ -34,8 +34,11 @@ class ReleaseInputsTest(unittest.TestCase):
         entries[prefix + "Resources/cyberpunk2077_addresses.json"] = json.dumps({"game_version": "2.3.1"})
         for plugin in module.PLUGINS:
             entries[prefix + f"Resources/plugins/{plugin}/{plugin}.dylib"] = b"baseline-plugin"
+            for name in ("libfmt.12.dylib", "libspdlog.1.17.dylib", "libyaml-cpp.0.9.dylib"):
+                entries[prefix + f"Resources/plugins/{plugin}/{name}"] = b"baseline-library"
         for plugin in module.NATIVE25_PLUGINS:
             self.write(self.args.native25 / f"plugins/{plugin}/{plugin}.dylib", b"native-plugin")
+        for plugin in module.NATIVE25_SCRIPT_PLUGINS:
             self.write(self.args.native25 / f"plugins/{plugin}/Scripts/main.reds", b"native scripts")
         zip_input(self.args.baseline, entries)
         zip_input(self.args.redscript, {"engine/tools/scc": b"scc", "engine/tools/libscc_lib.dylib": b"scc-lib"})
@@ -45,13 +48,26 @@ class ReleaseInputsTest(unittest.TestCase):
             previous = getattr(module, constant)
             self.addCleanup(setattr, module, constant, previous)
             setattr(module, constant, module.digest(getattr(self.args, name)))
+        legacy = self.root / "legacy-baseline.json"
+        import hashlib
+        legacy.write_text(json.dumps({"schema": 1, "game_version": "2.3.1", "baseline_sha256": module.BASELINE_SHA256,
+            "files": {name: {"sha256": hashlib.sha256(entries[prefix + "Resources/" + name]).hexdigest(),
+                              "minimum_macos": "27.0"} for name in module.LEGACY_NATIVE_FILES}}))
+        self.addCleanup(setattr, module, "LEGACY_BASELINE", module.LEGACY_BASELINE)
+        module.LEGACY_BASELINE = legacy
         self.write(self.args.native25 / "RED4ext.dylib", b"native loader")
+        self.write(self.args.native25 / "config.ini", self.args.config.read_bytes())
         self.write(self.args.native25 / "bin/red4ext_plugin_check", b"helper", executable=True)
         self.write(self.args.native25 / "bin/x64/cyberpunk2077_addresses.json", b'{"game_version":"2.5.0"}')
         self.write(self.args.native25 / "plugins/Codeware/Scripts/Codeware.Global.reds",
                    b"@addMethod(WardrobeSystem)\npublic native func ForgetItemID(itemID: ItemID) -> Bool\n")
         self.write(self.args.native25 / "plugins/ArchiveXL/Bundle/ArchiveXL.archive", b"bundle")
         self.write(self.args.native25 / "plugins/ArchiveXL/Bundle/Preserved.xl", b"accepted\n")
+        self.write(self.args.native25 / "plugins/ArchiveXL/Bundle/ModSettings.archive", b"mod-settings-assets")
+        self.write(self.args.native25 / "plugins/ArchiveXL/Bundle/ModSettings.archive.xl", b"mod-settings-localization")
+        for relative in ("plugins/input_loader/license.md", "plugins/input_loader/LICENSES/pugixml.txt",
+                         "plugins/input_loader/LICENSES/spdlog.txt", "plugins/ModSettings/LICENSE.md"):
+            self.write(self.args.native25 / relative, b"license notice")
         for name in ("nctool", "nctool.dll", "nctool.deps.json", "nctool.runtimeconfig.json", "libkraken.dylib"):
             self.write(self.args.nctool / name, b"nctool", executable=name == "nctool")
         self.write(self.args.nctool / "nightcity-mod-compat.json", (module.REPO / "native25/modcompat/nightcity-mod-compat.json").read_bytes())
@@ -61,6 +77,15 @@ class ReleaseInputsTest(unittest.TestCase):
             for p in self.args.native25.rglob("*") if p.is_file()}}))
         self.addCleanup(setattr, module, "ACCEPTED_PAYLOAD", module.ACCEPTED_PAYLOAD)
         module.ACCEPTED_PAYLOAD = accepted
+        accepted_helper = self.root / "accepted-helper.json"
+        accepted_helper.write_text(json.dumps({"schema": 1, "commands": ["prepare-import", "commit-import"],
+            "files": {"nctool.dll": module.digest(self.args.nctool / "nctool.dll")}}))
+        self.addCleanup(setattr, module, "ACCEPTED_HELPER", module.ACCEPTED_HELPER)
+        module.ACCEPTED_HELPER = accepted_helper
+        helper_sources = self.root / "helper-sources.json"
+        helper_sources.write_text(json.dumps({"kraken": {"input_sha256": module.digest(self.args.nctool / "libkraken.dylib")}}))
+        self.addCleanup(setattr, module, "HELPER_SOURCES", module.HELPER_SOURCES)
+        module.HELPER_SOURCES = helper_sources
 
     def write(self, path, data, executable=False):
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -78,6 +103,11 @@ class ReleaseInputsTest(unittest.TestCase):
         self.assertEqual((self.args.output / "RED4ext.dylib").read_bytes(), b"baseline")
         self.assertEqual((self.args.output / "native25/RED4ext.dylib").read_bytes(), b"native loader")
         self.assertTrue((self.args.output / "native25/plugins/Codeware/Codeware.dylib").is_file())
+        self.assertTrue((self.args.output / "native25/plugins/input_loader/input_loader.dylib").is_file())
+        self.assertFalse((self.args.output / "native25/plugins/input_loader/Scripts").exists())
+        self.assertTrue((self.args.output / "native25/plugins/ModSettings/ModSettings.dylib").is_file())
+        self.assertEqual((self.args.output / "native25/plugins/ArchiveXL/Bundle/ModSettings.archive").read_bytes(),
+                         b"mod-settings-assets")
         self.assertFalse((self.args.output / "plugins/Codeware").exists())
         self.assertFalse((self.args.output / "native25/plugins/CET-Lua").exists())
         self.assertFalse((self.args.output / "native25/CODEWARE_TEST_BUILD.json").exists())
@@ -146,6 +176,66 @@ class ReleaseInputsTest(unittest.TestCase):
         path.write_text(json.dumps(build))
         with self.assertRaises(ValueError):
             module.validate_payload(self.args.output)
+
+    def test_private_smoke_fixtures_and_build_notes_rejected(self):
+        module.prepare(self.args)
+        for relative in ("input-settings-test/r6/input/example.xml",
+                         "r6/scripts/NightCityImportSmoke/Test.reds",
+                         "r6/scripts/NightCityInputSettingsSmoke/Test.reds",
+                         "native25/plugins/input_loader/MACOS.md"):
+            with self.subTest(relative=relative):
+                path = self.args.output / relative
+                self.write(path, b"test fixture or private recipe")
+                with self.assertRaisesRegex(ValueError, "private test fixture|development note"):
+                    module.validate_payload(self.args.output)
+                path.unlink()
+                while path.parent != self.args.output and not any(path.parent.iterdir()):
+                    path = path.parent
+                    path.rmdir()
+
+    def test_older_import_helper_is_rejected_before_stage_replacement(self):
+        (self.args.nctool / "nctool.dll").write_bytes(b"old helper without preview")
+        self.assert_failed_prepare_preserves_output()
+
+    def test_different_kraken_input_is_rejected_before_stage_replacement(self):
+        (self.args.nctool / "libkraken.dylib").write_bytes(b"unverified compressor")
+        self.assert_failed_prepare_preserves_output()
+
+    def test_changed_native_configuration_is_rejected_before_stage_replacement(self):
+        self.args.config.write_text("[plugins]\nenabled = false\n")
+        self.assert_failed_prepare_preserves_output()
+
+    def test_changed_legacy_signature_or_code_is_rejected(self):
+        module.prepare(self.args)
+        path = self.args.output / "plugins/TweakXL/TweakXL.dylib"
+        path.write_bytes(path.read_bytes() + b"changed signature")
+        with self.assertRaisesRegex(ValueError, "legacy runtime differs"):
+            module.validate_payload(self.args.output)
+
+    def test_legacy_exception_cannot_cover_any_new_or_native25_path(self):
+        original = json.loads(module.LEGACY_BASELINE.read_text())
+        for replacement in ("plugins/NewPlugin/NewPlugin.dylib", "native25/RED4ext.dylib"):
+            with self.subTest(replacement=replacement):
+                manifest = json.loads(json.dumps(original))
+                manifest["files"][replacement] = manifest["files"].pop("RED4ext.dylib")
+                module.LEGACY_BASELINE.write_text(json.dumps(manifest))
+                self.assert_failed_prepare_preserves_output()
+
+    def test_missing_mod_settings_assets_are_rejected_even_if_not_in_allowlist(self):
+        p = self.args.native25 / "plugins/ArchiveXL/Bundle/ModSettings.archive"
+        p.unlink()
+        accepted = json.loads(module.ACCEPTED_PAYLOAD.read_text())
+        del accepted["files"][str(p.relative_to(self.args.native25))]
+        module.ACCEPTED_PAYLOAD.write_text(json.dumps(accepted))
+        self.assert_failed_prepare_preserves_output()
+
+    def test_missing_input_loader_is_rejected_even_if_not_in_allowlist(self):
+        p = self.args.native25 / "plugins/input_loader/input_loader.dylib"
+        p.unlink()
+        accepted = json.loads(module.ACCEPTED_PAYLOAD.read_text())
+        del accepted["files"][str(p.relative_to(self.args.native25))]
+        module.ACCEPTED_PAYLOAD.write_text(json.dumps(accepted))
+        self.assert_failed_prepare_preserves_output()
 
     def test_native_source_cannot_be_added_to_the_input_allowlist(self):
         path = self.args.native25 / "plugins/Codeware/private.cpp"
