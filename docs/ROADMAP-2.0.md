@@ -420,8 +420,10 @@ not bypass address or lifecycle validation.
   The isolated build starts with the listener installed, 600 Lua updates and all
   110 framework hooks without failures. The first player input test now passes:
   the requested sequence produces four callbacks, with no extra callbacks from
-  holding the key and none during closed menu gates. App-focus, save-reload and
-  normal-shutdown checks remain pending.
+  holding the key and none during closed menu gates. App-focus and save-reload
+  checks now pass too: seven cumulative callbacks, none in the background, and
+  input resumes in the new session without replaying old presses. The player
+  confirms Limited HUD and VA remain working. Normal shutdown remains pending.
   Inventory writes and public Console capabilities remain disabled; accepted
   1.9 and all six earlier probes remain preserved.
 
