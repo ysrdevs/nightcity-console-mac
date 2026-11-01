@@ -459,6 +459,15 @@ not bypass address or lifecycle validation.
   Logs and clean shutdown are captured. Candidate keys must be audited and the
   conflicting option removed before the next test. Accepted1.9 and all eight
   earlier probes remain preserved; public Console parity is still pending.
+- Tenth private probe, 1 November: local game/mod/user and macOS key bindings
+  were audited after the F9 conflict. The replacement offers only F10 or exact
+  Shift+F10, with independent launcher/native validation and unchanged pass-through
+  of game events. Modifier changes on key release and during a hold are covered
+  by offline tests; independent review passes. The new launcher retains
+  Shift+F10 across reopening, and startup confirms that binding with600 Lua
+  updates and110 framework hooks without failures. Gameplay delivery remains
+  pending. Accepted1.9 and all earlier artifacts, including rejected probe9,
+  remain preserved.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
