@@ -418,7 +418,10 @@ not bypass address or lifecycle validation.
   failures leave healthy modules running. Offline checks and independent review
   pass, including concurrent invalidation and the previous probe regression.
   The isolated build starts with the listener installed, 600 Lua updates and all
-  110 framework hooks without failures. The player input test is pending.
+  110 framework hooks without failures. The first player input test now passes:
+  the requested sequence produces four callbacks, with no extra callbacks from
+  holding the key and none during closed menu gates. App-focus, save-reload and
+  normal-shutdown checks remain pending.
   Inventory writes and public Console capabilities remain disabled; accepted
   1.9 and all six earlier probes remain preserved.
 
