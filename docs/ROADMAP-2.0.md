@@ -408,7 +408,9 @@ not bypass address or lifecycle validation.
   native position samples match their Lua values, including changing coordinates
   during the second load. Values become unavailable between samples and during
   menu/reload transitions. No unexpected runtime errors or hook failures appear.
-  Normal shutdown and fixture cleanup remain pending. The accepted 1.9 files
+  Normal shutdown now passes with all three fixture cleanups exactly once and
+  no position available during cleanup. This completes the scoped copied-data
+  checkpoint. Native input and inventory work remain. The accepted 1.9 files
   and all five earlier probes remain preserved.
 
 - [x] 2.0 direction approved and roadmap written.
