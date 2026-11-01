@@ -412,6 +412,15 @@ not bypass address or lifecycle validation.
   no position available during cleanup. This completes the scoped copied-data
   checkpoint. Native input and inventory work remain. The accepted 1.9 files
   and all five earlier probes remain preserved.
+- Seventh private probe, 1 November: a native F10 listener now feeds a private
+  Lua counter through session, menu and app-focus checks. Old input is discarded
+  across transitions, held keys do not repeat, and contained Lua callback
+  failures leave healthy modules running. Offline checks and independent review
+  pass, including concurrent invalidation and the previous probe regression.
+  The isolated build starts with the listener installed, 600 Lua updates and all
+  110 framework hooks without failures. The player input test is pending.
+  Inventory writes and public Console capabilities remain disabled; accepted
+  1.9 and all six earlier probes remain preserved.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
