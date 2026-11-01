@@ -430,6 +430,14 @@ not bypass address or lifecycle validation.
   input checkpoint.
   Inventory writes and public Console capabilities remain disabled; accepted
   1.9 and all six earlier probes remain preserved.
+- Eighth private probe, 1 November: the explicit native inventory candidate is
+  prepared and starts successfully. One F10 press requests one eurodollar, with
+  a retained player handle, original input tokens, no duplicate attempts and
+  before/after balance verification. Scoped native ABI/ownership review and
+  offline tests pass. Startup records six complete metadata targets, 600 Lua
+  updates and all110 framework hooks without failures. The first player money
+  check is pending. No public inventory capability or Console parity is claimed;
+  accepted 1.9 and the seven earlier probes remain preserved.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
