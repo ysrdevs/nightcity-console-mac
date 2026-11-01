@@ -436,7 +436,11 @@ not bypass address or lifecycle validation.
   before/after balance verification. Scoped native ABI/ownership review and
   offline tests pass. Startup records six complete metadata targets, 600 Lua
   updates and all110 framework hooks without failures. The first player money
-  check is pending. No public inventory capability or Console parity is claimed;
+  check now passes: three separate presses produce three verified +1 changes
+  with no extra attempt or unexpected runtime error, including two after the
+  position diagnostic stops sampling. Held-key/menu/focus suppression, reload,
+  compatibility and shutdown remain pending for this candidate.
+  No public inventory capability or Console parity is claimed;
   accepted 1.9 and the seven earlier probes remain preserved.
 
 - [x] 2.0 direction approved and roadmap written.
