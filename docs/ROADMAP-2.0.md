@@ -344,6 +344,15 @@ not bypass address or lifecycle validation.
   Lua fixtures cleaning up once, owner-thread Lua shutdown and inert plugin
   unload. No gameplay API is enabled.
   Its isolated installation preserved 1.9 and the frozen first-probe artifacts.
+- Third private probe, 1 November: a ScriptableService now forwards primitive
+  session events to a bounded native recorder, without player access or new
+  hooks. Actual script-to-native delivery is observed. Initial world attach
+  callbacks arrive on worker threads rather than the Running owner, so native
+  player acquisition is still disabled. An immediate registry lookup reports a
+  false failure because the SDK lookup slot expects a signature hash instead of
+  the plain function name used by this probe; actual handler delivery is intact.
+  Save-load/teardown observations are pending. Installation preserved 1.9 and
+  both frozen prior probes.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
