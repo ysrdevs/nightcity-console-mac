@@ -3,7 +3,7 @@
 This code is compiled into the existing `nctool` process. It is not a mod bundle.
 The complete helper entrypoint/project snapshot is in `nctool/`; the compatibility
 class and catalog are beside it. `sources.lock.json` pins the original repository,
-our patch, the existing WolvenKit input/patch and the native Kraken binary input.
+our patch, the existing WolvenKit input/patch and the native Kraken source/build input.
 The complete patch applies at the recorded `cyberpunk-savekit-mac` base commit.
 
 ## Runtime behavior
@@ -40,19 +40,41 @@ adaptations do not add extra installed script files.
 To reproduce the helper changes, check out the pinned `cyberpunk-savekit-mac`
 base, apply `nctool-compat.patch`, `archive-repack.patch`, and then `import-preview.patch`, populate `_refs/WolvenKit` at its recorded
 commit and apply `wolvenkit-raw-buffers.patch`. The latter patch predates this
-release. Use the preserved native universal `libkraken.dylib` input with the
-recorded SHA-256 and .NET 8:
+release. Build the pinned Kraken source for Apple Silicon/macOS 15.5, then use
+that `libkraken.dylib` as the native input and publish with .NET 8:
+
+```sh
+git clone https://github.com/WolvenKit/kraken.git /path/to/kraken-source
+git -C /path/to/kraken-source checkout --detach f75df7ab817d9ffb43ea8ad84a698ad3df9ba4c1
+git -C /path/to/kraken-source submodule update --init simde
+python3 native25/modcompat/build-kraken-macos.py \
+  --source /path/to/kraken-source --output /path/to/new-kraken-build
+```
+
+The build requires an Apple Silicon Mac with Xcode. It verifies the source and
+SIMDe revisions, refuses edited checkouts and existing output directories, and
+compiles upstream's shared-library source list without changing the sources.
+Its explicit compiler target is `arm64-apple-macos15.5`; the output's actual
+Mach-O architecture, minimum OS and required C exports are checked. The build
+record includes the toolchain, command and hash. This is a real source rebuild,
+not a load-command change. Copy its library into the helper publish directory
+before signing the release; preserve the other accepted helper dependencies.
 
 ```sh
 dotnet publish _tools/nctool/nctool.csproj -c Release -r osx-arm64 \
   --self-contained true -p:PublishSingleFile=false -o /path/to/nctool-publish
 ```
 
-The historical Kraken source commit was not recorded in the original workspace.
-Its public source is WolvenKit/Kraken, but an exact historical source-to-binary
-rebuild is **not verified**. This recipe uses that explicit hashed binary input.
-WolvenKit's GPLv3 notice, the helper's MIT notice and the mod notices are retained;
-the source snapshot and patch are included for review and redistribution.
+The new Kraken input is pinned in `sources.lock.json`. The previous library's
+historical source revision remains unknown; the new build does not claim to
+reproduce that old binary. Its six official Oodle decompression fixtures and
+level 1-5 compression outputs pass cross-decoding with the previous library.
+Both libraries retain the same upstream assertion failure when compressing
+WolvenKit's large `oodle.txt` fixture at level 6. This recipe neither disables
+that assertion nor claims complete encoder coverage. The archive/import
+regressions validate the helper's actual conversion paths separately.
+WolvenKit's GPLv3 notice, Kraken's GPLv3-or-later notice, SIMDe's MIT notice,
+the helper's MIT notice and the mod notices are retained.
 
 ## Isolated checks
 

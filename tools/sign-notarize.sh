@@ -32,6 +32,13 @@ while [ "$#" -gt 0 ]; do
 done
 [ "$SKIP_SIGNING" = 0 ] || { [ "$BUILD_APP" = 0 ] && [ "$SIGN_ONLY" = 0 ]; } \
   || { echo "--skip-signing requires --existing-app and cannot use --sign-only" >&2; exit 1; }
+# Use one spelling for verification, find output and the exact legacy skip list.
+APP="$(python3 - "$APP" <<'PY'
+from pathlib import Path
+import sys
+print(Path(sys.argv[1]).resolve())
+PY
+)"
 DMG="$OUTPUT_DIR/NightCity-Console-for-Mac.dmg"
 ZIP="$OUTPUT_DIR/NightCity-Console-for-Mac.zip"  # distributable zip (made from the stapled app)
 SUBZIP="$OUTPUT_DIR/_notarize.zip"              # submission copy of the tested app
@@ -62,8 +69,33 @@ else
 # The bundled nctool is a self-contained .NET helper that JITs. Under hardened runtime CoreCLR SIGKILLs the
 # instant it writes executable memory unless these entitlements are present (validated locally: JIT + a full
 # Kraken rawrepack run clean with them). Entitlements apply to the apphost EXECUTABLE, not the dylibs.
-NCTOOL_ENTS="$(mktemp -t nctool-ents)"
-trap 'rm -f "$NCTOOL_ENTS"' EXIT
+SIGN_WORK="$(mktemp -d -t nightcity-signing)"
+NCTOOL_ENTS="$SIGN_WORK/nctool-entitlements.plist"
+PRESERVED_LEGACY="$SIGN_WORK/preserved-legacy.txt"
+trap 'rm -rf "$SIGN_WORK"' EXIT
+# These are already signed by the same Developer ID. Preserve the exact pinned
+# 2.3.1 compatibility files, including their original signatures and deployment
+# targets. The 2.5 installer selects its separate native25 runtime instead.
+python3 - "$APP" "$PRESERVED_LEGACY" <<'PY'
+from pathlib import Path
+import runpy
+import sys
+helpers = runpy.run_path('tools/prepare-release-deps.py')
+resources = Path(sys.argv[1]) / 'Contents/Resources'
+helpers['validate_legacy_baseline'](resources)
+manifest = helpers['legacy_baseline']()
+Path(sys.argv[2]).write_text(''.join(str(resources / path) + '\n' for path in sorted(manifest['files'])))
+PY
+while IFS= read -r legacy; do
+  codesign --verify --strict "$legacy"
+  LEGACY_INFO="$(codesign -d --verbose=4 "$legacy" 2>&1)"
+  printf '%s\n' "$LEGACY_INFO" | grep -Fq "Authority=$SIGN_IDENTITY" \
+    || { echo "Pinned legacy signer does not match SIGN_IDENTITY: $legacy" >&2; exit 1; }
+  printf '%s\n' "$LEGACY_INFO" | grep -q 'flags=.*runtime' \
+    || { echo "Pinned legacy file lacks hardened runtime: $legacy" >&2; exit 1; }
+  printf '%s\n' "$LEGACY_INFO" | grep -q '^Timestamp=' \
+    || { echo "Pinned legacy file lacks secure timestamp: $legacy" >&2; exit 1; }
+done < "$PRESERVED_LEGACY"
 cat > "$NCTOOL_ENTS" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -80,6 +112,7 @@ NCTOOL_EXE="$APP/Contents/Resources/nctool/nctool"
 # .NET runtime dylibs. The nctool apphost is skipped here and signed next, with the JIT entitlements.
 find "$APP/Contents/Resources" -type f -print0 | while IFS= read -r -d '' f; do
   [ "$f" = "$NCTOOL_EXE" ] && continue
+  if grep -Fqx -- "$f" "$PRESERVED_LEGACY"; then continue; fi
   if file "$f" | grep -q "Mach-O"; then
     codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$f"
   fi
@@ -87,6 +120,7 @@ done
 codesign --force --options runtime --timestamp --entitlements "$NCTOOL_ENTS" --sign "$SIGN_IDENTITY" "$NCTOOL_EXE"
 codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
+python3 tools/verify-release-bundle.py "$APP"
 fi
 if [ "$SIGN_ONLY" = 1 ]; then
   echo "Signed locally: $APP (no notarization upload or packaging requested)."
