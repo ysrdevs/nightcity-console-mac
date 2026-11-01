@@ -470,8 +470,13 @@ not bypass address or lifecycle validation.
   Shift+F10 presses each produce a verified +1 without reloading. Walking is
   normal. Held Shift+F10, including releasing Shift first, and menu/background
   suppression now pass with exactly two further +1 actions and no extra call.
-  Reload, changed selection and shutdown checks remain pending. Accepted1.9 and
-  all earlier artifacts, including rejected probe9, remain preserved.
+  Reload passes with one further verified +1; the user confirms a VA purchase
+  and Limited HUD. Normal shutdown records all three Lua cleanups once, five
+  queued/drained actions, no drops or lifecycle faults, and removal of the input
+  listener. The same launcher retains a changed plain-F10 selection across
+  reopening, and the next game startup confirms F10 with all hooks installed.
+  Gameplay delivery of that alternate selection remains pending. Accepted1.9
+  and all earlier artifacts, including rejected probe9, remain preserved.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
