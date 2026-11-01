@@ -447,6 +447,15 @@ not bypass address or lifecycle validation.
   the fixed-key money probe. Configurable hotkeys and public integration remain.
   No public inventory capability or Console parity is claimed;
   accepted 1.9 and the seven earlier probes remain preserved.
+- Ninth private probe, 1 November: the private launcher now saves a choice of
+  F9/F10/F11/F12 for the one-eurodollar native test. The selected key is validated
+  independently at startup and stays fixed for that game process. Invalid
+  settings disable input rather than silently choosing a fallback. Offline
+  checks and independent source review pass. Launcher UI confirms F9 persists
+  across reopening and selection is disabled while the game runs. Startup
+  confirms F9,600 Lua updates and110 framework hooks without failures. The
+  selected/unselected-key gameplay check remains pending. Accepted1.9 and all
+  eight earlier probes remain preserved; public Console parity is still pending.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
