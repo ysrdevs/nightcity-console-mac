@@ -393,8 +393,11 @@ not bypass address or lifecycle validation.
   also pass, with20 further successful reads in a new epoch and none during
   menu/loading. The player confirms a VA purchase. The running session has
   exceeded the earlier Lua failure window without another memory error;
-  normal shutdown and fixture cleanup remain pending. Public gameplay
-  capabilities are still disabled.
+  normal shutdown now confirms788.49 seconds of Lua operation,290,039 owner
+  updates and all three fixture cleanups exactly once. Four world cycles
+  complete without lifecycle/thread faults, and preservation checks pass.
+  This completes the scoped native-read checkpoint. Public gameplay
+  capabilities are still disabled; copied data reaching Lua is the next step.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
