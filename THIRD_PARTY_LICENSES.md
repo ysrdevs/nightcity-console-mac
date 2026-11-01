@@ -13,6 +13,8 @@ game files - players use their own legally-owned copy of Cyberpunk 2077.
 | **TweakXL** | TweakDB extensions | MIT | https://github.com/psiberx/cp2077-tweak-xl; current macOS adaptations maintained separately |
 | **ArchiveXL** | Native archive/resources integration | MIT | https://github.com/psiberx/cp2077-archive-xl; current macOS adaptations maintained separately |
 | **Codeware** | Scoped UI and verified wardrobe support on 2.5 | MIT | https://github.com/psiberx/cp2077-codeware; current macOS adaptations maintained separately |
+| **Input Loader** | Native mod input mappings on 2.5 | MIT | https://github.com/jackhumbert/cyberpunk2077-input-loader; current macOS adaptations maintained separately |
+| **Mod Settings** | In-game settings and key rebinding for supported mods on 2.5 | MIT | https://github.com/jackhumbert/mod_settings; current macOS adaptations maintained separately |
 | **Equipment-EX 1.2.9** | Optional expanded wardrobe/outfit mod | MIT | https://github.com/psiberx/cp2077-equipment-ex; pinned core source/assets in `native25/optional-mods/` |
 | **Cyberware-EX 1.5.6** | Optional default cyberware expansion mod | MIT | https://github.com/psiberx/cp2077-cyberware-ex; pinned core source in `native25/optional-mods/` |
 | **redscript** | Script compiler | MIT | https://github.com/jac3km4/redscript; pinned compiler release in `tools/prepare-release-deps.py` |

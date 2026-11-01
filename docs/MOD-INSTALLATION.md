@@ -1,7 +1,7 @@
 # Installing mods with NightCity Console
 
 This guide covers the native Apple Silicon Steam build of Cyberpunk 2077.
-Equipment-EX, Cyberware-EX and Virtual Atelier support below targets game **2.5.0**.
+The 1.9 mod-support features below target game **2.5.0**.
 Keep a separate manual save before adding gameplay mods.
 
 ## Start here
@@ -11,7 +11,7 @@ Keep a separate manual save before adding gameplay mods.
    `Cyberpunk2077.app`, not the app itself.
 2. Click **Install** (or **Reinstall NightCity Console** after updating the app).
    This installs the bundled macOS runtime, RED4ext, TweakXL, ArchiveXL, scoped
-   Codeware support and redscript compiler. You do not need the Windows versions
+   Codeware support, Input Loader, Mod Settings and redscript compiler. You do not need the Windows versions
    of those dependencies.
 3. Add the mods you want using the choices below. Wait for installation and
    script compilation to finish, then click **Play** in NightCity Console.
@@ -51,7 +51,7 @@ through the launcher appear in its Mods list with a removal button.
 3. Download an Atelier store pack separately and install it with **Add Mod**.
    **VA alone does not include stores.** The tested pack is **PUBLICNET 1.2.1**;
    its [Nexus page](https://www.nexusmods.com/cyberpunk2077/mods/10909) is now
-   titled **A.G.I.S. — All Game Items Store**. Check the file version you download.
+   titled **A.G.I.S. - All Game Items Store**. Check the file version you download.
    Other store packs may need additional item, clothing or framework mods.
 4. Click **Play**, load your save and use an in-game computer. Open **Atelier**
    to browse the stores.
@@ -63,14 +63,16 @@ errors as well.
 
 ## Adding other mods
 
-The **1.9 development build** adds a review step before installation. See
+**NightCity Console 1.9** adds a review step before installation. See
 [Mod import preview](IMPORT-PREVIEW.md) for dependency checks, conflict handling
 and the current detection limits. Existing files are not overwritten by this
 workflow; remove the previous package according to its instructions first.
 
 Use **Add Mod** to select one or more ZIPs or extracted folders, or drop them on
-the Mods area. The launcher installs them in sequence, prepares supported files
-and compiles scripts before launch. Do not point it at your entire Downloads
+the Mods area. The launcher prepares the selected files in a temporary folder.
+Review their requirements, issues and destination paths, then click **Install**.
+Click **Cancel** to leave your game unchanged. The approved batch is installed
+and its scripts compiled before launch. Do not point it at your entire Downloads
 folder. For `.7z` or `.rar` downloads, extract them first and import the mod folder.
 
 Check each mod's requirements and instructions. Native macOS support is not
@@ -79,10 +81,26 @@ implied by a Windows mod working on the same game version. In particular:
 - Windows native plugins (`.dll`) cannot run on macOS. Use the bundled macOS
   frameworks; do not replace them with Windows downloads.
 - Windows CET/Lua mods are not supported by NightCity Console.
-- Codeware support covers the tested UI and wardrobe features. Mods that require
+- Codeware support covers the tested UI, wardrobe and scoped resource features. Mods that require
   other Codeware features need separate validation.
 - The known compatibility adaptations target the versions listed above.
   Unknown or edited targets can stop preparation with an actionable error.
+
+See the [mod compatibility list](MOD-COMPATIBILITY.md) for exact tested versions
+and the scope of each test. A dependency shown as present is not a guarantee
+that all of its APIs, or a newer mod version, work on macOS.
+
+## Mod Settings and custom keys
+
+Compatible mods add their settings to **Mod Settings** in the game's menus.
+Apply changes before returning to gameplay. Mods using Input Loader can add
+custom keys; mods that also support Mod Settings may let you rebind them there.
+NightCity includes the macOS versions of these frameworks on game 2.5, so do not
+install their Windows DLL packages over them.
+
+If a mod's key does nothing, check for another mod or game action using that key.
+Use **Add Mod** to install the complete package, including its `r6/input` XML
+files. Keep the mod's original folder layout and read its keybinding instructions.
 
 ## Where the files go
 
@@ -96,7 +114,8 @@ They are not paths inside `Cyberpunk2077.app`, and they are not save folders.
 | Verified VA / Equipment `.archive.xl` metadata | Beside its matching archive in `archive/Mac/mod/` |
 | Redscript `.reds` files | `r6/scripts/<ModName>/` |
 | TweakXL `.yaml` / `.yml` / supported tweak files | `r6/tweaks/` |
-| Bundled native frameworks | `red4ext/plugins/` — managed by NightCity Console |
+| Input Loader `.xml` bindings | `r6/input/` |
+| Bundled native frameworks | `red4ext/plugins/`, managed by NightCity Console |
 
 Prefer **Add Mod**: Windows downloads often use `archive/pc/mod`, and some
 archives need conversion. Merely moving a Windows archive into the Mac folder

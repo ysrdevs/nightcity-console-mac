@@ -30,13 +30,18 @@ A native Apple Silicon in-game console, cheat menu, and item browser for Cyberpu
 
 ## Status
 
-**1.8.1 updates the packaging of the optional mod installers and retains built-in noclip flight on Cyberpunk 2077 2.5.0, native macOS Steam.** Fly through geometry, stop at your destination, pause and resume, or return to where the flight began. The launcher installs the flight scripts automatically. See the [1.8.1 release notes](docs/RELEASE-1.8.1-PUBLIC.md) and [flight guide](docs/EXPLORATION.md).
+**1.9.0 is in release-candidate testing for Cyberpunk 2077 2.5.0, native macOS Steam.** It adds native Input Loader and Mod Settings, a mod import preview with dependency and conflict checks, and broader mod support. The final gameplay and notarization checks are pending. See the [1.9.0 release notes](docs/RELEASE-1.9.0-PUBLIC.md) and [mod compatibility list](docs/MOD-COMPATIBILITY.md).
 
 The 1.7.1 save-loading fix and the performance improvements, 37-weapon Iconic Weapon Creator, Virtual Atelier, Cyberware-EX and Equipment-EX support remain included. Noclip, Creator weapons, store purchases, outfit switching and dual operating systems passed local player testing in the complete 1.8 installer, including save/relaunch persistence. Console output now uses bounded background reads to keep file access out of the render path. Console commands and existing 2.3.1 compatibility remain part of the app.
 
-The 2.5 payload includes native macOS RED4ext, TweakXL, ArchiveXL and the Codeware features needed by these tested mods. Codeware support is scoped: this does not make every Codeware-dependent or Windows CET mod compatible. The launcher only stages native declarations for plugins whose game addresses pass its compatibility check.
+The 2.5 payload includes native macOS RED4ext, TweakXL, ArchiveXL, Input Loader, Mod Settings and the Codeware features needed by the tested mods. Codeware support includes scoped UI, wardrobe and resource features: this does not make every Codeware-dependent or Windows CET mod compatible. The launcher only stages native declarations for plugins whose game addresses pass its compatibility check.
 
 Equipment-EX and Cyberware-EX are included as optional installs, unchecked by default. Virtual Atelier and store packs are downloaded separately, with an official download link and import button in the launcher. See the [mod installation guide](docs/MOD-INSTALLATION.md) for the full walkthrough and folder locations. GOG and Intel builds are not supported.
+
+Use **Add Mod** for other downloaded ZIPs or folders. Review detected requirements,
+issues and the files to add before installation. Cancel leaves the game unchanged;
+missing detected requirements and file conflicts block installation. Gameplay mods
+remain separate downloads rather than being enabled by the bundled frameworks.
 ## What it does
 
 - In-game ImGui console drawn on the live frame (Metal), keyboard-driven, with tabbed views (Cmd+1/2/3), command history, and clipboard support (Cmd+V/C/X/A).
@@ -46,7 +51,9 @@ Equipment-EX and Cyberware-EX are included as optional installs, unchecked by de
 - Godmode that registers with the engine godmode system and auto-reapplies across scene and vehicle transitions.
 - Invisibility (line-of-sight and detection break), infinite ammo, and world toggles (time of day, slow motion, disable police response).
 - Teleport with saved position bookmarks (save a spot, return to it later).
-- Noclip flight in 1.8 on game 2.5: an Exploration tab with speed presets, pause/resume, stopping at your destination and optional Return to start. See the [flight guide](docs/EXPLORATION.md).
+- Noclip flight on game 2.5: an Exploration tab with speed presets, pause/resume, stopping at your destination and optional Return to start. See the [flight guide](docs/EXPLORATION.md).
+- Mod import preview with detected dependency checks, conflict detection and a list of destination files before installation.
+- Native Input Loader and Mod Settings on game 2.5, including supported mods' custom keys, settings controls and rebinding.
 - A generic `call <Class> <Method>` bridge that can invoke any observed RTTI method, plus quest-fact editing.
 - Action confirmations: every command reports exactly what it did at the bottom of the overlay.
 - Iconic Weapon Creator with 37 base-game weapons, nine categories and search by name or weapon type. Custom names, descriptions and effects persist after saving and reloading. Creation checks the selected base and required Iconic records before writing files; Phantom Liberty is not required for these weapon choices.
@@ -60,8 +67,12 @@ See [docs/COMMANDS.md](docs/COMMANDS.md) for the full command list and known lim
 ## Requirements
 
 - Apple Silicon Mac (arm64). Intel is not supported.
-- macOS 26 or newer; tested on macOS 26 and 27.
-- Cyberpunk 2077 v2.3.1 or v2.5.0, native macOS Steam build. The new VA, Cyberware-EX and Equipment-EX support targets 2.5.0.
+- Cyberpunk 2077 v2.5.0, native macOS Steam, for the current mod-support features.
+- The 2.5 runtime targets macOS 15.5 or newer, matching the game's minimum.
+  Current release testing is on macOS 27; an older-OS gameplay run is not claimed.
+- The older 2.3.1 runtime is retained unchanged. Its legacy libraries retain
+  their original macOS 26/27 deployment targets, and the 15.5 target does not
+  apply to those legacy files.
 - A legally-owned copy of the game. No CD PROJEKT RED files are distributed by this project.
 
 ## Install and usage (players)
@@ -79,7 +90,9 @@ No Terminal, no file editing. The app finds your game, installs the runtime file
 
 Updating from an older version: quit the game and the older launcher, replace the app, then click Install once (it reads "Reinstall NightCity Console") and Play. This installs the updated runtime and the flight scripts on supported 2.5 games, while retaining the 1.7.1 loading fix. No need to uninstall first.
 
-The 1.8.1 app and DMG are Developer ID signed and notarized by Apple, with stapled tickets. The ZIP contains the same stapled app and no nested ZIP files.
+The published 1.8.1 app and DMG are Developer ID signed and notarized by Apple.
+The 1.9.0 candidate is being validated before notarization and publication. Release
+packaging retains the app-only ZIP layout, without nested ZIP files.
 
 ### Virtual Atelier, Cyberware-EX and Equipment-EX on 2.5
 
@@ -197,6 +210,7 @@ Upstream originals, used under their respective MIT licenses (see each project's
 
 - RED4ext and RED4ext.SDK by WopsS (Octavian Dima). The macOS hooking framework is a port of this work.
 - TweakXL, ArchiveXL, and Codeware by psiberx. The macOS modding integrations are ports of these projects.
+- Input Loader and Mod Settings by Jack Humbert. The 2.5 payload includes native macOS integrations.
 - Cyber Engine Tweaks (CET) by the CET team. The console matches CET's Lua API surface.
 
 Tools and libraries:
