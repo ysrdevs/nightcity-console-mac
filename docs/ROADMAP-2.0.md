@@ -404,8 +404,12 @@ not bypass address or lifecycle validation.
   calls. Offline validation includes one million Lua snapshots,500,000 position
   tables and cleanup after errors. Startup records600 Lua updates and110
   framework hooks without failures, with position unavailable before loaded
-  Ready. The isolated game is running for the two-load/VA check. Gameplay
-  acceptance is pending, and1.9 plus all five prior probes remain preserved.
+  Ready. Both loads, walking and VA opening now pass the player test. All 40
+  native position samples match their Lua values, including changing coordinates
+  during the second load. Values become unavailable between samples and during
+  menu/reload transitions. No unexpected runtime errors or hook failures appear.
+  Normal shutdown and fixture cleanup remain pending. The accepted 1.9 files
+  and all five earlier probes remain preserved.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
