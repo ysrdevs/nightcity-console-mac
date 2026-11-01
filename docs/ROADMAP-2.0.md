@@ -1,6 +1,6 @@
 # NightCity Console 2.0 roadmap
 
-Approved direction: 1 November 2026. Status: planned, implementation not started.
+Approved direction: 1 November 2026. Status: isolated native prototype in progress.
 This is a development plan, not a claim that these features are available.
 
 ## Release objective
@@ -316,6 +316,15 @@ sharing are outside the agreed core plan. Broad native-feature enablement must
 not bypass address or lifecycle validation.
 
 ## Progress ledger
+
+- First implementation checkpoint, 1 November: the isolated native scheduler
+  probe reaches a responsive main menu, confirmed by the player. Loaded-image
+  inspection shows the five accepted framework plugins and the new probe, with
+  neither Gadget nor the old overlay loaded. Its first 600 update callbacks use
+  one consistent thread. Script compilation has zero errors and the same 408
+  warning messages as the accepted baseline. These are startup results, not
+  Console parity, Lua-mod compatibility or gameplay acceptance. The 1.9 release
+  artifacts and accepted test installation passed hash-preservation checks.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
