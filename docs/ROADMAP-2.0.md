@@ -378,6 +378,15 @@ not bypass address or lifecycle validation.
   minutes. The corrected host passes one million offline updates and cleanup;
   its live long-run check is pending. Successful gameplay alone did not prove
   that the Lua module remained healthy throughout the earlier run.
+- Fifth private probe, 1 November: the reviewed native player-position reader
+  is installed only in the isolated copy. Its first test allows20 reads after
+  owner-thread Ready while walking, with no handles retained between samples
+  and no public gameplay API. The Lua collector fix is included. Offline core,
+  lifecycle, ownership and packaging checks pass; all9 linked native helpers
+  are verified. Startup records600 Lua updates and110 installed hooks without
+  failures. Native reads remain closed before loaded-session Ready; gameplay
+  and long-run Lua acceptance are pending. Installation preserved1.9 and all
+  four earlier frozen probes.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
