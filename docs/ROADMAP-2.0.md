@@ -325,6 +325,12 @@ not bypass address or lifecycle validation.
   warning messages as the accepted baseline. These are startup results, not
   Console parity, Lua-mod compatibility or gameplay acceptance. The 1.9 release
   artifacts and accepted test installation passed hash-preservation checks.
+- The same native-only process subsequently passed player checks for loading
+  an existing save, normal walking, opening a VA store, Equipment-EX outfit
+  switching, second-OS activation and Limited HUD keys. Normal quit recorded
+  197,810 callbacks without a thread mismatch, followed by Running exit,
+  Shutdown entry and plugin unload. No new-save persistence, Creator, noclip,
+  Lua gameplay API or purchase acceptance is claimed for this prototype.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
