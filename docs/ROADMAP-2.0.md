@@ -438,7 +438,8 @@ not bypass address or lifecycle validation.
   updates and all110 framework hooks without failures. The first player money
   check now passes: three separate presses produce three verified +1 changes
   with no extra attempt or unexpected runtime error, including two after the
-  position diagnostic stops sampling. Held-key/menu/focus suppression, reload,
+  position diagnostic stops sampling. Held-key/menu/focus suppression now passes
+  with exactly two further additions and normal walking confirmed. Reload,
   compatibility and shutdown remain pending for this candidate.
   No public inventory capability or Console parity is claimed;
   accepted 1.9 and the seven earlier probes remain preserved.
