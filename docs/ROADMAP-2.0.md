@@ -385,12 +385,16 @@ not bypass address or lifecycle validation.
   lifecycle, ownership and packaging checks pass; all9 linked native helpers
   are verified. Startup records600 Lua updates and110 installed hooks without
   failures. Native reads remain closed before loaded-session Ready; gameplay
-  and long-run Lua acceptance are pending. Installation preserved1.9 and all
+  and long-run Lua acceptance were initially pending. Installation preserved1.9 and all
   four earlier frozen probes.
   The first loaded test now passes: the player confirms normal walking and
   jumping, and all20 native position reads succeed with changing coordinates
-  and no unexpected runtime errors. Return/reload and long-run Lua cleanup
-  remain pending; public gameplay capabilities are still disabled.
+  and no unexpected runtime errors. Returning to menu and loading again now
+  also pass, with20 further successful reads in a new epoch and none during
+  menu/loading. The player confirms a VA purchase. The running session has
+  exceeded the earlier Lua failure window without another memory error;
+  normal shutdown and fixture cleanup remain pending. Public gameplay
+  capabilities are still disabled.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
