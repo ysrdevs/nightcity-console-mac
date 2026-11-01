@@ -360,6 +360,16 @@ not bypass address or lifecycle validation.
   teardown invalidating access synchronously. They do not establish safety
   against arbitrary concurrent teardown or enable a public gameplay API.
   Installation and post-quit checks preserved 1.9 and both frozen prior probes.
+- Fourth private probe, 1 November: the corrected native registry lookup works
+  at startup, with no registration failure. The probe captures bounded copies
+  of player-system identities and observes the game's Ready event. Actual
+  player/position calls remain disabled because the lifetime of an intermediate
+  borrowed entry during acquisition is not yet established. The scoped-handle
+  pipeline passes offline cleanup tests but is not connected to gameplay.
+  Startup records 600 Lua updates and 110 installed framework hooks without
+  failures; Gadget and the legacy overlay remain absent. Installation preserved
+  1.9 and all three frozen prior probes. Loaded-session Ready delivery and the
+  next load/return/quit check are pending player confirmation.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
