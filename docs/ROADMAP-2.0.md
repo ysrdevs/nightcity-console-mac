@@ -371,9 +371,13 @@ not bypass address or lifecycle validation.
   1.9 and all three frozen prior probes. The player confirms loading, walking
   and VA store opening without issues. Two loaded-session Ready events are now
   recorded on the scheduler owner, with no Ready in the intervening menu worlds
-  and no event errors. Both processes were still present at capture, so normal
-  shutdown remains a separate pending check. Native player calls stay disabled
-  in this frozen probe.
+  and no event errors. Normal shutdown is now captured with 10,708,534 scheduler
+  updates and no thread mismatch. Native player calls stay disabled in this
+  frozen probe. The longer run also exposed a separate Lua collector issue:
+  a non-allocating callback could exhaust its memory budget after several
+  minutes. The corrected host passes one million offline updates and cleanup;
+  its live long-run check is pending. Successful gameplay alone did not prove
+  that the Lua module remained healthy throughout the earlier run.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
