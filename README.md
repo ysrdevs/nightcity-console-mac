@@ -204,14 +204,14 @@ NightCity Console is free, and its launcher, overlay and command runtime are ope
 
 macOS port and reverse engineering by ysrdevs (Yuvraj Singh).
 
-This project rebuilds capability pioneered by the Windows Cyberpunk 2077 modding ecosystem. The NightCity Console runtime intentionally matches the Cyber Engine Tweaks Lua/console command surface so that CET knowledge and copy-paste item codes transfer directly.
+This project rebuilds capability pioneered by the Windows Cyberpunk 2077 modding ecosystem. NightCity Console supports selected CET-style console commands and item codes. This does not provide general compatibility with CET's Lua API or Windows CET mods.
 
 Upstream originals, used under their respective MIT licenses (see each project's LICENSE for the exact name and year):
 
 - RED4ext and RED4ext.SDK by WopsS (Octavian Dima). The macOS hooking framework is a port of this work.
 - TweakXL, ArchiveXL, and Codeware by psiberx. The macOS modding integrations are ports of these projects.
 - Input Loader and Mod Settings by Jack Humbert. The 2.5 payload includes native macOS integrations.
-- Cyber Engine Tweaks (CET) by the CET team. The console matches CET's Lua API surface.
+- Cyber Engine Tweaks (CET) by the CET team. Selected console commands use familiar CET-style syntax.
 
 Tools and libraries:
 
