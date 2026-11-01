@@ -387,6 +387,10 @@ not bypass address or lifecycle validation.
   failures. Native reads remain closed before loaded-session Ready; gameplay
   and long-run Lua acceptance are pending. Installation preserved1.9 and all
   four earlier frozen probes.
+  The first loaded test now passes: the player confirms normal walking and
+  jumping, and all20 native position reads succeed with changing coordinates
+  and no unexpected runtime errors. Return/reload and long-run Lua cleanup
+  remain pending; public gameplay capabilities are still disabled.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
