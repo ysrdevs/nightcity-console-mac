@@ -351,8 +351,15 @@ not bypass address or lifecycle validation.
   player acquisition is still disabled. An immediate registry lookup reports a
   false failure because the SDK lookup slot expects a signature hash instead of
   the plain function name used by this probe; actual handler delivery is intact.
-  Save-load/teardown observations are pending. Installation preserved 1.9 and
-  both frozen prior probes.
+  The player subsequently confirmed two existing-save loads, normal walking,
+  return to the menu and normal quit. Four complete world cycles recorded
+  worker-thread attach events and owner-thread teardown events without dropped
+  or out-of-order events. All three Lua fixtures cleaned up once, and 100,663
+  scheduler updates had no thread mismatch. These observations support a
+  bounded diagnostic reader on the owner thread, with startup queued and
+  teardown invalidating access synchronously. They do not establish safety
+  against arbitrary concurrent teardown or enable a public gameplay API.
+  Installation and post-quit checks preserved 1.9 and both frozen prior probes.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
