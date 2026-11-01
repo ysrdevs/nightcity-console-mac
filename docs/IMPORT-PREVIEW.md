@@ -38,3 +38,6 @@ Virtual Atelier, Equipment-EX and Cyberware-EX retain their existing scoped
 compatibility adaptations. Noclip and the native framework binaries are not
 changed by this feature. The 2.5 Input Loader and Mod Settings checkpoint remains
 a separate restore point.
+
+The private build passed the import and existing-mod checks recorded in the
+[1.9 mod import checkpoint](CHECKPOINT-1.9-MOD-IMPORT.md).
