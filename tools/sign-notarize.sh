@@ -164,16 +164,16 @@ rm -f "$ZIP"
 /usr/bin/ditto -c -k --keepParent "$APP" "$ZIP"
 # 2) .dmg with an /Applications shortcut + drag-here layout, then notarize + staple
 #    the dmg itself so the downloaded image also passes Gatekeeper offline.
-rm -f "$DMG"
 VOL="NightCity Console"; STAGE="build/dmg"; APPNAME="$(basename "$APP")"
-# This path creates directly from a staging folder and does not touch existing mounted volumes.
+# This path creates directly from a staging folder and preserves existing attachments.
 rm -rf "$STAGE"; mkdir -p "$STAGE"
 ditto "$APP" "$STAGE/$APPNAME"
 ln -s /Applications "$STAGE/Applications"            # the drag-here shortcut
 # Create the compressed .dmg DIRECTLY from the staging folder - no attach/Finder-style/convert dance (that was
-# flaky on macOS 27's deprecated hdiutil and accumulated stale /Volumes mounts). Reliable; the Applications
-# shortcut conveys "drag the app here" (the fancy icon layout is dropped for a build that always succeeds).
-hdiutil create -volname "$VOL" -srcfolder "$STAGE" -format UDZO -ov "$DMG" >/dev/null
+# flaky on macOS 27's deprecated hdiutil and accumulated stale /Volumes mounts). The helper rejects an
+# already-attached output before overwrite, normally detaches only a new unmounted attachment for this
+# exact output, and verifies the image before signing or submission. Ambiguous states stop packaging.
+python3 tools/create-release-dmg.py --source "$STAGE" --output "$DMG" --volume "$VOL"
 rm -rf "$STAGE"
 codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG"
 notarize "$DMG" dmg

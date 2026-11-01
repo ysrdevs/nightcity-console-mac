@@ -11,7 +11,7 @@ The final 1.9 release candidate is still being validated.
 | Equipment-EX | 1.2.9 | Extra clothing slots, named outfits, switching and save/relaunch | Optional Mods in the launcher |
 | Cyberware-EX | 1.5.6, default preset | Second operating system, abilities and save/relaunch | Optional Mods in the launcher |
 | Immersive Rippers | 2.6.2 | Cassius Ryder chair, cyberware menu, exit/repeat and save/relaunch | Download separately, then Add Mod |
-| Limited HUD | 2.23.1 author source snapshot | Import and combined compilation pass; gameplay acceptance pending | Download separately, then Add Mod |
+| Limited HUD | 2.23.1 author source snapshot | Settings, minimap toggle/rebinding, opacity and weapon/scanner/vehicle HUD transitions; relaunch pending | Download separately, then Add Mod |
 
 Virtual Atelier, store packs, Immersive Rippers and Limited HUD are not bundled.
 Use their official pages:
