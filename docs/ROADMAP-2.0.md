@@ -398,6 +398,14 @@ not bypass address or lifecycle validation.
   complete without lifecycle/thread faults, and preservation checks pass.
   This completes the scoped native-read checkpoint. Public gameplay
   capabilities are still disabled; copied data reaching Lua is the next step.
+- Sixth private probe, 1 November: the position reader now hands copied values
+  to the private Lua fixture during the matching owner update only. Old ticks,
+  changed sessions and unavailable data are rejected without further engine
+  calls. Offline validation includes one million Lua snapshots,500,000 position
+  tables and cleanup after errors. Startup records600 Lua updates and110
+  framework hooks without failures, with position unavailable before loaded
+  Ready. The isolated game is running for the two-load/VA check. Gameplay
+  acceptance is pending, and1.9 plus all five prior probes remain preserved.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
