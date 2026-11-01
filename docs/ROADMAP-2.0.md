@@ -439,8 +439,12 @@ not bypass address or lifecycle validation.
   check now passes: three separate presses produce three verified +1 changes
   with no extra attempt or unexpected runtime error, including two after the
   position diagnostic stops sampling. Held-key/menu/focus suppression now passes
-  with exactly two further additions and normal walking confirmed. Reload,
-  compatibility and shutdown remain pending for this candidate.
+  with exactly two further additions and normal walking confirmed. Reload passes
+  with one further verified +1; the user confirms a VA purchase and Limited HUD.
+  Normal shutdown records all three Lua cleanups once, six queued/drained actions,
+  50 ignored repeats, one blocked input and no drops or lifecycle faults. The
+  native listener is removed and unload records inert callbacks. This completes
+  the fixed-key money probe. Configurable hotkeys and public integration remain.
   No public inventory capability or Console parity is claimed;
   accepted 1.9 and the seven earlier probes remain preserved.
 
