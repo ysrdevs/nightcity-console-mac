@@ -2,16 +2,18 @@
 
 These checks target Cyberpunk 2077 **2.5.0**, native Apple Silicon Steam.
 They describe tested flows and exact versions, not every feature or combination.
-The final 1.9 release candidate is still being validated.
+The final signed 1.9.0 build passed player compatibility and save/relaunch checks
+with the combination below. Limited HUD's F7 binding and minimap opacity also
+persisted after relaunch. Testing was performed on macOS 27.
 
-| Mod | Version | Verified development-build checks | Installation |
+| Mod | Version | Player-confirmed checks | Installation |
 | --- | --- | --- | --- |
 | Virtual Atelier | 1.6.0 | Store rendering, search, purchase/equip and save/relaunch | Download separately, then Import VA |
 | PUBLICNET, now A.G.I.S. | 1.2.1 | Store listing and purchases with the tested VA version | Download separately, then Add Mod |
 | Equipment-EX | 1.2.9 | Extra clothing slots, named outfits, switching and save/relaunch | Optional Mods in the launcher |
 | Cyberware-EX | 1.5.6, default preset | Second operating system, abilities and save/relaunch | Optional Mods in the launcher |
 | Immersive Rippers | 2.6.2 | Cassius Ryder chair, cyberware menu, exit/repeat and save/relaunch | Download separately, then Add Mod |
-| Limited HUD | 2.23.1 author source snapshot | Settings, minimap toggle/rebinding, opacity and weapon/scanner/vehicle HUD transitions; relaunch pending | Download separately, then Add Mod |
+| Limited HUD | 2.23.1 author source snapshot | Settings, minimap toggle/rebinding, opacity, weapon/scanner/vehicle HUD transitions and settings persistence after relaunch | Download separately, then Add Mod |
 
 Virtual Atelier, store packs, Immersive Rippers and Limited HUD are not bundled.
 Use their official pages:
@@ -21,7 +23,7 @@ Use their official pages:
 - [Immersive Rippers](https://www.nexusmods.com/cyberpunk2077/mods/7064)
 - [Limited HUD](https://www.nexusmods.com/cyberpunk2077/mods/2592)
 
-The Limited HUD candidate uses the author's exact files from commit
+The tested Limited HUD package uses the author's exact files from commit
 `7bc5ac17ebdae21d2c9067604cc6581ccca34012`, corresponding to the 2.23.1 changes.
 This does not claim the generated test ZIP is byte-identical to the Nexus ZIP.
 Only its main package is in scope; optional HUD replacements need separate tests.

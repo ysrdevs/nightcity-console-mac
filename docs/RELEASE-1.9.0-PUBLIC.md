@@ -1,7 +1,6 @@
 # NightCity Console 1.9.0: Mod Support and Import Preview
 
-Release candidate: final compatibility and save/relaunch checks are pending.
-The app and DMG are Developer ID signed and notarized by Apple.
+The app and DMG are Developer ID signed, notarized by Apple and stapled.
 
 This update expands mod support for **Cyberpunk 2077 2.5.0 on native macOS
 Steam**, adds native Input Loader and Mod Settings, and lets you review a mod
@@ -22,11 +21,12 @@ before installing it.
 - **Checked batch installation:** the reviewed files are verified again before
   copying. Failed copies roll back new files, and removal validates the recorded
   paths before deleting a managed package.
-- **Broader tested mod support:** the private development checkpoints include
-  Immersive Rippers' Cassius Ryder interaction, Input Loader hotkeys, Mod Settings
-  controls and Virtual Atelier Instant Buy. Limited HUD's settings, minimap
-  toggle/rebinding, opacity and weapon/scanner/vehicle HUD transitions have
-  passed player testing; final combined compatibility and relaunch checks remain.
+- **Broader tested mod support:** Immersive Rippers' Cassius Ryder chair and
+  cyberware menu, Input Loader hotkeys, Mod Settings controls and Virtual Atelier
+  Instant Buy passed player testing. Limited HUD's settings, minimap toggle and
+  rebinding, opacity, and weapon/scanner/vehicle HUD transitions also passed.
+  The final build passed compatibility and save/relaunch checks with VA,
+  Equipment-EX, Cyberware-EX, Creator weapons and noclip.
 - **Noclip and streaming fixes:** vehicle impacts no longer interrupt the tested
   flight path. The ArchiveXL hidden-object correction fixes the reproduced
   crashes when exploring below the map or inside empty building space.

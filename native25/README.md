@@ -9,9 +9,11 @@ included in this release tree. Publication in separate repositories is planned.
 ## Accepted profile
 
 The 2.5 payload includes RED4ext, TweakXL, ArchiveXL, Input Loader, Mod Settings
-and **Codeware's scoped UI, wardrobe and resource-event profile**. The private
-development checkpoints cover VA 1.6.0, Cyberware-EX 1.5.6 default preset,
-Equipment-EX 1.2.9 and Immersive Rippers 2.6.2 at Cassius Ryder. This is not full
+and **Codeware's scoped UI, wardrobe and resource-event profile**. Player checks
+cover VA 1.6.0, Cyberware-EX 1.5.6 default preset, Equipment-EX 1.2.9,
+Immersive Rippers 2.6.2 at Cassius Ryder and the Limited HUD 2.23.1 author source
+snapshot. The final signed 1.9.0 build passed combined compatibility and
+save/relaunch checks. This is not full
 Codeware world/entity/weather/quest/service-persistence support. Clipboard
 functionality retains the existing limitation. Equipment-EX and Cyberware-EX are
 available as separate optional packages; installing the native frameworks does
@@ -25,10 +27,11 @@ again during suffix resolution, avoiding the reported loading lock. The other
 replacement involved in the reproduced below-map crash. This does not establish
 compatibility for every clothing combination or world/quest mod.
 
-`accepted-payload.json` records the 77 runtime input files for the 1.9 candidate,
+`accepted-payload.json` records the 77 runtime input files for the 1.9 release,
 including the verified macOS 15.5 source rebuilds. Release staging checks those
-input bytes before copying anything. Final candidate gameplay testing remains
-separate from the earlier development-build acceptance.
+input bytes before copying anything. Player acceptance of the final signed
+build supplements the earlier development-build checks; the notarized packages
+contain the same signed files plus Apple's stapled ticket.
 Staging preserves the tested plugin scripts and resources, adds license notices and
 records input hashes. Private development metadata is excluded.
 Signing later changes Mach-O signatures; the input manifest records the accepted

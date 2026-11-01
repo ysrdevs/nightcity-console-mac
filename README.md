@@ -30,9 +30,9 @@ A native Apple Silicon in-game console, cheat menu, and item browser for Cyberpu
 
 ## Status
 
-**1.9.0 is in release-candidate testing for Cyberpunk 2077 2.5.0, native macOS Steam.** It adds native Input Loader and Mod Settings, a mod import preview with dependency and conflict checks, and broader mod support. The app and DMG are notarized; final compatibility and save/relaunch checks are pending. See the [1.9.0 release notes](docs/RELEASE-1.9.0-PUBLIC.md) and [mod compatibility list](docs/MOD-COMPATIBILITY.md).
+**1.9.0 supports Cyberpunk 2077 2.5.0, native macOS Steam.** It adds native Input Loader and Mod Settings, a mod import preview with dependency and conflict checks, and broader tested mod support including Immersive Rippers and Limited HUD. The app and DMG are notarized, and the final build passed player compatibility and save/relaunch checks. See the [1.9.0 release notes](docs/RELEASE-1.9.0-PUBLIC.md) and [mod compatibility list](docs/MOD-COMPATIBILITY.md).
 
-The 1.7.1 save-loading fix and the performance improvements, 37-weapon Iconic Weapon Creator, Virtual Atelier, Cyberware-EX and Equipment-EX support remain included. Noclip, Creator weapons, store purchases, outfit switching and dual operating systems passed local player testing in the complete 1.8 installer, including save/relaunch persistence. Console output now uses bounded background reads to keep file access out of the render path. Console commands and existing 2.3.1 compatibility remain part of the app.
+The 1.7.1 save-loading fix and the performance improvements, 37-weapon Iconic Weapon Creator, Virtual Atelier, Cyberware-EX and Equipment-EX support remain included. Noclip, Creator weapons, store purchases, outfit switching and dual operating systems passed local player testing in the complete 1.9 installer, including save/relaunch checks. Limited HUD's key binding and opacity settings also persisted. Console output uses bounded background reads to keep file access out of the render path. Console commands and existing 2.3.1 compatibility remain part of the app.
 
 The 2.5 payload includes native macOS RED4ext, TweakXL, ArchiveXL, Input Loader, Mod Settings and the Codeware features needed by the tested mods. Codeware support includes scoped UI, wardrobe and resource features: this does not make every Codeware-dependent or Windows CET mod compatible. The launcher only stages native declarations for plugins whose game addresses pass its compatibility check.
 
@@ -90,9 +90,8 @@ No Terminal, no file editing. The app finds your game, installs the runtime file
 
 Updating from an older version: quit the game and the older launcher, replace the app, then click Install once (it reads "Reinstall NightCity Console") and Play. This installs the updated runtime and the flight scripts on supported 2.5 games, while retaining the 1.7.1 loading fix. No need to uninstall first.
 
-The 1.9.0 candidate app and DMG are Developer ID signed and notarized by Apple.
-Publication awaits the final compatibility and save/relaunch checks. Release
-packaging retains the app-only ZIP layout, without nested ZIP files.
+The 1.9.0 app and DMG are Developer ID signed, notarized by Apple and stapled.
+Release packaging retains the app-only ZIP layout, without nested ZIP files.
 
 ### Virtual Atelier, Cyberware-EX and Equipment-EX on 2.5
 
