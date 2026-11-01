@@ -340,7 +340,9 @@ not bypass address or lifecycle validation.
   The player confirms a responsive main menu, two existing-save loads with a
   return to the main menu between them, normal walking, VA store opening and
   Limited HUD keys. No unexpected runtime/framework error is recorded. Normal
-  owner-thread Lua shutdown is still pending; no gameplay API is enabled.
+  quit records 119,086 scheduler updates without a thread mismatch, all three
+  Lua fixtures cleaning up once, owner-thread Lua shutdown and inert plugin
+  unload. No gameplay API is enabled.
   Its isolated installation preserved 1.9 and the frozen first-probe artifacts.
 
 - [x] 2.0 direction approved and roadmap written.
