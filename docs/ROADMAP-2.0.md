@@ -368,8 +368,12 @@ not bypass address or lifecycle validation.
   pipeline passes offline cleanup tests but is not connected to gameplay.
   Startup records 600 Lua updates and 110 installed framework hooks without
   failures; Gadget and the legacy overlay remain absent. Installation preserved
-  1.9 and all three frozen prior probes. Loaded-session Ready delivery and the
-  next load/return/quit check are pending player confirmation.
+  1.9 and all three frozen prior probes. The player confirms loading, walking
+  and VA store opening without issues. Two loaded-session Ready events are now
+  recorded on the scheduler owner, with no Ready in the intervening menu worlds
+  and no event errors. Both processes were still present at capture, so normal
+  shutdown remains a separate pending check. Native player calls stay disabled
+  in this frozen probe.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
