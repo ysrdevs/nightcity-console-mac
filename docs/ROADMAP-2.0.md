@@ -423,7 +423,11 @@ not bypass address or lifecycle validation.
   holding the key and none during closed menu gates. App-focus and save-reload
   checks now pass too: seven cumulative callbacks, none in the background, and
   input resumes in the new session without replaying old presses. The player
-  confirms Limited HUD and VA remain working. Normal shutdown remains pending.
+  confirms Limited HUD and VA remain working. Normal shutdown now passes with
+  monitor removal and all three Lua cleanups exactly once. Final counters show
+  seven delivered presses, two blocked presses and 22 ignored repeat events,
+  with no dropped events or lifecycle faults. This completes the scoped native
+  input checkpoint.
   Inventory writes and public Console capabilities remain disabled; accepted
   1.9 and all six earlier probes remain preserved.
 
