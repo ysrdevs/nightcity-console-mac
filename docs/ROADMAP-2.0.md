@@ -337,7 +337,8 @@ not bypass address or lifecycle validation.
   reports four unambiguous method signatures; none of those gameplay methods
   is invoked. All 110 existing framework hooks install without failure, script
   compilation has zero errors, and Gadget/the legacy overlay remain absent.
-  This candidate's menu/gameplay and normal Lua shutdown checks are pending.
+  The player confirms a responsive main menu. This candidate's load/return
+  transition and normal Lua shutdown checks are pending.
   Its isolated installation preserved 1.9 and the frozen first-probe artifacts.
 
 - [x] 2.0 direction approved and roadmap written.
