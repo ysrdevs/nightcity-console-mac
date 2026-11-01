@@ -454,8 +454,11 @@ not bypass address or lifecycle validation.
   checks and independent source review pass. Launcher UI confirms F9 persists
   across reopening and selection is disabled while the game runs. Startup
   confirms F9,600 Lua updates and110 framework hooks without failures. The
-  selected/unselected-key gameplay check remains pending. Accepted1.9 and all
-  eight earlier probes remain preserved; public Console parity is still pending.
+  F9 gameplay check then exposed a conflict with the game's Quick Load binding.
+  The money call ran, but the game also reloaded; this candidate is not accepted.
+  Logs and clean shutdown are captured. Candidate keys must be audited and the
+  conflicting option removed before the next test. Accepted1.9 and all eight
+  earlier probes remain preserved; public Console parity is still pending.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
