@@ -468,9 +468,10 @@ not bypass address or lifecycle validation.
   updates and110 framework hooks without failures. The first gameplay check
   passes: plain F10 leaves the balance unchanged, and two user-confirmed
   Shift+F10 presses each produce a verified +1 without reloading. Walking is
-  normal. Held-key/modifier-release, menu/background, reload, changed selection
-  and shutdown checks remain pending. Accepted1.9 and all earlier artifacts,
-  including rejected probe9, remain preserved.
+  normal. Held Shift+F10, including releasing Shift first, and menu/background
+  suppression now pass with exactly two further +1 actions and no extra call.
+  Reload, changed selection and shutdown checks remain pending. Accepted1.9 and
+  all earlier artifacts, including rejected probe9, remain preserved.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
