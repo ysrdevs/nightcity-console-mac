@@ -331,6 +331,14 @@ not bypass address or lifecycle validation.
   197,810 callbacks without a thread mismatch, followed by Running exit,
   Shutdown entry and plugin unload. No new-save persistence, Creator, noclip,
   Lua gameplay API or purchase acceptance is claimed for this prototype.
+- Second private probe, 1 November: native Lua initialization and 600 owner
+  updates are recorded in the live game. An intentionally failing module is
+  isolated while the healthy update fixture continues. Read-only RTTI inspection
+  reports four unambiguous method signatures; none of those gameplay methods
+  is invoked. All 110 existing framework hooks install without failure, script
+  compilation has zero errors, and Gadget/the legacy overlay remain absent.
+  This candidate's menu/gameplay and normal Lua shutdown checks are pending.
+  Its isolated installation preserved 1.9 and the frozen first-probe artifacts.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
