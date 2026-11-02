@@ -476,9 +476,12 @@ not bypass address or lifecycle validation.
   listener. The same launcher retains a changed plain-F10 selection across
   reopening, and the next game startup confirms F10 with all hooks installed.
   The alternate selection now passes gameplay too: Shift+F10 adds nothing,
-  plain F10 produces one verified +1 and walking remains normal. Final shutdown
-  of this second launch remains pending. Accepted1.9 and all earlier artifacts,
-  including rejected probe9, remain preserved.
+  plain F10 produces one verified +1 and walking remains normal. The second
+  launch also shuts down cleanly with all three Lua modules cleaned up once,
+  one queued/drained action and no drops or lifecycle faults. This completes
+  the private startup-selected configurable-input checkpoint; shared public
+  service/queue integration and visible Lua errors remain M1 work. Accepted1.9
+  and all earlier artifacts, including rejected probe9, remain preserved.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
