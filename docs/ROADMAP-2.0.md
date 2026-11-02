@@ -475,8 +475,10 @@ not bypass address or lifecycle validation.
   queued/drained actions, no drops or lifecycle faults, and removal of the input
   listener. The same launcher retains a changed plain-F10 selection across
   reopening, and the next game startup confirms F10 with all hooks installed.
-  Gameplay delivery of that alternate selection remains pending. Accepted1.9
-  and all earlier artifacts, including rejected probe9, remain preserved.
+  The alternate selection now passes gameplay too: Shift+F10 adds nothing,
+  plain F10 produces one verified +1 and walking remains normal. Final shutdown
+  of this second launch remains pending. Accepted1.9 and all earlier artifacts,
+  including rejected probe9, remain preserved.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
