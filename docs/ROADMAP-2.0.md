@@ -483,6 +483,17 @@ not bypass address or lifecycle validation.
   service/queue integration and visible Lua errors remain M1 work. Accepted1.9
   and all earlier artifacts, including rejected probe9, remain preserved.
 
+- Eleventh private probe, 3 November: the proven position and fixed money
+  actions now use a shared versioned service with a bounded owner-thread queue,
+  module-owned results and cancellation on stale sessions/input. Native and Lua
+  callers share copied values; uncertain mutations are never retried. The private
+  launcher displays module health and attributable errors from bounded snapshots
+  written outside the game thread. Offline and independent integration checks
+  pass. The isolated game reaches Press Space with600 Lua updates and110 hooks
+  without failures; the intentional error is visible while healthy modules stay
+  active. Gameplay, reload and shutdown acceptance are pending. Accepted1.9 and
+  all earlier artifacts remain preserved; native Console parity remains M2 work.
+
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
 - [ ] M0: isolated test configuration and exact Mansion capability inventory.
