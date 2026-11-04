@@ -512,7 +512,10 @@ not bypass address or lifecycle validation.
   check now passes: pos returns coordinates that change after walking, clear and
   position work, and closing F1 restores normal movement and mouse look. Three
   Console queries complete successfully with no pending or unread results.
-  Overlay input, reload, compatibility and shutdown checks remain pending.
+  Overlay input/focus checks now pass: F10 is blocked with F1 open and adds
+  exactly1 with F1 closed; app-switch closes F1 and a reopened Console still
+  returns position. Seven requests complete with no pending/unread results.
+  Reload, compatibility and shutdown checks remain pending.
   Accepted1.9 and previous private checkpoints remain preserved; native
   Creator/noclip parity is still M2.
 
