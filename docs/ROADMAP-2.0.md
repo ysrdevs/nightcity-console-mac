@@ -508,9 +508,13 @@ not bypass address or lifecycle validation.
   show their queued completion. Offline checks cover request ownership, stale
   sessions, overlay input suppression, shutdown and bounded rendering/input.
   Startup initially refused a class-list guard; the corrected bound now allows
-  the actual game process and hooks install successfully. Loaded-player position,
-  reload and compatibility acceptance remain pending. Accepted1.9 and previous
-  private checkpoints remain preserved; native Creator/noclip parity is still M2.
+  the actual game process and hooks install successfully. The first loaded-save
+  check now passes: pos returns coordinates that change after walking, clear and
+  position work, and closing F1 restores normal movement and mouse look. Three
+  Console queries complete successfully with no pending or unread results.
+  Overlay input, reload, compatibility and shutdown checks remain pending.
+  Accepted1.9 and previous private checkpoints remain preserved; native
+  Creator/noclip parity is still M2.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
