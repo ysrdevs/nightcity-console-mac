@@ -528,6 +528,16 @@ not bypass address or lifecycle validation.
   Accepted1.9 and previous private checkpoints remain preserved; native
   Creator/noclip parity is still M2.
 
+- Private Codeware exit correction, 3 November: the old synchronization-lock
+  lifetime reproduces the exact exit exception in both a cold address wrapper
+  and actual handle cleanup. A process-lifetime lock fixes both offline cases
+  while preserving normal reference release. Resolver data lifetime, address
+  validation and concurrency checks also pass. The isolated candidate preserves
+  the tested native F1 runtime/frontend and changes only Codeware. Installer
+  rollback and log-link preservation pass; the launcher now records actual game
+  exit status. Startup reaches Press Space. Loaded-session mod checks and normal
+  game-process exit are awaiting user acceptance;1.9 remains unchanged.
+
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
 - [ ] M0: isolated test configuration and exact Mansion capability inventory.
