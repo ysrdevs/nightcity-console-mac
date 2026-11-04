@@ -544,6 +544,18 @@ not bypass address or lifecycle validation.
   isolated correction for that loaded session; 1.9 remains unchanged. Native
   Creator/noclip and broader Console parity still require M2 migration.
 
+- Native Console money command, 4 November: the next isolated candidate adds
+  typed `money 1` with its own one-use Console authorization. F10 remains blocked
+  while F1 is open; menu, focus, overlay and session changes invalidate old
+  commands. Results distinguish verified additions from uncertain outcomes, and
+  mutations are never retried automatically. Native broker/service/controller
+  checks pass memory and thread sanitizers, including concurrent duplicate
+  submission and hotkey/Console interleaving. Existing Lua/service and frontend
+  regressions pass. The private build is installed and reaches Press Space with
+  the native Console connected; loaded-save testing is pending. It retains the
+  accepted Codeware correction and preserves 1.9 and previous private builds.
+  General item commands, Creator and noclip remain later M2 migration work.
+
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
 - [ ] M0: isolated test configuration and exact Mansion capability inventory.
