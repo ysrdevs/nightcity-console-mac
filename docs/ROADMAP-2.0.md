@@ -491,8 +491,13 @@ not bypass address or lifecycle validation.
   written outside the game thread. Offline and independent integration checks
   pass. The isolated game reaches Press Space with600 Lua updates and110 hooks
   without failures; the intentional error is visible while healthy modules stay
-  active. Gameplay, reload and shutdown acceptance are pending. Accepted1.9 and
-  all earlier artifacts remain preserved; native Console parity remains M2 work.
+  active. Gameplay and a recorded reload now pass: two explicit F10 presses
+  each complete once with exactly1 added across two loaded sessions. Four copied
+  position queries also complete, with no pending or unread requests. The user
+  confirms VA purchasing and Limited HUD; the launcher displays all results and
+  the attributable fixture error. Normal shutdown acceptance remains pending.
+  Accepted1.9 and all earlier artifacts remain preserved; native Console parity
+  remains M2 work.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
