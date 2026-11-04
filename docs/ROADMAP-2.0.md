@@ -495,14 +495,17 @@ not bypass address or lifecycle validation.
   each complete once with exactly1 added across two loaded sessions. Four copied
   position queries also complete, with no pending or unread requests. The user
   confirms VA purchasing and Limited HUD; the launcher displays all results and
-  the attributable fixture error. Normal shutdown acceptance remains pending.
+  the attributable fixture error. Normal shutdown now passes: all three Lua
+  modules clean up once, input monitoring stops, the queue is empty and callbacks
+  become inert. The launcher correctly labels the final stopped snapshot stale
+  and retains the error. Independent review confirms minimal M1 complete.
   Accepted1.9 and all earlier artifacts remain preserved; native Console parity
   remains M2 work.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
 - [ ] M0: isolated test configuration and exact Mansion capability inventory.
-- [ ] M1: minimal native runtime and Lua module.
+- [x] M1: minimal native runtime and Lua module, scoped acceptance 3 November.
 - [ ] M2: existing Console parity.
 - [ ] M3: Mansion gameplay and persistence.
 - [ ] M4: expanded tested CET mod set.
