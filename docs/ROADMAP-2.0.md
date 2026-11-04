@@ -523,8 +523,8 @@ not bypass address or lifecycle validation.
   finishes. A final process-exit audit found a Codeware static-destruction
   exception, also present in probe11 before this frontend existed. Earlier
   runtime-cleanup results do not establish clean process exit. This private F1
-  position checkpoint is accepted with that known framework exit fault, which
-  is the next fix before expanding native commands. It is not release-ready.
+  position checkpoint was accepted with that known framework exit fault,
+  corrected in the isolated successor described below. It is not release-ready.
   Accepted1.9 and previous private checkpoints remain preserved; native
   Creator/noclip parity is still M2.
 
@@ -535,8 +535,14 @@ not bypass address or lifecycle validation.
   validation and concurrency checks also pass. The isolated candidate preserves
   the tested native F1 runtime/frontend and changes only Codeware. Installer
   rollback and log-link preservation pass; the launcher now records actual game
-  exit status. Startup reaches Press Space. Loaded-session mod checks and normal
-  game-process exit are awaiting user acceptance;1.9 remains unchanged.
+  exit status. Startup reaches Press Space. On 4 November, the player confirms
+  position commands, normal movement, VA, Equipment-EX outfits, the second OS
+  and Limited HUD. The saved process record confirms normal exit with status 0.
+  All three native requests complete; Lua modules, input and the frontend shut
+  down cleanly, with no matching crash report or Codeware shutdown exception.
+  Independent review and protected-artifact checks pass. This accepts the
+  isolated correction for that loaded session; 1.9 remains unchanged. Native
+  Creator/noclip and broader Console parity still require M2 migration.
 
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
