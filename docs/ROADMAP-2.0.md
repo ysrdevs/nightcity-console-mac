@@ -495,7 +495,7 @@ not bypass address or lifecycle validation.
   each complete once with exactly1 added across two loaded sessions. Four copied
   position queries also complete, with no pending or unread requests. The user
   confirms VA purchasing and Limited HUD; the launcher displays all results and
-  the attributable fixture error. Normal shutdown now passes: all three Lua
+  the attributable fixture error. Runtime shutdown callbacks pass: all three Lua
   modules clean up once, input monitoring stops, the queue is empty and callbacks
   become inert. The launcher correctly labels the final stopped snapshot stale
   and retains the error. Independent review confirms minimal M1 complete.
@@ -518,7 +518,13 @@ not bypass address or lifecycle validation.
   Reload now passes too: position is unavailable at the main menu and returns
   current coordinates after loading again. The user confirms normal movement,
   VA and Limited HUD. All ten service requests complete with no pending/unread
-  results. Normal shutdown verification is the remaining check for this slice.
+  results. Native shutdown now passes too: the queue is empty, all three Lua
+  modules clean up once, the input monitor is removed and the frontend worker
+  finishes. A final process-exit audit found a Codeware static-destruction
+  exception, also present in probe11 before this frontend existed. Earlier
+  runtime-cleanup results do not establish clean process exit. This private F1
+  position checkpoint is accepted with that known framework exit fault, which
+  is the next fix before expanding native commands. It is not release-ready.
   Accepted1.9 and previous private checkpoints remain preserved; native
   Creator/noclip parity is still M2.
 
