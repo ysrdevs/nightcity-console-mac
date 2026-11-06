@@ -556,6 +556,22 @@ not bypass address or lifecycle validation.
   accepted Codeware correction and preserves 1.9 and previous private builds.
   General item commands, Creator and noclip remain later M2 migration work.
 
+- Native inventory workflow, 6 November: the isolated candidate now includes
+  Items search and categories, quantity controls, Quick money actions and typed
+  add/give/money commands. Its embedded catalog has 7,543 supported Items records;
+  the game validates each record before a grant. Unique items receive a fresh
+  instance per requested unit. Money uses one amount-bearing grant. Results
+  distinguish confirmed additions, refusal before a write and uncertain or
+  partial outcomes, without automatic retries. Real frontend-to-service
+  integration and inventory batch checks pass sanitizers, alongside existing
+  service, Lua, packaging and native-address checks. The private candidate is
+  staged and its runtime, catalog and frontend initialize successfully. The
+  automated screen capture is black, so visible startup and the combined player
+  acceptance remain pending. The accepted Codeware correction is unchanged,
+  and preservation checks cover 1.9 and all previous frozen test builds.
+  Creator generation/storage migration is proceeding offline; native Creator
+  and noclip are not included in this inventory candidate.
+
 - [x] 2.0 direction approved and roadmap written.
 - [x] Accepted 1.9 release and source checkpoints identified.
 - [ ] M0: isolated test configuration and exact Mansion capability inventory.
