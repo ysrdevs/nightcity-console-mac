@@ -40,8 +40,9 @@ struct NativeRuntimeManifest: Codable {
     static let cachePath = "r6/cache/native20/final.redscripts"
 
     static func load(resources: URL) throws -> (NativeRuntimeManifest, String) {
-        try NativeRuntimeFiles.validateRoot(resources)
-        let url = try NativeRuntimeFiles.checked(resources, manifestRelative)
+        let resourceRoot = resources.absoluteURL
+        try NativeRuntimeFiles.validateRoot(resources, kind: "app resources")
+        let url = try NativeRuntimeFiles.checked(resourceRoot, manifestRelative)
         guard let data = try NativeRuntimeFiles.read(url, maximum: 2 * 1024 * 1024) else {
             throw NativeRuntimeError(message: "This app is missing its native 2.5 runtime manifest. Reinstall NightCity Console; the legacy backend will not be used on 2.5.")
         }
@@ -87,8 +88,9 @@ struct NativeRuntimeManifest: Codable {
     }
 
     func verifyGame(root: URL) throws {
-        try NativeRuntimeFiles.validateRoot(root)
-        let url = try NativeRuntimeFiles.checked(root, executable.relativePath)
+        let gameRoot = root.absoluteURL
+        try NativeRuntimeFiles.validateRoot(root, kind: "game")
+        let url = try NativeRuntimeFiles.checked(gameRoot, executable.relativePath)
         guard let bytes = try NativeRuntimeFiles.read(url, maximum: 1024 * 1024 * 1024) else { throw NativeRuntimeError(message: "Game executable is missing.") }
         let actual = try Self.imageIdentity(bytes)
         try NativeRuntimeFiles.require(actual.uuid.caseInsensitiveCompare(executable.uuid) == .orderedSame && actual.textSHA256 == executable.textSHA256,
@@ -143,16 +145,23 @@ enum NativeRuntimeFiles {
     }
     static func hash(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
     static func digest(_ value: String) -> Bool { value.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil }
-    static func validateRoot(_ url: URL) throws {
-        try require(url.isFileURL && url.path.hasPrefix("/") && !url.path.contains(":") && !url.path.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
-            "The game or app folder contains an unsupported colon or control character. Move it to a folder whose path can be represented safely in native launch and script arguments.")
+    static func validateRoot(_ url: URL, kind: String = "runtime") throws {
+        // Bundle.main may provide a relative URL backed by the app's base URL.
+        // Resolve it once, then inspect one stable decoded filesystem path.
+        let absolute = url.absoluteURL
+        let path = absolute.path
+        let file = absolute.isFileURL, rooted = path.hasPrefix("/"), colon = path.contains(":")
+        let control = path.unicodeScalars.first { CharacterSet.controlCharacters.contains($0) }
+        let controlCode = control.map { String(format: "U+%04X", $0.value) } ?? "none"
+        try require(file && rooted && !colon && control == nil,
+            "The \(kind) folder cannot be represented safely in native launch and script arguments. A local absolute path without a colon or control character is required. [root=\(kind); scheme=\(absolute.scheme ?? "none"); file=\(file); absolute=\(rooted); colon=\(colon); control=\(controlCode); base=\(url.baseURL != nil)]")
     }
     static func relative(_ path: String) -> Bool {
         !path.isEmpty && path.utf8.count <= 512 && !path.hasPrefix("/") && !path.contains("\\") && !path.contains(":") && !path.contains("\0") && !path.contains("\n") && path.split(separator: "/", omittingEmptySubsequences: false).allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." }
     }
     static func checked(_ root: URL, _ relative: String) throws -> URL {
         try require(self.relative(relative), "Invalid runtime path.")
-        var url = root.standardizedFileURL
+        var url = root.absoluteURL.standardizedFileURL
         for part in relative.split(separator: "/") {
             url.appendPathComponent(String(part))
             var metadata = stat()

@@ -169,6 +169,15 @@ import Darwin
         try refuses("release environment") { _ = try NativeRuntimeManifest.load(resources: migration.resources) }
         try refuses("colon or control") { try ready.manifest.verifyGame(root: ready.game.appendingPathComponent("colon:path")) }
         try refuses("colon or control") { _ = try NativeRuntimeManifest.load(resources: ready.resources.appendingPathComponent("newline\npath")) }
+        let relativeResources = URL(string: "resources/", relativeTo: URL(fileURLWithPath: ready.root.path, isDirectory: true))!
+        try check(relativeResources.baseURL != nil)
+        try check(NativeRuntimeManifest.load(resources: relativeResources).1 == NativeRuntimeManifest.load(resources: ready.resources).1)
+        let relativeGame = URL(string: "game/", relativeTo: URL(fileURLWithPath: ready.root.path, isDirectory: true))!
+        try ready.manifest.verifyGame(root: relativeGame)
+        try check(NativeRuntimeFiles.checked(relativeResources, NativeRuntimeManifest.manifestRelative).path == NativeRuntimeFiles.checked(ready.resources, NativeRuntimeManifest.manifestRelative).path)
+        try refuses("root=app resources") { _ = try NativeRuntimeManifest.load(resources: URL(string: "Contents/Resources/", relativeTo: URL(string: "https://example.invalid/App/")!)!) }
+        try refuses("control=U+000A") { try NativeRuntimeFiles.validateRoot(URL(fileURLWithPath: "/fixture/line\nfeed"), kind: "game") }
+        try refuses("colon=true") { try NativeRuntimeFiles.validateRoot(URL(string: "Contents/Resources/", relativeTo: URL(fileURLWithPath: "/fixture/colon:app/", isDirectory: true))!, kind: "app resources") }
         print("\(checks) native runtime installation/identity/environment checks passed; temporary fixtures only, no app/game launched")
     }
     static func throwUnexpected() { fatalError("A test fixture must never launch") }
