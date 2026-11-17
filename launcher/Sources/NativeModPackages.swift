@@ -257,6 +257,14 @@ enum NativeModPackages {
         }
         try NativeModTransaction.apply(root: root, desired: desired, owned: owned, gameClosed: gameClosed, validateStaged: validateScripts)
     }
+    static func prepareModuleData(gameRoot: URL, packages: [Package]) throws {
+        let selected = Set(packages.map { $0.preview.packageId })
+        // These are runtime-owned mutable stores, not paths supplied by mods.
+        // Source admission remains read-only and requires the stores to exist.
+        for module in ["VehicleCallCost", "immersive_third_person"] where selected.contains(module) {
+            try NativeModFiles.ensureOwnedDirectory(root: gameRoot, relative: "red4ext/nightcity-native20/module-data/" + module)
+        }
+    }
     static func withLaunch(gameRoot: URL, resources: URL, launch: () throws -> Void) throws {
         let closed = { !NSWorkspace.shared.runningApplications.contains { $0.executableURL?.lastPathComponent == "Cyberpunk2077" } }
         let store = try lockStore(gameRoot, gameClosed: closed)
@@ -267,6 +275,7 @@ enum NativeModPackages {
             for package in packages { for artifact in package.artifacts {
                 try NativeRuntimeFiles.require(try NativeModFiles.identity(NativeRuntimeFiles.checked(gameRoot, artifact.destination)) == .init(sha256: artifact.sha256, size: artifact.size), "Selected mod file changed or is missing: \(artifact.destination). Restore the previous selection or reimport the original package.")
             } }
+            try prepareModuleData(gameRoot: gameRoot, packages: packages)
             let revision = try selection?.revision ?? self.revision([])
             let directory = try NativeRuntimeFiles.checked(gameRoot, release)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])

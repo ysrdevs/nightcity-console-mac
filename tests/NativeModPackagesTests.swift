@@ -109,6 +109,52 @@ import Darwin
         }
         try check(read(root, ns.artifacts[0].destination) == nil)
     }
+    static func moduleData(_ root: URL) throws {
+        let base = "red4ext/nightcity-native20/module-data", itpPath = base + "/immersive_third_person", vccPath = base + "/VehicleCallCost"
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try NativeModPackages.prepareModuleData(gameRoot: root, packages: [])
+        try check(!FileManager.default.fileExists(atPath: root.appendingPathComponent(base).path))
+        let ns = try package(root, "nativeSettings", "data"), itp = try package(root, "immersive_third_person", "data"), vcc = try package(root, "VehicleCallCost", "data")
+        try NativeModPackages.prepareModuleData(gameRoot: root, packages: [ns])
+        try check(!FileManager.default.fileExists(atPath: root.appendingPathComponent(base).path))
+        let work = root.appendingPathComponent("metadata"); try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        try NativeModPackages.activate([ns, itp], current: nil, root: root, workspace: work, gameClosed: { true }, validateScripts: {})
+        var callbacks = 0
+        try NativeModPackages.withLaunch(gameRoot: root, resources: root) {
+            callbacks += 1
+            try check(FileManager.default.fileExists(atPath: root.appendingPathComponent(itpPath).path))
+            try check(!FileManager.default.fileExists(atPath: root.appendingPathComponent(vccPath).path))
+        }
+        let directory = root.appendingPathComponent(itpPath)
+        let attrs = try FileManager.default.attributesOfItem(atPath: directory.path)
+        try check((attrs[.posixPermissions] as? NSNumber)?.intValue == 0o700)
+        try check((attrs[.ownerAccountID] as? NSNumber)?.uint32Value == geteuid())
+        let settings = try write(root, itpPath + "/settings.lua", "return {distance=3.0}")
+        var before = stat(), after = stat(); try check(lstat(settings.path, &before) == 0)
+        try NativeModPackages.withLaunch(gameRoot: root, resources: root) { callbacks += 1 }
+        try check(lstat(settings.path, &after) == 0 && before.st_ino == after.st_ino && before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec && before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec)
+        try check(read(root, itpPath + "/settings.lua") == "return {distance=3.0}")
+        try NativeModPackages.prepareModuleData(gameRoot: root, packages: [ns, vcc])
+        try check(FileManager.default.fileExists(atPath: root.appendingPathComponent(vccPath).path))
+        try check(!FileManager.default.fileExists(atPath: root.appendingPathComponent(base + "/nativeSettings").path))
+        let snapshot = try NativeRuntimeFiles.read(root.appendingPathComponent(NativeModPackages.release + "/release-launch.nccset"))
+        try FileManager.default.moveItem(at: directory, to: root.appendingPathComponent("preserved-data"))
+        try FileManager.default.createSymbolicLink(at: directory, withDestinationURL: root.appendingPathComponent("preserved-data"))
+        try refuses("Linked") { try NativeModPackages.withLaunch(gameRoot: root, resources: root) { callbacks += 1 } }
+        try check(callbacks == 2)
+        try check(NativeRuntimeFiles.read(root.appendingPathComponent(NativeModPackages.release + "/release-launch.nccset")) == snapshot)
+        try check(read(root, "preserved-data/settings.lua") == "return {distance=3.0}")
+        try FileManager.default.removeItem(at: directory)
+        _ = try write(root, itpPath, "ordinary file")
+        try refuses("directory") { try NativeModPackages.withLaunch(gameRoot: root, resources: root) { callbacks += 1 } }
+        try check(read(root, itpPath) == "ordinary file")
+        try FileManager.default.removeItem(at: directory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        try check(chmod(directory.path, 0o777) == 0)
+        try refuses("owned") { try NativeModPackages.withLaunch(gameRoot: root, resources: root) { callbacks += 1 } }
+        try check((try FileManager.default.attributesOfItem(atPath: directory.path)[.posixPermissions] as? NSNumber)?.intValue == 0o777)
+        try check(callbacks == 2)
+    }
     static func commands(_ root: URL) throws {
         let env = ["PATH": "/usr/bin:/bin"]
         let result = try NativeRuntimeCommand.run(URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "printf success"], directory: root, environment: env)
@@ -132,7 +178,7 @@ import Darwin
     static func main() throws {
         let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().appendingPathComponent("nightcity-native-packages-tests-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true); defer { try? FileManager.default.removeItem(at: root) }
-        try transaction(root.appendingPathComponent("transactions")); try packages(root.appendingPathComponent("packages")); try commands(root)
+        try transaction(root.appendingPathComponent("transactions")); try packages(root.appendingPathComponent("packages")); try moduleData(root.appendingPathComponent("module-data-fixture")); try commands(root)
         print("Native mod package tests passed: \(checks) checks (temporary fixtures only).")
     }
 }

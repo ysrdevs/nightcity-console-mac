@@ -38,6 +38,35 @@ enum NativeModFiles {
         try NativeRuntimeFiles.require(rename(temporary.path, target.path) == 0, "Cannot publish the staged mod file.")
         try sync(target.deletingLastPathComponent())
     }
+    // Create only an application-selected data directory. Never follow a
+    // symlink or alter an existing directory's ownership/permissions/settings.
+    static func ensureOwnedDirectory(root: URL, relative: String) throws {
+        _ = try NativeRuntimeFiles.checked(root, relative)
+        guard let resolved = realpath(root.path, nil) else { throw NativeRuntimeError(message: "Cannot resolve native mod data storage.") }
+        defer { free(resolved) }
+        let components = String(cString: resolved).split(separator: "/").map(String.init)
+        let children = relative.split(separator: "/").map(String.init)
+        var directory = open("/", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        try NativeRuntimeFiles.require(directory >= 0, "Cannot open native mod data storage.")
+        defer { close(directory) }
+        for (index, name) in (components + children).enumerated() {
+            var child = openat(directory, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            if child < 0 && errno == ENOENT && index >= components.count {
+                try NativeRuntimeFiles.require(mkdirat(directory, name, 0o700) == 0 || errno == EEXIST, "Cannot create selected native mod data directory.")
+                child = openat(directory, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+            }
+            try NativeRuntimeFiles.require(child >= 0, "Native mod data directory is missing, linked or inaccessible.")
+            var metadata = stat(), named = stat()
+            let inspected = fstat(child, &metadata) == 0 && fstatat(directory, name, &named, AT_SYMLINK_NOFOLLOW) == 0 && metadata.st_dev == named.st_dev && metadata.st_ino == named.st_ino && metadata.st_mode & S_IFMT == S_IFDIR
+            let owned = index < components.count || (metadata.st_uid == geteuid() && metadata.st_mode & 0o022 == 0)
+            if !inspected || !owned { close(child); throw NativeRuntimeError(message: "Native mod data directory must be owned and not writable by other users.") }
+            if index >= components.count && fsync(directory) != 0 { close(child); throw NativeRuntimeError(message: "Cannot sync native mod data directory.") }
+            close(directory); directory = child
+        }
+        let final = try NativeRuntimeFiles.checked(root, relative)
+        var retained = stat(), current = stat()
+        try NativeRuntimeFiles.require(fstat(directory, &retained) == 0 && lstat(final.path, &current) == 0 && retained.st_dev == current.st_dev && retained.st_ino == current.st_ino, "Native mod data directory changed during preparation.")
+    }
     static func remove(_ url: URL) throws {
         try NativeRuntimeFiles.require(unlink(url.path) == 0 || errno == ENOENT, "Cannot remove owned mod file.")
         try sync(url.deletingLastPathComponent())
