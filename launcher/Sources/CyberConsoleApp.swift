@@ -133,7 +133,8 @@ final class Model: ObservableObject {
               FileManager.default.fileExists(atPath: d.appendingPathComponent("RED4ext.dylib").path) else { return nil }
         return d
     }
-    var native25Active: Bool { (gameVersion ?? readGameVersion()) == "2.5.0" && native25Root() != nil }
+    var nativeRuntime25: Bool { (gameVersion ?? readGameVersion()) == "2.5.0" }
+    var native25Active: Bool { nativeRuntime25 && (native25Root() != nil || Bundle.main.resourceURL.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent(NativeRuntimeManifest.manifestRelative).path) } == true) }
     // red4ext-relative paths of every file in the native25 tree.
     func native25Files(_ root: URL) -> [String] {
         let fm = FileManager.default
@@ -153,6 +154,10 @@ final class Model: ObservableObject {
     // the three dylibs DYLD_INSERT_LIBRARIES will load (must all exist before launch)
     var injectDylibs: [String] { ["RED4ext.dylib", "FridaGadget.dylib", "libcyberconsole_overlay.dylib"] }
     func fullyInstalled() -> Bool {
+        if nativeRuntime25 {
+            guard let resources = Bundle.main.resourceURL else { return false }
+            return (try? NativeRuntimeInstallation.current(gameRoot: URL(fileURLWithPath: gamePath), resources: resources)) == true
+        }
         let fm = FileManager.default
         guard let resources = Bundle.main.resourceURL else { return false }
         // Play must refresh an older Creator bridge/overlay even when the native loader is unchanged.
@@ -481,7 +486,7 @@ final class Model: ObservableObject {
     func nativePluginScriptSources() -> [String: URL] {
         let fm = FileManager.default
         var sources: [String: URL] = [:]
-        for name in (try? fm.contentsOfDirectory(atPath: "\(red4Dir)/plugins")) ?? [] where !name.hasPrefix(".") {
+        for name in (try? fm.contentsOfDirectory(atPath: "\(red4Dir)/plugins")) ?? [] where !name.hasPrefix(".") && !(nativeRuntime25 && name == "NightCityRuntime") {
             let root = URL(fileURLWithPath: "\(red4Dir)/plugins/\(name)/Scripts")
             if fm.fileExists(atPath: root.path) { sources[name] = root }
         }
@@ -504,6 +509,7 @@ final class Model: ObservableObject {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: check)
             p.arguments = [db] + dylibs.map { "\(dir)/\($0)" }
+            if nativeRuntime25 { p.environment = try NativeRuntimeLaunch.cleanEnvironment(ProcessInfo.processInfo.environment) }
             // This is a status-only probe; unconsumed pipes can deadlock a verbose checker.
             p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
             guard (try? p.run()) != nil else { refused.append(name); continue }
@@ -523,6 +529,26 @@ final class Model: ObservableObject {
         gameVersion = readGameVersion()   // the game may have been updated since the app started
         needsDiskAccess = false
         let fm = FileManager.default
+        if nativeRuntime25 {
+            do {
+                try NativeRuntimeInstallation.install(gameRoot: URL(fileURLWithPath: gamePath), resources: res,
+                    gameClosed: { !NSWorkspace.shared.runningApplications.contains { $0.executableURL?.lastPathComponent == "Cyberpunk2077" } })
+                // Existing Creator metadata is user data, never part of the native inventory.
+                for item in Const.cmnPayload where !fm.fileExists(atPath: "\(gamePath)/\(item.dest)") {
+                    if let bytes = try NativeRuntimeFiles.read(res.appendingPathComponent(item.res)) {
+                        try NativeRuntimeFiles.write(bytes, to: NativeRuntimeFiles.checked(URL(fileURLWithPath: gamePath), item.dest))
+                    }
+                }
+                guard ensureGameEntitlements() else { return }
+                refresh(); status = "Native runtime installed. Click Play."
+            } catch { status = "Native install stopped: \(error.localizedDescription)" }
+            return
+        }
+        guard gameVersion == "2.3.1" else { status = "This game version is unsupported. Existing game files were kept."; return }
+        if fm.fileExists(atPath: "\(gamePath)/\(NativeRuntimeInstallation.receiptPath)") {
+            status = "This folder contains a managed native 2.5 runtime. Restore its matching game version before reinstalling; its files were preserved."
+            return
+        }
         do {
             // Exact owned copies only. Conflicts are checked before other payload changes.
             // Off 2.5 these wrappers must not be compiled against another game's natives.
@@ -660,6 +686,14 @@ final class Model: ObservableObject {
 
     func uninstall() {
         guard canChangeGameFiles() else { return }
+        if FileManager.default.fileExists(atPath: "\(gamePath)/\(NativeRuntimeInstallation.receiptPath)") || FileManager.default.fileExists(atPath: "\(gamePath)/\(NativeRuntimeInstallation.pendingPath)") {
+            do {
+                try NativeRuntimeInstallation.remove(gameRoot: URL(fileURLWithPath: gamePath),
+                    gameClosed: { !NSWorkspace.shared.runningApplications.contains { $0.executableURL?.lastPathComponent == "Cyberpunk2077" } })
+                refresh(); status = "Native runtime removed. Mods, settings, Creator definitions and installation backups were kept."
+            } catch { status = "Native uninstall stopped: \(error.localizedDescription)" }
+            return
+        }
         guard let resources = Bundle.main.resourceURL else { status = "Bundle resources missing."; return }
         do {
             try ExplorationScripts.reconcile(gameRoot: URL(fileURLWithPath: gamePath),
@@ -703,6 +737,12 @@ final class Model: ObservableObject {
         guard gameFound else { status = "Game not found."; return }
         guard !busy else { status = "Please wait for the current operation to finish."; return }
         gameVersion = readGameVersion()      // a game update while the app was open changes which files belong
+        if nativeRuntime25 { playNativeRuntime(); return }
+        guard gameVersion == "2.3.1" else { status = "This game version is unsupported; launch was stopped."; return }
+        if FileManager.default.fileExists(atPath: "\(gamePath)/\(NativeRuntimeInstallation.receiptPath)") {
+            status = "A native 2.5 runtime is installed in this folder. Restore the matching game version before Play."
+            return
+        }
         if !fullyInstalled() { install() }   // self-heal stale/partial installs
         guard fullyInstalled() else { return }   // keep the installation error; don't launch a partial payload
         // pre-flight: every injected dylib must exist, or the game aborts on launch
@@ -797,6 +837,42 @@ final class Model: ObservableObject {
             }
         } else {
             launchGame()
+        }
+    }
+
+    private var nativeProcess: Process?
+
+    private func playNativeRuntime() {
+        guard let resources = Bundle.main.resourceURL else { status = "Bundle resources missing."; return }
+        do {
+            let (manifest, _) = try NativeRuntimeManifest.load(resources: resources)
+            try manifest.verifyGame(root: URL(fileURLWithPath: gamePath))
+            _ = try NativeRuntimeLaunch.cleanEnvironment(ProcessInfo.processInfo.environment)
+            if manifest.requiresPreparedPackages && NativeRuntimePackagePreparation.withLaunch == nil {
+                throw NativeRuntimeError(message: "The reviewed native package preparation is not bundled in this candidate yet. Play is blocked until that integration is complete.")
+            }
+        } catch { status = error.localizedDescription; return }
+        if !fullyInstalled() { install() }
+        guard fullyInstalled(), ensureGameEntitlements() else { return }
+        ensureSteam()
+        let root = URL(fileURLWithPath: gamePath), recording = recordPerformance
+        busy = true; status = "Checking native runtime and compiling scripts…"; busyDetail = status
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let refused = try self.stageNativePluginScripts()
+                guard refused.isEmpty else { throw NativeRuntimeError(message: "Native plugin verification refused: \(refused.joined(separator: ", ")). Launch was stopped.") }
+                try NativeRuntimeLaunch.compile(gameRoot: root, resources: resources, inherited: ProcessInfo.processInfo.environment)
+                let plan = try NativeRuntimeLaunch.plan(gameRoot: root, resources: resources,
+                    inherited: ProcessInfo.processInfo.environment, recordPerformance: recording)
+                try NativeRuntimeLaunch.launch(gameRoot: root, resources: resources, plan: plan,
+                    gameClosed: { !NSWorkspace.shared.runningApplications.contains { $0.executableURL?.lastPathComponent == "Cyberpunk2077" } },
+                    started: { process in DispatchQueue.main.sync { self.nativeProcess = process; self.gameIsRunning = true } },
+                    exited: { code, reason in DispatchQueue.main.async {
+                        self.nativeProcess = nil; self.refreshRunningGame()
+                        self.status = reason == .exit ? "Game exited with status \(code). Exit record saved." : "Game terminated by signal \(code). Export Diagnostics for support."
+                    } })
+                DispatchQueue.main.async { self.busy = false; self.status = "Launched with the native runtime. Press F1 or ` for the Console." }
+            } catch { DispatchQueue.main.async { self.busy = false; self.status = "Native launch stopped: \(error.localizedDescription)" } }
         }
     }
 
