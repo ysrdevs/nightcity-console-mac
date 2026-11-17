@@ -156,6 +156,21 @@ struct DiagnosticsCollectorTests {
         try write(game, "r6/scripts/NightCityExploration/" + explorationNames[0], "abc")
         try write(game, "r6/scripts/NightCityExploration/" + explorationNames[1], "EXPLORATION_SOURCE_PRIVATE")
 
+        try write(game, "red4ext/plugins/NightCityRuntime/NightCityRuntime.dylib", "abc")
+        try write(snapshot.appBundle, "Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/NightCityRuntime.dylib", "abc")
+        try write(game, "red4ext/NightCityFrontend.dylib", "abc")
+        try write(snapshot.appBundle, "Contents/Resources/native20/payload/red4ext/NightCityFrontend.dylib", "abc")
+        try writeJSON(game, "red4ext/plugins/NightCityRuntime/runtime-status.json", [
+            "schema": 1, "pid": 42, "session": ["epoch": "18446744073709551615", "state": "ready"],
+            "requests": ["accepted": "3", "completed": "3", "pending": 0, "unread": false],
+            "modules": [["id": "immersive_third_person", "state": "healthy", "message": "NATIVE_MESSAGE_PRIVATE"],
+                        ["id": "nativeSettings", "state": "disabled", "message": "NATIVE_ERROR_PRIVATE"],
+                        ["id": "../NATIVE_INVALID_MODULE", "state": "healthy"]],
+            "action_results": [["message": "NATIVE_ACTION_PRIVATE", "position": "NATIVE_POSITION_PRIVATE"]],
+            "prepared_packages": ["state": "captured", "mode": "selected", "revision": abcHash, "module_count": 2, "error_code": 0, "message": "NATIVE_CAPTURE_PRIVATE"]])
+        try writeJSON(game, "red4ext/nightcity/native-runtime-installed.json", [
+            "backend": "native2.5", "runtimeProfile": "native-steam-2.5", "manifestSHA256": abcHash,
+            "settings": ["password": "NATIVE_CONFIG_PRIVATE"], "source": "/Users/private/NATIVE_SOURCE_PRIVATE"])
         let report = collect()
         let all = report.entries.map { String(decoding: $0.data, as: UTF8.self) }.joined(separator: "\n")
         for secret in ["OLD_LOG_SECRET", "UNRELATED_LOG_SECRET", "SOURCE_MUST_NOT_BE_READ", "ARCHIVE_MUST_NOT_BE_READ", "SAVE_MUST_NOT_BE_READ", "DOCUMENT_MUST_NOT_BE_READ", "OTHER_APP_CRASH_PRIVATE", "SYMLINK_ESCAPE_PRIVATE", "COMMAND_PRIVATE", "USER_PRINT_PRIVATE", "COMMAND_INPUT_PRIVATE", "GALLERY_PRIVATE", "IGNORED_DEFAULT", "STATUS_PRIVATE", "FILENAME_PRIVATE", "KEY_PRIVATE", "JSON_PRIVATE_TOKEN", "JSON_PRIVATE_COMMAND"] {
@@ -178,6 +193,19 @@ struct DiagnosticsCollectorTests {
         precondition(inputFiles.first { $0["path"] as? String == "r6/cache/inputContexts.xml" }?["status"] as? String == "hashed")
         precondition(inputFiles.first { $0["path"] as? String == "r6/cache/inputUserMappings.xml" }?["status"] as? String == "missing_or_not_regular")
         let native = try array(report, "native-binaries.json")
+        let nativeStatus = try object(report, "native/runtime-status.json")
+        precondition(nativeStatus["session_relation"] as? String == "unknown_identity_unconfirmed")
+        precondition((nativeStatus["session"] as? [String: String])?["epoch"] == "18446744073709551615")
+        precondition((nativeStatus["requests"] as? [String: String])?["pending"] == "0")
+        precondition((nativeStatus["requests"] as? [String: String])?["unread"] == nil, "Bool is not a numeric queue counter")
+        precondition((nativeStatus["modules"] as? [[String: String]])?.count == 2)
+        precondition((nativeStatus["prepared_packages"] as? [String: String])?["revision"] == abcHash)
+        for secret in ["NATIVE_MESSAGE_PRIVATE", "NATIVE_ERROR_PRIVATE", "NATIVE_ACTION_PRIVATE", "NATIVE_POSITION_PRIVATE", "NATIVE_CAPTURE_PRIVATE", "NATIVE_CONFIG_PRIVATE", "NATIVE_SOURCE_PRIVATE", "NATIVE_INVALID_MODULE"] {
+            precondition(!all.contains(secret), "Native diagnostics leaked \(secret)")
+        }
+        for path in ["red4ext/plugins/NightCityRuntime/NightCityRuntime.dylib", "red4ext/NightCityFrontend.dylib"] {
+            precondition(native.first { $0["path"] as? String == "<GAME>/" + path }?["matches_bundled"] as? Bool == true)
+        }
         for plugin in ["input_loader/input_loader", "ModSettings/ModSettings"] {
             precondition(native.first { $0["path"] as? String == "<GAME>/red4ext/plugins/" + plugin + ".dylib" }?["sha256"] as? String == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
         }

@@ -353,10 +353,11 @@ final class DiagnosticsCollector {
             }
             collectBinaries(game)
             collectRuntimeIdentity(game)
+            collectNativeRuntime(game)
             collectScriptIntegrity(game)
             collectExplorationIntegrity(game)
             var caches: [[String: Any]] = []
-            for path in ["r6/cache/final.redscripts", "r6/cache/modded/final.redscripts", "r6/cache/final.redscripts.bk"] {
+            for path in ["r6/cache/final.redscripts", "r6/cache/modded/final.redscripts", "r6/cache/native20/final.redscripts", "r6/cache/final.redscripts.bk"] {
                 if let info = game.information(path) { caches.append(fileDetails(info)) }
             }
             json("script-caches.json", caches)
@@ -471,10 +472,13 @@ final class DiagnosticsCollector {
         let app = DiagnosticsDirectory(snapshot.appBundle)
         let paths = ["red4ext/RED4ext.dylib", "red4ext/plugins/Codeware/Codeware.dylib", "red4ext/plugins/ArchiveXL/ArchiveXL.dylib",
                      "red4ext/plugins/TweakXL/TweakXL.dylib", "red4ext/plugins/input_loader/input_loader.dylib",
-                     "red4ext/plugins/ModSettings/ModSettings.dylib", "red4ext/libcyberconsole_overlay.dylib", "red4ext/FridaGadget.dylib"]
+                     "red4ext/plugins/ModSettings/ModSettings.dylib", "red4ext/libcyberconsole_overlay.dylib", "red4ext/FridaGadget.dylib",
+                     "red4ext/plugins/NightCityRuntime/NightCityRuntime.dylib", "red4ext/NightCityFrontend.dylib"]
         for path in paths where hasTime {
             let native = path == "red4ext/RED4ext.dylib" || path.hasPrefix("red4ext/plugins/")
-            let bundled = (native && snapshot.native25 ? "native25/" : "") + String(path.dropFirst("red4ext/".count))
+            let nativePayload = "native20/payload/" + path
+            let bundled = app?.information("Contents/Resources/" + nativePayload) != nil ? nativePayload :
+                (native && snapshot.native25 ? "native25/" : "") + String(path.dropFirst("red4ext/".count))
             var entry = comparedFile(root, path, bundledPath: bundled, app: app)
             if snapshot.includeSystemInformation { entry["signature"] = Self.signature(root.root.appendingPathComponent(path)) }
             entries.append(entry)
@@ -496,6 +500,82 @@ final class DiagnosticsCollector {
     }
     private func validHash(_ value: String) -> Bool {
         value.range(of: #"^[a-fA-F0-9]{64}$"#, options: .regularExpression) != nil
+    }
+    // Native status is deliberately projected, not copied wholesale: action
+    // results can contain Console commands, coordinates and custom item names.
+    private func collectNativeRuntime(_ root: DiagnosticsDirectory) {
+        guard hasTime else { return }
+        let path = "red4ext/plugins/NightCityRuntime/runtime-status.json"
+        func boundedID(_ value: Any?) -> String? {
+            guard let s = value as? String, s.utf8.count <= 96,
+                  s.range(of: #"^[A-Za-z0-9_.-]+$"#, options: .regularExpression) != nil else { return nil }
+            return s
+        }
+        func counter(_ value: Any?) -> String? {
+            if let s = value as? String, s.utf8.count <= 20, UInt64(s) != nil { return s }
+            if let n = value as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(),
+               n.doubleValue.isFinite, n.doubleValue >= 0, n.doubleValue.rounded() == n.doubleValue,
+               let v = UInt64(n.stringValue) { return String(v) }
+            return nil
+        }
+        if let info = root.information(path), info.size <= limits.textBytes,
+           let data = root.read(path, maximum: limits.textBytes, tail: false),
+           let source = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           source["schema"] as? Int == 1, let pid = source["pid"] as? Int, pid > 0 {
+            var safe: [String: Any] = ["status": "available", "schema": 1, "pid": pid, "file": fileDetails(info)]
+            // PID alone is not a heartbeat and can be reused. Require both
+            // process checks plus a status file written after that process began.
+            if sampleMetadata["identity_checked_before"] as? Bool == true,
+               sampleMetadata["identity_checked_after"] as? Bool == true,
+               let samplePID = (sampleMetadata["pid"] as? NSNumber)?.intValue,
+               let start = (sampleMetadata["process_start_seconds"] as? NSNumber)?.doubleValue {
+                let micros = (sampleMetadata["process_start_microseconds"] as? NSNumber)?.doubleValue ?? 0
+                safe["session_relation"] = pid == samplePID && info.modified >= start + micros / 1_000_000 &&
+                    info.modified <= Date().timeIntervalSince1970 + 1 ? "matches_sampled_process" : "different_or_stale_process"
+            } else { safe["session_relation"] = "unknown_identity_unconfirmed" }
+            for (group, keys) in ["session": ["epoch"], "requests": ["accepted", "completed", "pending", "unread"],
+                                  "publication": ["revision", "previous_successful_revision", "successful_writes_before", "failed_writes_before"]] {
+                let values = source[group] as? [String: Any] ?? [:]
+                var copied: [String: String] = [:]
+                for key in keys { if let v = counter(values[key]) { copied[key] = v } }
+                if group == "session", let state = values["state"] as? String,
+                   ["unknown", "unavailable", "starting", "ready", "closed", "stopped", "faulted"].contains(state) { copied["state"] = state }
+                safe[group] = copied
+            }
+            safe["modules"] = (source["modules"] as? [[String: Any]] ?? []).prefix(128).compactMap { module -> [String: String]? in
+                guard let id = boundedID(module["id"]), let state = module["state"] as? String,
+                      ["healthy", "disabled", "stopped", "unavailable", "pending", "failed"].contains(state) else { return nil }
+                return ["id": id, "state": state]
+            }
+            if let captured = source["prepared_packages"] as? [String: Any] {
+                var copied: [String: String] = [:]
+                for key in ["state", "mode"] { if let s = boundedID(captured[key]) { copied[key] = s } }
+                for key in ["module_count", "error_code"] { if let n = counter(captured[key]) { copied[key] = n } }
+                if let revision = captured["revision"] as? String, validHash(revision) { copied["revision"] = revision }
+                safe["prepared_packages"] = copied
+            }
+            json("native/runtime-status.json", safe)
+        } else { json("native/runtime-status.json", ["status": "missing_or_invalid"]) }
+        // Installer identity is separate from loaded-process status. Never
+        // infer successful loading merely from a present manifest or dylib.
+        var identities: [[String: Any]] = []
+        for file in ["red4ext/nightcity/native-runtime-installed.json", "red4ext/nightcity/native-runtime-pending.json"] where hasTime {
+            guard let info = root.information(file) else { continue }
+            var identity: [String: Any] = ["path": file, "bytes": info.size]
+            if let (hash, _) = measuredHash(root, file) { identity["sha256"] = hash }
+            if info.size <= limits.textBytes, let data = root.read(file, maximum: limits.textBytes, tail: false),
+               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                for key in ["backend", "runtimeProfile", "runtimeIdentity", "state", "transactionID"] {
+                    if let v = boundedID(object[key]) { identity[key] = v }
+                }
+                for key in ["manifestSHA256", "manifestHash"] {
+                    if let hash = object[key] as? String, validHash(hash) { identity[key] = hash }
+                }
+            }
+            identities.append(identity)
+        }
+        json("native/installation.json", identities)
+        collectLogs(root, directory: "red4ext/plugins/NightCityRuntime", prefix: "NightCityRuntime", label: "native-runtime")
     }
     private func safeRelative(_ value: String) -> Bool {
         !value.isEmpty && value.count < 512 && !value.hasPrefix("/") &&
