@@ -10,7 +10,27 @@ DEPS="deps"
 [ "$MODE" != "release" ] || DEPS="build/release-deps"
 
 echo "==> overlay + deps"
-./tools/fetch-deps.sh
+if [ "$MODE" = "release" ] && [ -n "${NIGHTCITY_RELEASE_INPUTS_DIR:-}" ]; then
+  # Reuse an explicit, fully checked compatibility payload. This avoids
+  # fetching or reading a live game when preparing the isolated 2.0 app.
+  python3 - "$NIGHTCITY_RELEASE_INPUTS_DIR" "$DEPS" <<'PY'
+from pathlib import Path
+import runpy
+import shutil
+import sys
+h = runpy.run_path('tools/prepare-release-deps.py')
+source, destination = map(lambda p: Path(p).resolve(), sys.argv[1:])
+h['validate_payload'](source)
+if source != destination:
+    if destination.exists():
+        h['validate_payload'](destination)
+        shutil.rmtree(destination)
+    shutil.copytree(source, destination)
+h['validate_payload'](destination)
+PY
+else
+  ./tools/fetch-deps.sh
+fi
 ./overlay/build.sh
 
 echo "==> assembling $APP"
@@ -107,6 +127,11 @@ if cp "$SCC_DEPS/scc" "$SCC_DEPS/libscc_lib.dylib" "$APP/Contents/Resources/scc/
   echo "  bundled scc + libscc_lib.dylib"
 else
   echo "  [warn] scc missing from deps/ (re-run tools/fetch-deps.sh) - script mods won't compile"
+fi
+
+if [ -n "${NIGHTCITY_NATIVE20_PAYLOAD:-}" ]; then
+  echo "==> bundling the explicit native 2.0 release payload"
+  python3 tools/native20-payload.py "$NIGHTCITY_NATIVE20_PAYLOAD" --stage "$APP/Contents/Resources/native20"
 fi
 
 if [ "$MODE" = "release" ]; then

@@ -163,8 +163,8 @@ struct DiagnosticsCollectorTests {
         try writeJSON(game, "red4ext/plugins/NightCityRuntime/runtime-status.json", [
             "schema": 1, "pid": 42, "session": ["epoch": "18446744073709551615", "state": "ready"],
             "requests": ["accepted": "3", "completed": "3", "pending": 0, "unread": false],
-            "modules": [["id": "immersive_third_person", "state": "healthy", "message": "NATIVE_MESSAGE_PRIVATE"],
-                        ["id": "nativeSettings", "state": "disabled", "message": "NATIVE_ERROR_PRIVATE"],
+            "modules": [["id": "immersive_third_person", "state": "disabled", "recovery": "restart_game_camera_unverified", "message": "NATIVE_MESSAGE_PRIVATE"],
+                        ["id": "nativeSettings", "state": "captured", "recovery": "NATIVE_RECOVERY_PRIVATE", "message": "NATIVE_ERROR_PRIVATE"],
                         ["id": "../NATIVE_INVALID_MODULE", "state": "healthy"]],
             "action_results": [["message": "NATIVE_ACTION_PRIVATE", "position": "NATIVE_POSITION_PRIVATE"]],
             "prepared_packages": ["state": "captured", "mode": "selected", "revision": abcHash, "module_count": 2, "error_code": 0, "message": "NATIVE_CAPTURE_PRIVATE"]])
@@ -199,8 +199,10 @@ struct DiagnosticsCollectorTests {
         precondition((nativeStatus["requests"] as? [String: String])?["pending"] == "0")
         precondition((nativeStatus["requests"] as? [String: String])?["unread"] == nil, "Bool is not a numeric queue counter")
         precondition((nativeStatus["modules"] as? [[String: String]])?.count == 2)
+        precondition((nativeStatus["modules"] as? [[String: String]])?.first?["recovery"] == "restart_game_camera_unverified")
+        precondition((nativeStatus["modules"] as? [[String: String]])?.last?["recovery"] == nil)
         precondition((nativeStatus["prepared_packages"] as? [String: String])?["revision"] == abcHash)
-        for secret in ["NATIVE_MESSAGE_PRIVATE", "NATIVE_ERROR_PRIVATE", "NATIVE_ACTION_PRIVATE", "NATIVE_POSITION_PRIVATE", "NATIVE_CAPTURE_PRIVATE", "NATIVE_CONFIG_PRIVATE", "NATIVE_SOURCE_PRIVATE", "NATIVE_INVALID_MODULE"] {
+        for secret in ["NATIVE_MESSAGE_PRIVATE", "NATIVE_ERROR_PRIVATE", "NATIVE_RECOVERY_PRIVATE", "NATIVE_ACTION_PRIVATE", "NATIVE_POSITION_PRIVATE", "NATIVE_CAPTURE_PRIVATE", "NATIVE_CONFIG_PRIVATE", "NATIVE_SOURCE_PRIVATE", "NATIVE_INVALID_MODULE"] {
             precondition(!all.contains(secret), "Native diagnostics leaked \(secret)")
         }
         for path in ["red4ext/plugins/NightCityRuntime/NightCityRuntime.dylib", "red4ext/NightCityFrontend.dylib"] {

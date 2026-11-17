@@ -88,6 +88,10 @@ def verify(app, check_inputs=False):
         helpers["require"](resources / name)
     info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
     version = info["CFBundleShortVersionString"]
+    if tuple(map(int, version.split("."))) >= (2, 0, 0):
+        native20 = runpy.run_path(str(Path(__file__).with_name("native20-payload.py")))
+        native20["verify"](resources / "native20")
+        native20["verify_tools"](resources / "native20")
     if version != info["CFBundleVersion"] or tuple(map(int, version.split("."))) <= (1, 5, 0):
         raise ValueError("release bundle versions must match and be newer than the public 1.5.0 baseline")
     check_os_floor = tuple(map(int, version.split("."))) >= (1, 9, 0)

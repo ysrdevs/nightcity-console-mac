@@ -544,8 +544,13 @@ final class DiagnosticsCollector {
             }
             safe["modules"] = (source["modules"] as? [[String: Any]] ?? []).prefix(128).compactMap { module -> [String: String]? in
                 guard let id = boundedID(module["id"]), let state = module["state"] as? String,
-                      ["healthy", "disabled", "stopped", "unavailable", "pending", "failed"].contains(state) else { return nil }
-                return ["id": id, "state": state]
+                      ["captured", "initializing", "healthy", "disabled", "stopped", "unavailable", "pending", "failed"].contains(state) else { return nil }
+                var copied = ["id": id, "state": state]
+                if let recovery = module["recovery"] as? String,
+                   ["none", "restart_game_camera_unverified"].contains(recovery) {
+                    copied["recovery"] = recovery
+                }
+                return copied
             }
             if let captured = source["prepared_packages"] as? [String: Any] {
                 var copied: [String: String] = [:]

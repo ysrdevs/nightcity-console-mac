@@ -106,18 +106,43 @@ cat > "$NCTOOL_ENTS" <<'PLIST'
 </dict></plist>
 PLIST
 NCTOOL_EXE="$APP/Contents/Resources/nctool/nctool"
+JIT_HOSTS="$SIGN_WORK/jit-hosts.txt"
+python3 - "$APP" "$JIT_HOSTS" <<'PY'
+import json
+from pathlib import Path
+import sys
+resources = Path(sys.argv[1]) / 'Contents/Resources'
+hosts = [resources / 'nctool/nctool']
+config = resources / 'native20/mod-import.json'
+if config.exists():
+    relative = json.loads(config.read_text())['helperRelative']
+    if not relative.startswith('native20/helpers/') or '..' in Path(relative).parts:
+        raise ValueError('Unexpected managed preparation apphost')
+    path = resources / relative
+    if path.is_symlink() or not path.is_file():
+        raise ValueError('Missing preparation apphost')
+    hosts.append(path)
+Path(sys.argv[2]).write_text(''.join(str(path) + '\n' for path in hosts))
+PY
 
 # Sign every nested Mach-O inside-out with hardened runtime + secure timestamp (required for notarization).
 # This is ALL Mach-O, not just *.dylib: the nctool bundle also ships helper executables (createdump) and the
 # .NET runtime dylibs. The nctool apphost is skipped here and signed next, with the JIT entitlements.
 find "$APP/Contents/Resources" -type f -print0 | while IFS= read -r -d '' f; do
-  [ "$f" = "$NCTOOL_EXE" ] && continue
+  if grep -Fqx -- "$f" "$JIT_HOSTS"; then continue; fi
   if grep -Fqx -- "$f" "$PRESERVED_LEGACY"; then continue; fi
   if file "$f" | grep -q "Mach-O"; then
     codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$f"
   fi
 done
-codesign --force --options runtime --timestamp --entitlements "$NCTOOL_ENTS" --sign "$SIGN_IDENTITY" "$NCTOOL_EXE"
+while IFS= read -r helper; do
+  codesign --force --options runtime --timestamp --entitlements "$NCTOOL_ENTS" --sign "$SIGN_IDENTITY" "$helper"
+done < "$JIT_HOSTS"
+if [ -f "$APP/Contents/Resources/native20/manifest.json" ]; then
+  # Signing changes Mach-O bytes. Refresh only those inventory hashes before
+  # the outer app signature seals the final manifest and payload together.
+  python3 tools/native20-payload.py "$APP/Contents/Resources/native20" --after-signing
+fi
 codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
 python3 tools/verify-release-bundle.py "$APP"
