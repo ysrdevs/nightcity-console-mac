@@ -95,6 +95,23 @@ sources and immutable revisions are separate from mutable `module-data`
 settings. Do not edit the managed packet files by hand. Restoring a previous
 selection preserves settings, Creator definitions and saves.
 
+## Native Lua mod profiles
+
+With the game closed, click **Profiles…**. Give the current managed Lua mod
+selection a name and save it. Select a saved profile and click **Apply** to
+restore that selection. **Restore previous** returns to the last managed
+selection, including after adding or removing a supported Lua mod.
+
+Profiles cover the managed native Lua packages and their prepared files.
+Unrelated archive/redscript mods, saves and Creator definitions are not switched.
+Mutable mod settings are shared between profiles, not copied or rolled back.
+Removing a dependency is blocked while a selected mod still requires it.
+Deleting a saved profile name does not uninstall the currently selected mods.
+
+If files were edited outside the launcher, it stops and identifies the conflict.
+Do not delete the game's `package-state` directory: it retains the verified
+imports and revisions needed to restore your profiles.
+
 ## Adding other mods
 
 **NightCity Console 1.9** adds a review step before installation. See

@@ -50,6 +50,10 @@ selection that can be restored with the game closed. Unknown edited files are
 kept and reported instead of silently overwritten. Settings, saves and Creator
 definitions are separate from managed immutable packages.
 
+Use **Profiles…** to save and switch named managed Lua mod selections. Dependency
+checks protect required providers when removing a mod. Settings are shared
+between profiles; unrelated mods and saves are not switched.
+
 The Console's **Lua mods** tab shows module state and failures. Diagnostics
 include native-runtime identity, module recovery state, selected package
 versions and optional sampled callback timings. Timings measure runtime work,

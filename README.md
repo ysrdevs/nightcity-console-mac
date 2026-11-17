@@ -70,6 +70,7 @@ AudioXL and arbitrary Windows native DLLs are outside the 2.0 support claim.
 - Teleport with saved position bookmarks (save a spot, return to it later).
 - Noclip flight on game 2.5: an Exploration tab with speed presets, pause/resume, stopping at your destination and optional Return to start. See the [flight guide](docs/EXPLORATION.md).
 - Mod import preview with detected dependency checks, conflict detection and a list of destination files before installation.
+- Named profiles for managed native Lua packages, dependency-aware removal and Restore previous. Switch with the game closed; settings stay shared between profiles.
 - Native Input Loader and Mod Settings on game 2.5, including supported mods' custom keys, settings controls and rebinding.
 - Supported console commands and quest-fact editing. The native backend exposes reviewed operations; arbitrary game-method calls and unrestricted Lua evaluation are not supported.
 - Action results distinguish pending requests, verified changes, refusals and uncertain outcomes. Do not repeat a grant while its result is pending or unknown.
