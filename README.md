@@ -62,7 +62,7 @@ AudioXL and arbitrary Windows native DLLs are outside the 2.0 support claim.
 ## What it does
 
 - In-game Metal/ImGui console with mouse-operated tabs, typed commands, command history and clipboard support. Press F1 or backtick to open it.
-- Searchable item browser backed by a bundled catalog of 7,667 items. Browse by category (Weapons, Cyberware, Clothes, Crafting, Mods, Misc) or type to filter, press Enter to spawn the top match, no hunting for ids.
+- Searchable item browser with 7,543 supported item records from a 7,667-row source catalog. Filter by category or name, select an item and quantity, then click Add.
 - Pinned favorites that persist across restarts, surfaced in a Quick tab so your go-to gear is one keypress away.
 - One-click cheats: money, full heal, perks, attributes, relic points, set character level.
 - Godmode and infinite ammo with explicit On, Off, Check and Reset controls.
@@ -72,7 +72,7 @@ AudioXL and arbitrary Windows native DLLs are outside the 2.0 support claim.
 - Mod import preview with detected dependency checks, conflict detection and a list of destination files before installation.
 - Native Input Loader and Mod Settings on game 2.5, including supported mods' custom keys, settings controls and rebinding.
 - Supported console commands and quest-fact editing. The native backend exposes reviewed operations; arbitrary game-method calls and unrestricted Lua evaluation are not supported.
-- Action confirmations: every command reports exactly what it did at the bottom of the overlay.
+- Action results distinguish pending requests, verified changes, refusals and uncertain outcomes. Do not repeat a grant while its result is pending or unknown.
 - Iconic Weapon Creator with 37 base-game weapons, nine categories and search by name or weapon type. Custom names, descriptions and effects persist after saving and reloading. Creation checks the selected base and required Iconic records before writing files; Phantom Liberty is not required for these weapon choices.
 - Native Mods tab that lists, enables, and disables loose `.archive` mods by renaming `.archive` to `.archive.off`.
 - Add Mod installs supported ZIPs or folders, including multiple selections, and prepares script mods for the selected game version.
@@ -139,39 +139,47 @@ Click **Export Diagnostics** in the launcher and choose where to save the ZIP. I
 
 **For a freeze or loading hang, leave the game open and export before force-quitting it.** The launcher attempts a 3-second thread sample of the game running from the selected folder. This includes thread stacks and loaded binary identities to help locate a blocked operation. The ZIP records the selected process, capture times, any failure or truncation, and dates for older logs and crashes. A closed game cannot be sampled. If macOS prevents sampling, the other diagnostics still export and the launcher tells you; Activity Monitor → select Cyberpunk 2077 → Sample Process is a manual fallback.
 
-For a performance report, enable **Record performance on next launch**, relaunch the game, reproduce the slowdown and then export. Turn recording off when finished. The measurements are drawable intervals from the game, not GPU benchmark results.
+For a performance report, enable **Record performance on next launch**, relaunch the game, reproduce the slowdown and then export. Turn recording off when finished. On the native 2.0 backend, measurements are sampled runtime callback times, not game FPS or GPU benchmarks. The legacy backend retains its drawable-interval measurements.
 
 Save files, screenshots, mod source contents, memory dumps, unrelated process samples and console command history are excluded. Common personal paths and identifiers are redacted, but review the ZIP before sharing it. Include what happened, the steps to reproduce it, whether the in-game console was open or closed, and FPS before/after at the same location and graphics settings. This helps distinguish a console bottleneck from the cost of a particular mod or graphics setting. File, size and time limits keep collection bounded; some issues may still need a focused follow-up capture.
 
 ### Using the console in-game
 
-The game captures the mouse during play, so the overlay is keyboard-driven. Switch tabs with Cmd+1 / Cmd+2 / Cmd+3:
+Press F1 or backtick to open the Console. Use the mouse to select Console,
+Items, Quick, Creator, Exploration, Locations or Lua mods. Close it before
+moving or flying. Console supports typed commands, history and paste.
 
-- Console (Cmd+1): type commands directly. Up/Down for history, Cmd+V to paste, `help` for the list.
-- Items (Cmd+2): browse by category (Cmd+G cycles categories) or type to search the 7,667-item catalog. Enter spawns the top match, Cmd+P pins it to favorites. Set the quantity first if you want a stack.
-- Quick (Cmd+3): one-click cheats, your pinned favorites, and teleport bookmarks.
+Items has category and text filters, a selected quantity and Add buttons.
+Quick contains money, character/gameplay controls and favorites. Locations
+stores named destinations. Lua mods shows the native Lua host's module states;
+it is not a list of every archive or redscript mod.
 
-Common commands (full list in [docs/COMMANDS.md](docs/COMMANDS.md), or `help` in-game):
+Common native commands (see [the command reference](docs/COMMANDS.md)):
 
 ```text
-give Items.Preset_Silverhand_3516 1       # Johnny's Malorian
+add Items.Preset_Ajax_Default 1
 money 50000
 perks 10
 level 50
 heal
-teleport save home    then    teleport home
-Game.AddToInventory("Items.MaxDOSE", 5)    # CET-style line, also works
+pos
+bookmark save home
+bookmark go home
+Game.AddToInventory("Items.MaxDOSE", 5)
 ```
+
+Enter one command per line and wait for its result. Close F1 after a travel
+request says PREPARING, and release movement keys while it completes.
 
 ## Build (from source)
 
-This repository contains the Console launcher, Metal overlay and command
-runtime source. The current macOS native framework adaptations are maintained
-separately; their implementation sources and build recipe are not included
-here, and publication in separate repositories is planned. The distributed app
+This repository contains the launcher, legacy Metal overlay and legacy command
+runtime source. The 2.0 native runtime/frontend and macOS framework adaptations
+are maintained separately for now; their implementation sources and build
+recipes are not included here. Publication in separate repositories is planned. The distributed app
 includes the prebuilt frameworks and their required runtime scripts/resources.
 
-To build the Console overlay on Apple Silicon with Xcode command line tools:
+To build the retained legacy Console overlay on Apple Silicon with Xcode command line tools:
 
 ```bash
 git clone https://github.com/ysrdevs/nightcity-console-mac.git
@@ -183,25 +191,35 @@ This builds `build/libcyberconsole_overlay.dylib` and does not install into or
 launch the game. It fetches pinned Dear ImGui and Lua inputs when needed.
 
 For a complete launcher build, follow [release assembly instructions](docs/RELEASE-BUILD.md).
-They require the pinned 2.3.1 baseline ZIP, an explicit prebuilt `NATIVE25_DIR`
-matching the accepted dependency hashes, and the installer helper publish
-directory. Signing and notarization use `tools/sign-notarize.sh` with an Apple
+They require the pinned compatibility dependencies plus an explicit verified
+`NIGHTCITY_NATIVE20_PAYLOAD` for 2.0, including its native binaries and original-mod
+preparation helper. Signing and notarization use `tools/sign-notarize.sh` with an Apple
 Developer ID. These steps assemble the Console around its native dependencies;
 they do not rebuild those frameworks from this checkout.
 
 Key source files:
 
-- `runtime/red4ext_hooks.js`: the command engine (RTTI resolution, function calls, all commands).
-- `overlay/overlay.mm`: the Metal/ImGui overlay and input handling.
+- `runtime/red4ext_hooks.js`: the retained legacy command engine.
+- `overlay/overlay.mm`: the retained legacy Metal/ImGui overlay and input handling.
 - `launcher/`: the SwiftUI macOS app that installs and launches the game.
 
 ## How it works (short version)
 
-NightCity Console injects three dylibs into the arm64 game process with `DYLD_INSERT_LIBRARIES` (no SIP changes): the macOS RED4ext hooking framework, the Frida gadget (an in-process script host), and a native Metal/ImGui overlay. It resolves REDengine's RTTI registry, then drives the script VM (the universal script executor) to call game functions with typed arguments built into a synthetic script stack frame. The console UI is Dear ImGui drawn from a `presentDrawable:` swizzle; input comes from an `NSApplication.sendEvent:` swizzle. The command engine and the overlay are decoupled and communicate over a small file channel in `/tmp`.
+On supported Steam 2.5, the launcher selects the native backend before starting
+the process. It loads the native RED4ext loader and Metal frontend, with the
+Console runtime supplied as a native plugin. Exact executable checks precede
+engine hooks. Copied requests/results cross the UI boundary; game and Lua work
+runs on its assigned execution thread. Frida Gadget and the old Console Lua
+host are not loaded on this path.
 
-On Install, the launcher re-signs the game binary ad-hoc with the `allow-jit` and `allow-unsigned-executable-memory` entitlements. The stock Steam signature omits these, and without them macOS kills the game the moment the injected JIT engine generates code. Nothing is permanent: Steam's "Verify Integrity of Game Files" restores the original signature at any time.
+The retained 2.3.1 path uses the older Frida-backed command bridge and overlay.
+[TECHNICAL.md](TECHNICAL.md) and the
+[earlier platform write-up](docs/MACOS-MODDING-PLATFORM.md) describe that design,
+not the complete 2.0 runtime.
 
-For the Console's reverse-engineering and architecture write-up, see [TECHNICAL.md](TECHNICAL.md). The [macOS modding platform write-up](docs/MACOS-MODDING-PLATFORM.md) records the earlier 2.3.1 work; current 2.5 dependency scope is described in [native25/README.md](native25/README.md).
+Install applies the game-signature entitlements required by the supported
+loader. Steam's Verify Integrity of Game Files restores the original game
+signature. No SIP change is required.
 
 ## Compatibility and caveats
 
@@ -213,7 +231,7 @@ For the Console's reverse-engineering and architecture write-up, see [TECHNICAL.
 
 ## Support
 
-NightCity Console is free, and its launcher, overlay and command runtime are open source. If it saved you some hassle and you want to support development, you can buy me a coffee. Completely optional, and very appreciated.
+NightCity Console is free. This repository publishes its launcher and legacy overlay/command runtime; the new native runtime and framework ports are currently maintained separately. If it saved you some hassle and you want to support development, you can buy me a coffee. Completely optional, and very appreciated.
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/ysrdevs)
 
@@ -232,7 +250,7 @@ Upstream originals, used under their respective MIT licenses (see each project's
 
 Tools and libraries:
 
-- Frida (runtime instrumentation and in-process script host).
+- Frida (retained legacy runtime instrumentation and in-process script host).
 - Dear ImGui by Omar Cornut (overlay UI).
 - Ghidra (reverse engineering and decompilation).
 - redscript by jac3km4.

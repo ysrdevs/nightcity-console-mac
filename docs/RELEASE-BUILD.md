@@ -22,15 +22,37 @@ The archived baseline ZIP has SHA-256:
 19f83a8546819cf09091bb836e585940eaed23a87447009184249d5d2f031151
 ```
 
-Build with three explicit dependency inputs:
+For 2.0, supply the complete prepared native payload in addition to the
+compatibility dependencies. The public checkout assembles these binaries; it
+does not build the private native runtime or framework ports.
+
+```sh
+NIGHTCITY_BUILD_MODE=release \
+NIGHTCITY_RELEASE_INPUTS_DIR=/path/to/verified-compatibility-dependencies \
+NIGHTCITY_NATIVE20_PAYLOAD=/path/to/verified-native20-payload \
+./launcher/build-app.sh
+```
+
+`NIGHTCITY_RELEASE_INPUTS_DIR` must pass the existing dependency validator.
+Alternatively, build those compatibility dependencies from the original inputs:
 
 ```sh
 NIGHTCITY_BUILD_MODE=release \
 NIGHTCITY_BASELINE_ZIP=/path/to/NightCity-Console-for-Mac.zip \
 NATIVE25_DIR=/path/to/accepted-prebuilt-2.5/red4ext \
 NCTOOL_PUBLISH_DIR=/path/to/nctool-publish \
+NIGHTCITY_NATIVE20_PAYLOAD=/path/to/verified-native20-payload \
 ./launcher/build-app.sh
 ```
+
+The native20 directory contains an exact manifest, the game-relative `payload`
+tree, the self-contained original-mod preparation helper and its pinned tool
+configuration. No live game installation, full compiled game script cache,
+private C++ source tree or developer fixture directory is an accepted payload.
+`tools/native20-payload.py` verifies its complete inventory. The supported
+2.5 launcher requires this payload and does not silently use the legacy backend.
+Signing refreshes only code hashes and the dependent tool manifest before the
+outer application signature seals them. Non-code changes are refused.
 
 `NATIVE25_DIR` must contain `RED4ext.dylib`, `config.ini`, `bin/red4ext_plugin_check`,
 `bin/x64/cyberpunk2077_addresses.json` identifying 2.5.0, and complete

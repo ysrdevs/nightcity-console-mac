@@ -66,8 +66,9 @@ errors as well.
 Download the supported original packages separately. Do not install Windows CET
 or copy their DLLs over the bundled macOS frameworks.
 
-1. Use **Add Mod** for Native Settings 1.97 and the supported gameplay mod.
-   You can select dependencies and their consumer together.
+1. Use **Add Mod** for the supported gameplay mod and its dependencies.
+   Native Settings 1.97 is required for ITP and Vehicle Call Cost. You can
+   select dependencies and their consumer together.
 2. For Mansion 2.0, select both its main download and Native Interactions
    Framework 1.1.5. Preparation verifies and converts the tested assets.
 3. For ITP 2.0.1, extract its large download first, then select the complete
