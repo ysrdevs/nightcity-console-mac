@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 import CryptoKit
 
 enum Const {
-    static let appVersion = "1.9.0"
+    static let appVersion = "2.0.0"
     static let supportedGameVersions = ["2.3.1", "2.5.0"]
     // Payload files that only work on game 2.3.1: the RED4ext AddressLib is a 2.3.1 address list, and on any
     // other version RED4ext would resolve its hashes to the wrong code.
@@ -228,6 +228,20 @@ final class Model: ObservableObject {
     var moddedScriptCache: String { "\(gamePath)/r6/cache/modded/final.redscripts" }
 
     private func compileScripts() -> String? {
+        if nativeRuntime25 {
+            guard let resources = Bundle.main.resourceURL, let tool = nctoolPath() else { return "Native resources are missing. Reinstall NightCity Console." }
+            let root = URL(fileURLWithPath: gamePath)
+            do {
+                let store = try NativeModPackages.lockStore(root, gameClosed: Self.nativeGameClosed)
+                try store.withLaunchLock {
+                    try NativeModTransaction.recover(root: root)
+                    _ = try NativeRuntimeCommand.run(URL(fileURLWithPath: tool), arguments: ["compat25", root.path], directory: root,
+                        environment: NativeRuntimeLaunch.cleanEnvironment(ProcessInfo.processInfo.environment), maximumOutput: 1024 * 1024, timeout: 120)
+                    try validateNativeModScripts(root: root, resources: resources)
+                }
+                return nil
+            } catch { return error.localizedDescription }
+        }
         if native25Active {
             do { _ = try stageNativePluginScripts() }
             catch { return error.localizedDescription }
@@ -956,7 +970,9 @@ final class Model: ObservableObject {
     @Published var progress: Double = 0         // 0..1 for the determinate bar (nil-ish when 0 at start)
     @Published var importPreview: ModImportPreviewSession?
     @Published var nativeModPreview: NativeModPackages.Review?
-    @Published var nativeModLabels: [String] = []
+    @Published var nativeModRows: [NativeModPackages.Summary] = []
+    @Published var nativeProfiles: [NativeModProfiles.Profile] = []
+    @Published var nativeSelectionRevision: String?
     @Published var nativeCanRestore = false
     private var importWorkspaceRoot: URL?
 
@@ -1000,7 +1016,9 @@ final class Model: ObservableObject {
 
     func refreshMods() {
         let nativeSelection = try? NativeModPackages.readSelection(URL(fileURLWithPath: gamePath))
-        nativeModLabels = nativeSelection?.packages.map { "\($0.preview.packageId) \($0.preview.version)" }.sorted() ?? []
+        nativeModRows = nativeSelection?.packages.map { NativeModPackages.Summary(id: $0.preview.packageId, label: "\(NativeModPackages.displayName($0.preview.packageId)) \($0.preview.version)") }.sorted { $0.label < $1.label } ?? []
+        nativeProfiles = (try? NativeModProfiles.read(URL(fileURLWithPath: gamePath))) ?? []
+        nativeSelectionRevision = nativeSelection?.revision ?? (try? NativeModPackages.revision([]))
         nativeCanRestore = nativeSelection?.previous != nil
         let fm = FileManager.default
         var found: [InstalledMod] = []
@@ -1178,6 +1196,39 @@ final class Model: ObservableObject {
         }
     }
 
+    private func changeNativeSelection(_ detail: String, success: String,
+        action: @escaping (URL, URL, @escaping () throws -> Void) throws -> Void) {
+        guard canChangeGameFiles(), let resources = Bundle.main.resourceURL else { return }
+        let root = URL(fileURLWithPath: gamePath)
+        busy = true; busyDetail = detail; status = detail
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try action(root, resources, { try self.validateNativeModScripts(root: root, resources: resources) })
+                DispatchQueue.main.async { self.busy = false; self.busyDetail = ""; self.refreshMods(); self.status = success }
+            } catch { DispatchQueue.main.async { self.busy = false; self.busyDetail = ""; self.refreshMods(); self.status = "Native mod operation stopped: \(error.localizedDescription)" } }
+        }
+    }
+    func removeNativeMod(_ id: String) {
+        changeNativeSelection("Removing the selected native mod…", success: "Native mod removed. Settings and unrelated mods were kept. Restore previous is available.") { root, _, compile in
+            try NativeModPackages.remove(id, gameRoot: root, gameClosed: Self.nativeGameClosed, validateScripts: compile)
+        }
+    }
+    func saveNativeProfile(_ name: String) {
+        changeNativeSelection("Saving the native mod profile…", success: "Native mod profile saved. Mod settings are shared between profiles.") { root, _, _ in
+            try NativeModProfiles.save(name: name, root: root, gameClosed: Self.nativeGameClosed)
+        }
+    }
+    func applyNativeProfile(_ profile: NativeModProfiles.Profile) {
+        changeNativeSelection("Preparing \(profile.name)…", success: "Selected \(profile.name). Click Play to use this profile.") { root, _, compile in
+            try NativeModProfiles.apply(profile, root: root, gameClosed: Self.nativeGameClosed, validateScripts: compile)
+        }
+    }
+    func deleteNativeProfile(_ profile: NativeModProfiles.Profile) {
+        changeNativeSelection("Removing the saved profile…", success: "Saved profile removed. The current mod selection is unchanged.") { root, _, _ in
+            try NativeModProfiles.delete(profile.id, root: root, gameClosed: Self.nativeGameClosed)
+        }
+    }
+
     func cancelModImportPreview() {
         guard !busy, importWorkspaceRoot != nil else { return }
         importPreview = nil
@@ -1319,6 +1370,7 @@ struct ContentView: View {
     @StateObject private var diagnostics = DiagnosticsExportController()
     @State private var showOptionalMods = false
     @State private var showModGuide = false
+    @State private var showNativeProfiles = false
     @State private var resolvingDrop = false
 
     private var changesDisabled: Bool { m.busy || m.gameIsRunning || resolvingDrop || m.importPreview != nil || m.nativeModPreview != nil }
@@ -1412,7 +1464,7 @@ struct ContentView: View {
                 Button("Guide") { showModGuide = true }
                 Button("Optional Mods…") { showOptionalMods = true }
                     .disabled(resolvingDrop)
-                if m.nativeCanRestore { Button("Restore previous") { m.restoreNativeMods() }.disabled(changesDisabled) }
+                if m.nativeRuntime25 && m.installed { Button("Profiles…") { showNativeProfiles = true }.disabled(changesDisabled) }
                 Button("Add Mod…") { addMod() }.disabled(!m.installed || changesDisabled)
             }
             modDropZone
@@ -1449,6 +1501,7 @@ struct ContentView: View {
         .frame(width: 620, height: 640)
         .sheet(isPresented: $showOptionalMods) { OptionalModsView(model: m) }
         .sheet(isPresented: $showModGuide) { ModInstallationGuide() }
+        .sheet(isPresented: $showNativeProfiles) { NativeModProfilesView(model: m) }
         .sheet(item: $m.nativeModPreview) { review in
             NativeModPreviewView(model: m, review: review)
         }
@@ -1506,14 +1559,19 @@ struct ContentView: View {
     }
 
     @ViewBuilder var modsList: some View {
-        if m.mods.isEmpty && m.nativeModLabels.isEmpty {
+        if m.mods.isEmpty && m.nativeModRows.isEmpty {
             Text("No mods installed yet.").font(.caption).foregroundColor(.secondary)
         } else {
             ScrollView {
                 VStack(spacing: 1) {
-                    ForEach(m.nativeModLabels, id: \.self) { label in
-                        HStack { Image(systemName: "shippingbox.fill").foregroundColor(.secondary); Text(label).font(.callout); Spacer(); Text("Native").font(.caption2).foregroundColor(.secondary) }
-                            .padding(.horizontal, 6).padding(.vertical, 3)
+                    ForEach(m.nativeModRows) { mod in
+                        HStack {
+                            Image(systemName: "shippingbox.fill").foregroundColor(.secondary)
+                            Text(mod.label).font(.callout); Spacer()
+                            Text("Native").font(.caption2).foregroundColor(.secondary)
+                            Button { m.removeNativeMod(mod.id) } label: { Image(systemName: "trash") }
+                                .buttonStyle(.borderless).foregroundColor(.red).disabled(changesDisabled).help("Remove \(mod.label)")
+                        }.padding(.horizontal, 6).padding(.vertical, 3)
                     }
                     ForEach(m.mods) { mod in
                         HStack(spacing: 8) {

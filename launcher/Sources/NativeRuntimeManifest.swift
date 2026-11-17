@@ -40,6 +40,7 @@ struct NativeRuntimeManifest: Codable {
     static let cachePath = "r6/cache/native20/final.redscripts"
 
     static func load(resources: URL) throws -> (NativeRuntimeManifest, String) {
+        try NativeRuntimeFiles.validateRoot(resources)
         let url = try NativeRuntimeFiles.checked(resources, manifestRelative)
         guard let data = try NativeRuntimeFiles.read(url, maximum: 2 * 1024 * 1024) else {
             throw NativeRuntimeError(message: "This app is missing its native 2.5 runtime manifest. Reinstall NightCity Console; the legacy backend will not be used on 2.5.")
@@ -61,8 +62,8 @@ struct NativeRuntimeManifest: Codable {
         try NativeRuntimeFiles.require(required.isSubset(of: paths), "The native runtime payload is incomplete.")
         try NativeRuntimeFiles.require(injectedDylibs == ["red4ext/RED4ext.dylib", Self.frontendPath], "The native 2.5 injection list must contain only its loader and frontend.")
         try NativeRuntimeFiles.require(!scriptRoots.isEmpty && scriptRoots.count <= 8 && Set(scriptRoots).count == scriptRoots.count && scriptRoots.allSatisfy { root in root == "red4ext/plugins/NightCityRuntime/scripts" && paths.contains(where: { $0.hasPrefix(root + "/") }) }, "Invalid native script roots.")
-        let keys: Set<String> = ["NCC_RUNTIME_PROFILE", "NIGHTCITY_RUNTIME_PROBE", "NCC_DISABLE_LEGACY_LUA", "NCC_NATIVE_PROBE_HOTKEY"]
-        try NativeRuntimeFiles.require(Set(environment.keys).isSubset(of: keys) && environment["NCC_DISABLE_LEGACY_LUA"] == "1" && environment["NCC_RUNTIME_PROFILE"] != nil && environment["NIGHTCITY_RUNTIME_PROBE"] != nil && environment.values.allSatisfy { !$0.isEmpty && $0.utf8.count <= 96 && $0.range(of: "^[A-Za-z0-9_.+-]+$", options: .regularExpression) != nil }, "Invalid native environment contract.")
+        let releaseEnvironment = ["NCC_RUNTIME_PROFILE": "native20-release", "NIGHTCITY_RUNTIME_PROBE": "release20", "NCC_DISABLE_LEGACY_LUA": "1"]
+        try NativeRuntimeFiles.require(environment == releaseEnvironment, "Invalid native release environment contract. Development profiles and probe hotkeys are not player payloads.")
         for (path, hashes) in previousFiles.merging(retiredFiles, uniquingKeysWith: +) {
             try NativeRuntimeFiles.require(Self.managedPath(path) && !hashes.isEmpty && hashes.count <= 32 && hashes.allSatisfy(NativeRuntimeFiles.digest), "Invalid prior payload identity: \(path)")
         }
@@ -86,6 +87,7 @@ struct NativeRuntimeManifest: Codable {
     }
 
     func verifyGame(root: URL) throws {
+        try NativeRuntimeFiles.validateRoot(root)
         let url = try NativeRuntimeFiles.checked(root, executable.relativePath)
         guard let bytes = try NativeRuntimeFiles.read(url, maximum: 1024 * 1024 * 1024) else { throw NativeRuntimeError(message: "Game executable is missing.") }
         let actual = try Self.imageIdentity(bytes)
@@ -141,6 +143,10 @@ enum NativeRuntimeFiles {
     }
     static func hash(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
     static func digest(_ value: String) -> Bool { value.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil }
+    static func validateRoot(_ url: URL) throws {
+        try require(url.isFileURL && url.path.hasPrefix("/") && !url.path.contains(":") && !url.path.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains),
+            "The game or app folder contains an unsupported colon or control character. Move it to a folder whose path can be represented safely in native launch and script arguments.")
+    }
     static func relative(_ path: String) -> Bool {
         !path.isEmpty && path.utf8.count <= 512 && !path.hasPrefix("/") && !path.contains("\\") && !path.contains(":") && !path.contains("\0") && !path.contains("\n") && path.split(separator: "/", omittingEmptySubsequences: false).allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." }
     }

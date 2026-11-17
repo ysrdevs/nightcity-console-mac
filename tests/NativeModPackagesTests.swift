@@ -86,6 +86,11 @@ import Darwin
             let bytes = try NativeRuntimeFiles.read(root.appendingPathComponent(NativeModPackages.release + "/release-launch.nccset"))!
             try check(bytes[8] == 7)
         }
+        try refuses("dependent mods") { try NativeModPackages.remove("nativeSettings", gameRoot: root, gameClosed: { true }, validateScripts: {}) }
+        try NativeModPackages.restorePrevious(gameRoot: root, gameClosed: { true }, validateScripts: {})
+        try check(NativeModPackages.readSelection(root)?.packages.count == 1)
+        try NativeModPackages.remove("nativeSettings", gameRoot: root, gameClosed: { true }, validateScripts: {})
+        try check(NativeModPackages.readSelection(root)?.packages.isEmpty == true)
         try NativeModPackages.restorePrevious(gameRoot: root, gameClosed: { true }, validateScripts: {})
         try check(NativeModPackages.readSelection(root)?.packages.count == 1)
         try check(read(root, vcc.artifacts[0].destination) == nil)

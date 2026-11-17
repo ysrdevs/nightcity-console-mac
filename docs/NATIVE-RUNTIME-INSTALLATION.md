@@ -84,3 +84,31 @@ The full launcher Swift sources also pass type checking. Release-native runtime
 and frontend identity/path configuration, current package preparation wiring,
 actual clean/upgrade gameplay acceptance, signing and notarization remain separate
 gates. A passing fixture cannot establish those outcomes.
+
+## Original-mod preparation and profiles
+
+The native launcher routes recognized original packages through the app-bundled `native20/helpers/NightCityModPrepare`. `native20/mod-import.json` pins its executable hash and the bundled nctool dependency inventory. The helper's schema-2 responses must include a complete artifact manifest and `materializationReady=true`; preparation alone does not authorize native execution. The runtime independently checks every selected executable source against its supported profile.
+
+Native Settings and Vehicle Call Cost prepare their approved source packets. ITP retains its three original Lua files and original REDscripts. Mansion and Native Interactions are selected together; the helper materializes their supported combined resources. Source configuration is never copied over existing player settings. Unsupported versions and unknown Lua packages continue through the existing importer review or are refused; the launcher does not grant arbitrary Lua or native plugins execution rights.
+
+Apply revalidates the original package and retained prepared workspace, holds the same closed-game selection lock as launch, checks destination ownership, journals changes and validates staged scripts before publishing selection metadata. Interrupted transactions recover only files that still match their recorded old or new bytes. External edits are preserved and require attention before launch. The normal Play path verifies selected artifacts and compiles while holding the selection lock through process creation.
+
+Player selection evidence is under `red4ext/nightcity-native20/package-state`: `active.json`, `pending.json`, `profiles.json`, immutable `revisions/<digest>.json`, retained import workspaces and backups. Runtime capture reads only the fixed `release/release-launch.nccset` envelope and fixed package source paths, using `release/release-launch.lock`. The 73-byte envelope contains a fixed magic, a dependency-checked package mask and the selected revision digest. It contains no executable paths or permissions.
+
+The Profiles sheet saves a name for an immutable native-package selection, switches that selection while the game is closed, and restores the previous selection. Names are normalized, bounded and collision checked. Mod settings remain shared between profiles, and saves, Creator definitions and unrelated mods are preserved. Removing a provider is refused while selected mods depend on it. Removing Mansion also removes its paired Native Interactions selection; restoring the previous selection remains available.
+
+Validation commands:
+
+```sh
+bash tools/test-native-runtime.sh
+bash tools/test-native-mod-packages.sh
+bash tools/test-native-mod-profiles.sh
+```
+
+An opt-in integration test takes a staged app Resources directory and original package paths:
+
+```sh
+bash tools/test-native-mod-import-integration.sh /path/to/Resources /path/to/original-package ...
+```
+
+That integration invokes the actual self-contained helper and production Swift preview/apply/restore against a new temporary fixture. It never installs into a game, runs the game compiler or claims runtime admission. Runtime compilation and player acceptance remain separate release checks.

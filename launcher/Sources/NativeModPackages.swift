@@ -9,6 +9,10 @@ enum NativeModPackages {
     static let base = NativeModTransaction.base
     static let activePath = base + "/active.json"
     static let ids: Set<String> = ["nativeSettings", "VehicleCallCost", "immersive_third_person", "nativeInteractions", "mansionDLC"]
+    struct Summary: Identifiable { let id: String; let label: String }
+    static func displayName(_ id: String) -> String {
+        ["nativeSettings": "Native Settings", "VehicleCallCost": "Vehicle Call Cost", "immersive_third_person": "Immersive Third Person", "nativeInteractions": "Native Interactions", "mansionDLC": "V’s Edgerunners Mansion"][id] ?? id
+    }
     static let dependencies = ["VehicleCallCost": ["nativeSettings"], "immersive_third_person": ["nativeSettings"], "mansionDLC": ["nativeInteractions"]]
     struct Configuration: Decodable { let schema: Int; let helperRelative: String; let helperSHA256: String }
     struct Dependency: Codable { let packageId: String; let requiredVersion: String; let requiredProfile: String; let status: String }
@@ -40,7 +44,7 @@ enum NativeModPackages {
         var text: String {
             packages.map { package in
                 let p = package.preview
-                return "\(p.packageId) \(p.version)\n\(package.artifacts.count) prepared files\n" +
+                return "\(displayName(p.packageId)) \(p.version)\n\(package.artifacts.count) prepared files\n" +
                     (p.dependencies.isEmpty ? "No additional Lua dependency." : "Requires: " + p.dependencies.map(\.packageId).joined(separator: ", ")) +
                     "\n" + p.mutablePolicy
             }.joined(separator: "\n\n") + "\n\nExisting settings, saves, Creator definitions and unrelated mods are preserved. Changes take effect on the next launch."
@@ -199,6 +203,20 @@ enum NativeModPackages {
                 gameClosed: gameClosed, validateScripts: validateScripts)
         }
     }
+    static func remove(_ packageId: String, gameRoot: URL, gameClosed: @escaping () -> Bool, validateScripts: () throws -> Void) throws {
+        let store = try lockStore(gameRoot, gameClosed: gameClosed)
+        try store.withLaunchLock {
+            try NativeModTransaction.recover(root: gameRoot)
+            guard let current = try readSelection(gameRoot), current.packages.contains(where: { $0.preview.packageId == packageId }) else { throw NativeRuntimeError(message: "That native mod is no longer selected.") }
+            let requiredBy = current.packages.filter { (dependencies[$0.preview.packageId] ?? []).contains(packageId) }.map { displayName($0.preview.packageId) }
+            try NativeRuntimeFiles.require(requiredBy.isEmpty, "Remove these dependent mods first: \(requiredBy.joined(separator: ", ")).")
+            var removed: Set<String> = [packageId]
+            if packageId == "mansionDLC", current.packages.contains(where: { $0.preview.packageId == "nativeInteractions" && $0.artifacts.isEmpty }) { removed.insert("nativeInteractions") }
+            let workspace = try NativeRuntimeFiles.checked(gameRoot, base + "/remove-" + UUID().uuidString.lowercased())
+            try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try activate(current.packages.filter { !removed.contains($0.preview.packageId) }, current: current, root: gameRoot, workspace: workspace, gameClosed: gameClosed, validateScripts: validateScripts)
+        }
+    }
     static func restorePrevious(gameRoot: URL, gameClosed: @escaping () -> Bool, validateScripts: () throws -> Void) throws {
         let store = try lockStore(gameRoot, gameClosed: gameClosed)
         try store.withLaunchLock {
@@ -228,7 +246,8 @@ enum NativeModPackages {
         } }
         for path in owned.keys where !selectedPaths.contains(path) { desired.append(.init(path: path, source: nil, identity: nil, mode: 0o600)) }
         var records: [(String, Data)] = [(base + "/revisions/" + next.revision + ".json", try encode(packages.sorted { $0.preview.packageId < $1.preview.packageId })), (activePath, try encode(next))]
-        if current == nil { records.insert((base + "/revisions/" + (try revision([])) + ".json", try encode([Package]())), at: 0) }
+        let emptyRevision = try revision([])
+        if current == nil && next.revision != emptyRevision { records.insert((base + "/revisions/" + emptyRevision + ".json", try encode([Package]())), at: 0) }
         for (index, entry) in records.enumerated() {
             let source = workspace.appendingPathComponent("selection-\(index).json")
             try NativeRuntimeFiles.write(entry.1, to: source)

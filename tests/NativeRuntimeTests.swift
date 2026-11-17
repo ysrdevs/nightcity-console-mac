@@ -163,6 +163,12 @@ import Darwin
         manifestJSON["injectedDylibs"] = ["red4ext/RED4ext.dylib", "red4ext/FridaGadget.dylib"]
         try NativeRuntimeFiles.write(JSONSerialization.data(withJSONObject: manifestJSON), to: migration.resources.appendingPathComponent(NativeRuntimeManifest.manifestRelative))
         try refuses("injection list") { _ = try NativeRuntimeManifest.load(resources: migration.resources) }
+        manifestJSON["injectedDylibs"] = ["red4ext/RED4ext.dylib", NativeRuntimeManifest.frontendPath]
+        manifestJSON["environment"] = ["NCC_RUNTIME_PROFILE": "native20-development", "NIGHTCITY_RUNTIME_PROBE": "probe76", "NCC_DISABLE_LEGACY_LUA": "1"]
+        try NativeRuntimeFiles.write(JSONSerialization.data(withJSONObject: manifestJSON), to: migration.resources.appendingPathComponent(NativeRuntimeManifest.manifestRelative))
+        try refuses("release environment") { _ = try NativeRuntimeManifest.load(resources: migration.resources) }
+        try refuses("colon or control") { try ready.manifest.verifyGame(root: ready.game.appendingPathComponent("colon:path")) }
+        try refuses("colon or control") { _ = try NativeRuntimeManifest.load(resources: ready.resources.appendingPathComponent("newline\npath")) }
         print("\(checks) native runtime installation/identity/environment checks passed; temporary fixtures only, no app/game launched")
     }
     static func throwUnexpected() { fatalError("A test fixture must never launch") }

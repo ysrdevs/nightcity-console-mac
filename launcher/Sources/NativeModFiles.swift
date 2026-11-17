@@ -126,7 +126,7 @@ enum NativeModTransaction {
             let current = try NativeModFiles.identity(NativeRuntimeFiles.checked(root, change.path))?.sha256
             try NativeRuntimeFiles.require(current == change.before || current == change.after, "Recovery preserved a changed mod file: \(change.path)")
             if let backup = change.backup {
-                try NativeRuntimeFiles.require(change.beforeSize != nil && change.beforeSize! >= 0 && change.beforeSize! <= NativeModFiles.limit && [0o600, 0o644, 0o755].contains(change.beforeMode ?? change.mode), "Invalid native mod backup metadata.")
+                try NativeRuntimeFiles.require(change.beforeSize != nil && change.beforeSize! >= 0 && change.beforeSize! <= NativeModFiles.limit && (0...0o777).contains(change.beforeMode ?? change.mode), "Invalid native mod backup metadata.")
                 try NativeRuntimeFiles.require(try NativeModFiles.identity(NativeRuntimeFiles.checked(root, backup)) == .init(sha256: change.before!, size: change.beforeSize!), "Native mod recovery backup changed.")
             }
         }
