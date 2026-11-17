@@ -1,7 +1,8 @@
 # NightCity Console for Mac 2.0.0
 
-Candidate notes. Final installer gameplay acceptance and Apple notarization
-are pending; this file does not claim a released or notarized 2.0 artifact yet.
+Candidate notes. The app and DMG are Developer ID signed, notarized by Apple
+and stapled. Final installer gameplay acceptance is pending; 2.0 has not been
+published yet.
 
 ## A native runtime for Cyberpunk 2077 2.5
 

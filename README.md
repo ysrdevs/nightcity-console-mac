@@ -108,9 +108,9 @@ No Terminal, no file editing. The app finds your game, installs the runtime file
 
 Updating from an older version: quit the game and the older launcher, replace the app, then click Install once (it reads "Reinstall NightCity Console") and Play. This installs the updated runtime and the flight scripts on supported 2.5 games, while retaining the 1.7.1 loading fix. No need to uninstall first.
 
-The published 1.9.0 app and DMG are Developer ID signed, notarized by Apple and stapled.
-The 2.0 candidate will receive its own signing, notarization and extraction checks
-after final acceptance. Release packaging retains the app-only ZIP layout without nested ZIP files.
+The published 1.9.0 and candidate 2.0.0 app and DMG are Developer ID signed,
+notarized by Apple and stapled. The 2.0 candidate still awaits final installer
+gameplay acceptance. Release packaging retains the app-only ZIP layout without nested ZIP files.
 
 ### Virtual Atelier, Cyberware-EX and Equipment-EX on 2.5
 
