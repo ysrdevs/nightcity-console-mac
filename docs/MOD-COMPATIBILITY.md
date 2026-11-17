@@ -1,10 +1,32 @@
-# Mod compatibility for NightCity Console 1.9
+# Mod compatibility for NightCity Console 2.0
 
 These checks target Cyberpunk 2077 **2.5.0**, native Apple Silicon Steam.
 They describe tested flows and exact versions, not every feature or combination.
 The final signed 1.9.0 build passed player compatibility and save/relaunch checks
 with the combination below. Limited HUD's F7 binding and minimap opacity also
 persisted after relaunch. Testing was performed on macOS 27.
+
+The isolated 2.0 native runtime has also passed the existing mod checks during
+its migration. Final complete-installer acceptance is tracked separately.
+
+## New Lua mod support
+
+| Mod | Reviewed version | Player-confirmed checks | Remaining final-candidate checks |
+| --- | --- | --- | --- |
+| Native Settings | 1.97 | Menu construction, controls, reopening, ordinary keybindings roundtrip, saved Vehicle Call Cost settings | Complete installer import and selected-profile launch |
+| Vehicle Call Cost | Retained original package | Enabled/disabled charging, exact configured price, vehicle arrival and save/relaunch | Complete installer import |
+| V's Edgerunners Mansion | Apartment DLC 2.0 with Native Interactions Framework 1.1.5 | Purchase/ownership, elevator both ways, bed prompts, sleeping/getting up, coffee/tea and save/relaunch | Complete installer import and final combined check |
+| Immersive Third Person: Best Of Both Worlds V2 | 2.0.1 | Smooth horizontal/vertical camera, walking/sprinting/crouching, F1 toggle, automatic first person when drawing a weapon and third person after holstering, manual first person, Distance/Height and persistent settings-page availability | Player-selected binding and final relaunch persistence in the complete installer |
+
+These packages are downloaded separately. Original ITP Lua and REDscripts are
+not rewritten. The native bridge supplies the engine operations used by that
+version. Native Settings and Mansion/NIF preparation use version-specific
+framework and asset adaptations; downloaded originals remain untouched.
+New upstream releases must be reviewed before this importer accepts them.
+A working third-person exploration camera is not a claim of third-person
+combat aiming: use ITP's first-person weapon transition.
+
+## Existing mod baseline
 
 | Mod | Version | Player-confirmed checks | Installation |
 | --- | --- | --- | --- |
@@ -31,8 +53,8 @@ Only its main package is in scope; optional HUD replacements need separate tests
 The bundled foundation on 2.5 includes native RED4ext, ArchiveXL, TweakXL,
 scoped Codeware support, Input Loader, Mod Settings and the redscript compiler.
 Input Loader and Mod Settings passed custom input, settings controls, rebinding,
-VA Instant Buy and relaunch checks. They do not make Windows native plugins or
-CET/Lua mods compatible with macOS.
+VA Instant Buy and relaunch checks. Windows native plugins remain unsupported. Lua support is limited to the
+reviewed packages above and their exercised APIs.
 
 Codeware support remains scoped. Full world, entity, quest, weather and service
 persistence features are not covered by the listed tests. Rippers acceptance

@@ -1,7 +1,7 @@
 # Installing mods with NightCity Console
 
 This guide covers the native Apple Silicon Steam build of Cyberpunk 2077.
-The 1.9 mod-support features below target game **2.5.0**.
+The 2.0 native mod-support features below target game **2.5.0**.
 Keep a separate manual save before adding gameplay mods.
 
 ## Start here
@@ -61,6 +61,39 @@ supported archive and script files for macOS 2.5. An empty store page can mean
 that no store pack is installed; check the launcher's status for compilation
 errors as well.
 
+## Native Settings, Mansion and Immersive Third Person
+
+Download the supported original packages separately. Do not install Windows CET
+or copy their DLLs over the bundled macOS frameworks.
+
+1. Use **Add Mod** for Native Settings 1.97 and the supported gameplay mod.
+   You can select dependencies and their consumer together.
+2. For Mansion 2.0, select both its main download and Native Interactions
+   Framework 1.1.5. Preparation verifies and converts the tested assets.
+3. For ITP 2.0.1, extract its large download first, then select the complete
+   folder containing `archive`, `bin` and `r6`. Keep all original Lua and
+   REDscripts. Native Settings is required; Mansion is not.
+4. Review the detected version, requirements and prepared files, then apply.
+   Compilation and managed-file verification must succeed before Play.
+
+Use the separate **MODS** entry for Native Settings pages. **MOD SETTINGS** is
+the other framework, and **MOD.IO** is the game's own mod service.
+
+ITP settings control camera distance and height. F1 → Exploration → Camera
+also offers **Toggle third person**, or type `thirdperson` in Console. Drawing
+a weapon switches to first person for aiming; holstering returns to third
+person when ITP owns that mode. Manual first person stays first person.
+
+F1 → **Lua mods** reports loaded Lua module states and errors. If ITP stops
+after an error and reports unverified camera recovery, quit and relaunch the
+game before using ITP again. A save reload alone does not restart a disabled
+Lua module. Export Diagnostics for the failure report.
+
+Managed packages live under `red4ext/nightcity-native20/`. Their imported
+sources and immutable revisions are separate from mutable `module-data`
+settings. Do not edit the managed packet files by hand. Restoring a previous
+selection preserves settings, Creator definitions and saves.
+
 ## Adding other mods
 
 **NightCity Console 1.9** adds a review step before installation. See
@@ -80,7 +113,7 @@ implied by a Windows mod working on the same game version. In particular:
 
 - Windows native plugins (`.dll`) cannot run on macOS. Use the bundled macOS
   frameworks; do not replace them with Windows downloads.
-- Windows CET/Lua mods are not supported by NightCity Console.
+- Only the reviewed Lua packages in the compatibility list are supported. Arbitrary CET mods and newer or modified Lua packages are not automatically compatible.
 - Codeware support covers the tested UI, wardrobe and scoped resource features. Mods that require
   other Codeware features need separate validation.
 - The known compatibility adaptations target the versions listed above.

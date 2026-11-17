@@ -559,6 +559,41 @@ final class DiagnosticsCollector {
                 if let revision = captured["revision"] as? String, validHash(revision) { copied["revision"] = revision }
                 safe["prepared_packages"] = copied
             }
+            if let performance = source["performance"] as? [String: Any],
+               performance["measurement"] as? String == "sampled_owner_callback_wall_time" {
+                func counts(_ values: Any?) -> [String]? {
+                    guard let values = values as? [Any], values.count <= 64 else { return nil }
+                    let copied = values.compactMap(counter)
+                    return copied.count == values.count ? copied : nil
+                }
+                func distribution(_ value: Any?) -> [String: Any]? {
+                    guard let value = value as? [String: Any] else { return nil }
+                    var result: [String: Any] = [:]
+                    for key in ["count", "sum_ns", "min_ns", "max_ns"] { if let n = counter(value[key]) { result[key] = n } }
+                    if let buckets = counts(value["bucket_counts"]) { result["bucket_counts"] = buckets }
+                    if let flag = value["saturated"] as? Bool { result["saturated"] = flag }
+                    return result
+                }
+                var copied: [String: Any] = ["measurement": "sampled_owner_callback_wall_time", "unit": "nanoseconds", "not_fps": true]
+                for key in ["sample_every_n_ticks", "generation", "ticks_started", "ticks_completed", "sampled_started", "unsampled_completed"] {
+                    if let n = counter(performance[key]) { copied[key] = n }
+                }
+                if let flag = performance["enabled"] as? Bool { copied["enabled"] = flag }
+                if let bounds = counts(performance["bucket_upper_ns"]) { copied["bucket_upper_ns"] = bounds }
+                copied["total"] = distribution(performance["total"])
+                var phases: [String: Any] = [:]
+                let sourcePhases = performance["phases"] as? [String: Any] ?? [:]
+                for name in ["services", "flight", "lua"] { if let value = distribution(sourcePhases[name]) { phases[name] = value } }
+                copied["phases"] = phases
+                let faults = performance["faults"] as? [String: Any] ?? [:]
+                var copiedFaults: [String: Any] = [:]
+                for key in ["nested_ticks", "rejected_phases", "rejected_ends", "abandoned_phases", "clock_failures", "clock_regressions"] {
+                    if let n = counter(faults[key]) { copiedFaults[key] = n }
+                }
+                for key in ["wrong_owner_observed", "counters_saturated"] { if let b = faults[key] as? Bool { copiedFaults[key] = b } }
+                copied["faults"] = copiedFaults
+                safe["performance"] = copied
+            }
             json("native/runtime-status.json", safe)
         } else { json("native/runtime-status.json", ["status": "missing_or_invalid"]) }
         // Installer identity is separate from loaded-process status. Never
@@ -580,6 +615,27 @@ final class DiagnosticsCollector {
             identities.append(identity)
         }
         json("native/installation.json", identities)
+        var selection: [String: Any] = ["status": "missing", "source_paths_and_settings_omitted": true]
+        let selectionBase = "red4ext/nightcity-native20/package-state/"
+        selection["interrupted_transaction_present"] = root.information(selectionBase + "pending.json") != nil
+        if let data = root.read(selectionBase + "active.json", maximum: limits.textBytes, tail: false),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], object["schema"] as? Int == 1 {
+            selection["status"] = "available"
+            for key in ["revision", "previous"] {
+                if let value = object[key] as? String, validHash(value) { selection[key] = value }
+            }
+            selection["packages"] = (object["packages"] as? [[String: Any]] ?? []).prefix(16).compactMap { package -> [String: Any]? in
+                guard let preview = package["preview"] as? [String: Any], let id = boundedID(preview["packageId"]) else { return nil }
+                var copied: [String: Any] = ["id": id]
+                for key in ["version", "profileId"] { if let value = boundedID(preview[key]) { copied[key] = value } }
+                for key in ["previewSHA256", "artifactManifestSHA256"] {
+                    if let value = package[key] as? String, validHash(value) { copied[key] = value }
+                }
+                copied["artifact_count"] = (package["artifacts"] as? [Any] ?? []).count
+                return copied
+            }
+        }
+        json("native/mod-selection.json", selection)
         collectLogs(root, directory: "red4ext/plugins/NightCityRuntime", prefix: "NightCityRuntime", label: "native-runtime")
     }
     private func safeRelative(_ value: String) -> Bool {
