@@ -113,6 +113,16 @@ import Darwin
         let env = ["PATH": "/usr/bin:/bin"]
         let result = try NativeRuntimeCommand.run(URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "printf success"], directory: root, environment: env)
         try check(String(decoding: result, as: UTF8.self) == "success")
+        let parentDirectory = FileManager.default.currentDirectoryPath
+        let workingDirectory = root.appendingPathComponent("tool working directory")
+        try FileManager.default.createDirectory(at: workingDirectory, withIntermediateDirectories: true)
+        _ = try write(workingDirectory, "sentinel", "correct child directory")
+        let relativeRead = try NativeRuntimeCommand.run(URL(fileURLWithPath: "/bin/cat"), arguments: ["sentinel"], directory: workingDirectory, environment: env)
+        try check(String(decoding: relativeRead, as: UTF8.self) == "correct child directory")
+        try check(FileManager.default.currentDirectoryPath == parentDirectory)
+        try refuses("Cannot launch") {
+            _ = try NativeRuntimeCommand.run(URL(fileURLWithPath: "/bin/pwd"), arguments: [], directory: root.appendingPathComponent("missing directory"), environment: env)
+        }
         try refuses("output limit") { _ = try NativeRuntimeCommand.run(URL(fileURLWithPath: "/usr/bin/yes"), arguments: [], environment: env, maximumOutput: 4096, timeout: 2) }
         let start = Date()
         try refuses("time limit") { _ = try NativeRuntimeCommand.run(URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", "sleep 30 & exit 0"], environment: env, timeout: 0.2) }

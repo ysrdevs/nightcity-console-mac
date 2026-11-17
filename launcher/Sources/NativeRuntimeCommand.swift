@@ -25,7 +25,9 @@ enum NativeRuntimeCommand {
             posix_spawn_file_actions_adddup2(&actions, descriptors[1], STDOUT_FILENO) == 0 && posix_spawn_file_actions_adddup2(&actions, descriptors[1], STDERR_FILENO) == 0 &&
             posix_spawn_file_actions_addclose(&actions, descriptors[0]) == 0 && posix_spawn_file_actions_addclose(&actions, descriptors[1]) == 0 &&
             posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0) == 0, "Cannot isolate preparation tool.")
-        if let directory { try NativeRuntimeFiles.require(posix_spawn_file_actions_addchdir(&actions, directory.path) == 0, "Cannot select preparation directory.") }
+        // The non-_np spelling requires macOS 26. This equivalent child-only
+        // action is available since 10.15 and preserves the 15.5 app target.
+        if let directory { try NativeRuntimeFiles.require(posix_spawn_file_actions_addchdir_np(&actions, directory.path) == 0, "Cannot select preparation directory.") }
         let argv = ([executable.path] + arguments).map { strdup($0) } + [nil]
         let envp = environment.sorted { $0.key < $1.key }.map { strdup($0.key + "=" + $0.value) } + [nil]
         defer { argv.forEach { free($0) }; envp.forEach { free($0) } }
