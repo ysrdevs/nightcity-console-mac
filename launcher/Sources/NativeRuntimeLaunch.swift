@@ -36,6 +36,45 @@ enum NativeRuntimeLaunch {
         let cache = try NativeRuntimeFiles.checked(gameRoot, NativeRuntimeManifest.cachePath)
         return Plan(executable: try NativeRuntimeFiles.checked(gameRoot, manifest.executable.relativePath), arguments: ["-scriptsBlobPath=\(cache.path)"], environment: environment, cache: cache)
     }
+    static func ensureEntitlements(gameRoot: URL, inherited: [String: String]) throws {
+        let environment = try cleanEnvironment(inherited)
+        let executable = try NativeRuntimeFiles.checked(gameRoot, "Cyberpunk2077.app/Contents/MacOS/Cyberpunk2077")
+        let tool = URL(fileURLWithPath: "/usr/bin/codesign")
+        let existing = try NativeRuntimeCommand.run(tool, arguments: ["-d", "--entitlements", ":-", executable.path], environment: environment, timeout: 30)
+        let text = String(decoding: existing, as: UTF8.self)
+        if text.contains("allow-jit") && text.contains("allow-dyld-environment-variables") && text.contains("disable-library-validation") { return }
+        let keys = ["com.apple.security.cs.allow-dyld-environment-variables", "com.apple.security.cs.allow-jit", "com.apple.security.cs.allow-unsigned-executable-memory", "com.apple.security.cs.disable-executable-page-protection", "com.apple.security.cs.disable-library-validation"]
+        let data = try PropertyListSerialization.data(fromPropertyList: Dictionary(uniqueKeysWithValues: keys.map { ($0, true) }), format: .xml, options: 0)
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("nightcity-native-entitlements-" + UUID().uuidString + ".plist")
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        try NativeRuntimeFiles.write(data, to: temporary)
+        _ = try NativeRuntimeCommand.run(tool, arguments: ["-f", "-s", "-", "--entitlements", temporary.path, executable.path], environment: environment, timeout: 60)
+    }
+
+    static func stagePluginScripts(gameRoot: URL, inherited: [String: String]) throws -> [String] {
+        let fm = FileManager.default, environment = try cleanEnvironment(inherited)
+        let plugins = try NativeRuntimeFiles.checked(gameRoot, "red4ext/plugins")
+        let checker = try NativeRuntimeFiles.checked(gameRoot, "red4ext/bin/red4ext_plugin_check")
+        let database = try NativeRuntimeFiles.checked(gameRoot, "red4ext/bin/x64/cyberpunk2077_addresses.json")
+        var sources: [String: URL] = [:], accepted: [String: URL] = [:], refused: [String] = []
+        for name in (try fm.contentsOfDirectory(atPath: plugins.path)).sorted() where !name.hasPrefix(".") {
+            let directory = try NativeRuntimeFiles.checked(gameRoot, "red4ext/plugins/" + name)
+            let scripts = directory.appendingPathComponent("Scripts")
+            // Runtime scripts are supplied separately with compilePathsFile.
+            if name != "NightCityRuntime" && fm.fileExists(atPath: scripts.path) { sources[name] = scripts }
+            let dylibs = try fm.contentsOfDirectory(atPath: directory.path).filter { $0.hasSuffix(".dylib") && !$0.hasPrefix(".") }.sorted()
+            guard !dylibs.isEmpty else { continue }
+            do {
+                _ = try NativeRuntimeCommand.run(checker, arguments: [database.path] + dylibs.map { directory.appendingPathComponent($0).path },
+                    directory: gameRoot, environment: environment, maximumOutput: 1024 * 1024, timeout: 30)
+                if let source = sources[name] { accepted[name] = source }
+            } catch { refused.append(name) }
+        }
+        try PluginScriptStager.reconcile(accepted: accepted, knownSources: sources,
+            scriptsRoot: NativeRuntimeFiles.checked(gameRoot, "r6/scripts"), manifestURL: NativeRuntimeFiles.checked(gameRoot, "red4ext/nightcity-plugin-scripts.json"))
+        return refused
+    }
+
     static func compile(gameRoot: URL, resources: URL, inherited: [String: String]) throws {
         let (manifest, _) = try NativeRuntimeManifest.load(resources: resources)
         let environment = try cleanEnvironment(inherited)
@@ -55,15 +94,9 @@ enum NativeRuntimeLaunch {
         try NativeRuntimeFiles.require(output.contains("Output successfully saved") && NativeRuntimeFiles.read(cache) != nil, "The script compiler did not confirm a fresh native cache; launch was refused.")
     }
     static func run(executable: URL, arguments: [String], directory: URL, environment: [String: String]) throws -> String {
-        let process = Process(); process.executableURL = executable; process.arguments = arguments
-        process.currentDirectoryURL = directory; process.environment = environment
-        let output = Pipe(); process.standardOutput = output; process.standardError = output
-        try process.run()
-        let bytes = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        let text = String(data: bytes, encoding: .utf8) ?? ""
-        try NativeRuntimeFiles.require(process.terminationStatus == 0, "\(executable.lastPathComponent) failed: \(String(text.suffix(3000)))")
-        return text
+        let bytes = try NativeRuntimeCommand.run(executable, arguments: arguments, directory: directory,
+            environment: environment, maximumOutput: 1024 * 1024, timeout: 120)
+        return String(decoding: bytes, as: UTF8.self)
     }
     static func launch(gameRoot: URL, resources: URL, plan: Plan, gameClosed: @escaping () -> Bool, started: @escaping (Process) -> Void,
                        exited: @escaping (Int32, Process.TerminationReason) -> Void) throws {
@@ -72,6 +105,12 @@ enum NativeRuntimeLaunch {
             try NativeRuntimeFiles.require(gameClosed(), "Cyberpunk is already running.")
             try manifest.verifyGame(root: gameRoot)
             try NativeRuntimeFiles.require(try NativeRuntimeInstallation.current(gameRoot: gameRoot, resources: resources), "Native runtime files changed before launch.")
+            let refused = try stagePluginScripts(gameRoot: gameRoot, inherited: ProcessInfo.processInfo.environment)
+            try NativeRuntimeFiles.require(refused.isEmpty, "Native plugin verification refused: \(refused.joined(separator: ", ")).")
+            // Selection lock remains held through compile and process ownership
+            // publication, so Apply cannot swap sources beneath this cache.
+            try compile(gameRoot: gameRoot, resources: resources, inherited: ProcessInfo.processInfo.environment)
+            try NativeRuntimeFiles.require(gameClosed(), "Cyberpunk started while preparing its script cache.")
             let process = Process(); process.executableURL = plan.executable; process.arguments = plan.arguments
             process.currentDirectoryURL = gameRoot; process.environment = plan.environment
             let logs = try NativeRuntimeFiles.checked(gameRoot, NativeRuntimeManifest.dataPath + "/logs")

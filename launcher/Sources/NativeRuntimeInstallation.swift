@@ -10,6 +10,12 @@ enum NativeRuntimeInstallation {
     struct Change: Codable { let path: String; let before: String?; let after: String?; let mode: Int; let backup: String? }
     struct Journal: Codable { let schema: Int; let id: String; let changes: [Change] }
 
+    // UI status only. Play always performs full image and payload validation.
+    static func matchingReceipt(gameRoot: URL, resources: URL) throws -> Bool {
+        let (_, digest) = try NativeRuntimeManifest.load(resources: resources)
+        return try NativeRuntimeFiles.read(NativeRuntimeFiles.checked(gameRoot, pendingPath), maximum: 2 * 1024 * 1024) == nil && receipt(gameRoot)?.manifestSHA256 == digest
+    }
+
     static func current(gameRoot: URL, resources: URL) throws -> Bool {
         let (manifest, digest) = try NativeRuntimeManifest.load(resources: resources)
         if try NativeRuntimeFiles.read(NativeRuntimeFiles.checked(gameRoot, pendingPath), maximum: 2 * 1024 * 1024) != nil { return false }

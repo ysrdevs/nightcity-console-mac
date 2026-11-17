@@ -60,6 +60,7 @@ final class Model: ObservableObject {
     }
 
     init() {
+        NativeModPackages.configureLaunch()
         gamePath = defaults.string(forKey: "gamePath") ?? Const.defaultGame
         recordPerformance = defaults.bool(forKey: "recordPerformance")
         do { optionalMods = try OptionalModCatalog.load(resources: Bundle.main.resourceURL).mods }
@@ -269,7 +270,7 @@ final class Model: ObservableObject {
 
     func refresh() {
         gameVersion = readGameVersion()
-        installed = fullyInstalled()
+        installed = nativeRuntime25 ? ((try? Bundle.main.resourceURL.map { try NativeRuntimeInstallation.matchingReceipt(gameRoot: URL(fileURLWithPath: gamePath), resources: $0) }) == true) : fullyInstalled()
         refreshMods()
         if !gameFound {
             status = "Cyberpunk 2077 not found here - click Browse to locate it."
@@ -497,6 +498,7 @@ final class Model: ObservableObject {
             scriptsRoot: URL(fileURLWithPath: "\(gamePath)/r6/scripts"), manifestURL: pluginScriptsManifest)
     }
     func stageNativePluginScripts() throws -> [String] {
+        if nativeRuntime25 { return try NativeRuntimeLaunch.stagePluginScripts(gameRoot: URL(fileURLWithPath: gamePath), inherited: ProcessInfo.processInfo.environment) }
         let fm = FileManager.default
         let check = "\(red4Dir)/bin/red4ext_plugin_check", db = "\(red4Dir)/bin/x64/cyberpunk2077_addresses.json"
         let sources = nativePluginScriptSources()
@@ -530,18 +532,14 @@ final class Model: ObservableObject {
         needsDiskAccess = false
         let fm = FileManager.default
         if nativeRuntime25 {
-            do {
-                try NativeRuntimeInstallation.install(gameRoot: URL(fileURLWithPath: gamePath), resources: res,
-                    gameClosed: { !NSWorkspace.shared.runningApplications.contains { $0.executableURL?.lastPathComponent == "Cyberpunk2077" } })
-                // Existing Creator metadata is user data, never part of the native inventory.
-                for item in Const.cmnPayload where !fm.fileExists(atPath: "\(gamePath)/\(item.dest)") {
-                    if let bytes = try NativeRuntimeFiles.read(res.appendingPathComponent(item.res)) {
-                        try NativeRuntimeFiles.write(bytes, to: NativeRuntimeFiles.checked(URL(fileURLWithPath: gamePath), item.dest))
-                    }
-                }
-                guard ensureGameEntitlements() else { return }
-                refresh(); status = "Native runtime installed. Click Play."
-            } catch { status = "Native install stopped: \(error.localizedDescription)" }
+            let root = URL(fileURLWithPath: gamePath)
+            busy = true; busyDetail = "Installing the native runtime…"; status = busyDetail
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    try self.prepareNativeInstallation(root: root, resources: res)
+                    DispatchQueue.main.async { self.busy = false; self.refresh(); self.status = "Native runtime installed. Click Play." }
+                } catch { DispatchQueue.main.async { self.busy = false; self.status = "Native install stopped: \(error.localizedDescription)" } }
+            }
             return
         }
         guard gameVersion == "2.3.1" else { status = "This game version is unsupported. Existing game files were kept."; return }
@@ -842,36 +840,44 @@ final class Model: ObservableObject {
 
     private var nativeProcess: Process?
 
+    private static func nativeGameClosed() -> Bool {
+        !NSWorkspace.shared.runningApplications.contains { $0.executableURL?.lastPathComponent == "Cyberpunk2077" }
+    }
+    private func prepareNativeInstallation(root: URL, resources: URL) throws {
+        try NativeRuntimeInstallation.install(gameRoot: root, resources: resources, gameClosed: Self.nativeGameClosed)
+        for item in Const.cmnPayload {
+            let target = try NativeRuntimeFiles.checked(root, item.dest)
+            if try NativeRuntimeFiles.read(target) == nil, let bytes = try NativeRuntimeFiles.read(resources.appendingPathComponent(item.res)) {
+                try NativeRuntimeFiles.write(bytes, to: target)
+            }
+        }
+        try NativeRuntimeLaunch.ensureEntitlements(gameRoot: root, inherited: ProcessInfo.processInfo.environment)
+    }
     private func playNativeRuntime() {
         guard let resources = Bundle.main.resourceURL else { status = "Bundle resources missing."; return }
-        do {
-            let (manifest, _) = try NativeRuntimeManifest.load(resources: resources)
-            try manifest.verifyGame(root: URL(fileURLWithPath: gamePath))
-            _ = try NativeRuntimeLaunch.cleanEnvironment(ProcessInfo.processInfo.environment)
-            if manifest.requiresPreparedPackages && NativeRuntimePackagePreparation.withLaunch == nil {
-                throw NativeRuntimeError(message: "The reviewed native package preparation is not bundled in this candidate yet. Play is blocked until that integration is complete.")
-            }
-        } catch { status = error.localizedDescription; return }
-        if !fullyInstalled() { install() }
-        guard fullyInstalled(), ensureGameEntitlements() else { return }
         ensureSteam()
         let root = URL(fileURLWithPath: gamePath), recording = recordPerformance
         busy = true; status = "Checking native runtime and compiling scripts…"; busyDetail = status
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let refused = try self.stageNativePluginScripts()
-                guard refused.isEmpty else { throw NativeRuntimeError(message: "Native plugin verification refused: \(refused.joined(separator: ", ")). Launch was stopped.") }
-                try NativeRuntimeLaunch.compile(gameRoot: root, resources: resources, inherited: ProcessInfo.processInfo.environment)
+                let (manifest, _) = try NativeRuntimeManifest.load(resources: resources)
+                try manifest.verifyGame(root: root)
+                _ = try NativeRuntimeLaunch.cleanEnvironment(ProcessInfo.processInfo.environment)
+                if manifest.requiresPreparedPackages && NativeRuntimePackagePreparation.withLaunch == nil {
+                    throw NativeRuntimeError(message: "The reviewed native package preparation is missing. Play is blocked until that integration is complete.")
+                }
+                if try !NativeRuntimeInstallation.current(gameRoot: root, resources: resources) { try self.prepareNativeInstallation(root: root, resources: resources) }
+                else { try NativeRuntimeLaunch.ensureEntitlements(gameRoot: root, inherited: ProcessInfo.processInfo.environment) }
                 let plan = try NativeRuntimeLaunch.plan(gameRoot: root, resources: resources,
                     inherited: ProcessInfo.processInfo.environment, recordPerformance: recording)
                 try NativeRuntimeLaunch.launch(gameRoot: root, resources: resources, plan: plan,
-                    gameClosed: { !NSWorkspace.shared.runningApplications.contains { $0.executableURL?.lastPathComponent == "Cyberpunk2077" } },
+                    gameClosed: Self.nativeGameClosed,
                     started: { process in DispatchQueue.main.sync { self.nativeProcess = process; self.gameIsRunning = true } },
                     exited: { code, reason in DispatchQueue.main.async {
                         self.nativeProcess = nil; self.refreshRunningGame()
                         self.status = reason == .exit ? "Game exited with status \(code). Exit record saved." : "Game terminated by signal \(code). Export Diagnostics for support."
                     } })
-                DispatchQueue.main.async { self.busy = false; self.status = "Launched with the native runtime. Press F1 or ` for the Console." }
+                DispatchQueue.main.async { self.busy = false; self.refresh(); self.status = "Launched with the native runtime. Press F1 or ` for the Console." }
             } catch { DispatchQueue.main.async { self.busy = false; self.status = "Native launch stopped: \(error.localizedDescription)" } }
         }
     }
@@ -949,6 +955,9 @@ final class Model: ObservableObject {
     @Published var busyDetail: String = ""     // live per-step progress shown in the drop zone
     @Published var progress: Double = 0         // 0..1 for the determinate bar (nil-ish when 0 at start)
     @Published var importPreview: ModImportPreviewSession?
+    @Published var nativeModPreview: NativeModPackages.Review?
+    @Published var nativeModLabels: [String] = []
+    @Published var nativeCanRestore = false
     private var importWorkspaceRoot: URL?
 
     // Parse a "[PROGRESS] <fraction> <label>" line emitted by nctool. Returns nil for any other line.
@@ -990,6 +999,9 @@ final class Model: ObservableObject {
     }
 
     func refreshMods() {
+        let nativeSelection = try? NativeModPackages.readSelection(URL(fileURLWithPath: gamePath))
+        nativeModLabels = nativeSelection?.packages.map { "\($0.preview.packageId) \($0.preview.version)" }.sorted() ?? []
+        nativeCanRestore = nativeSelection?.previous != nil
         let fm = FileManager.default
         var found: [InstalledMod] = []
         if let items = try? fm.contentsOfDirectory(atPath: modsManifestDir) {
@@ -1064,13 +1076,13 @@ final class Model: ObservableObject {
 
     func installMods(from urls: [URL]) {
         guard canChangeGameFiles() else { return }
-        guard importPreview == nil else { status = "Finish reviewing the selected mods first."; return }
+        guard importPreview == nil && nativeModPreview == nil else { status = "Finish reviewing the selected mods first."; return }
         guard !urls.isEmpty else { return }
         do { try ModImportPlan.validate(urls) }
         catch { status = error.localizedDescription; return }
         guard gameFound else { status = "Game not found."; return }
         gameVersion = readGameVersion()
-        guard fullyInstalled() else { status = "Install NightCity Console first, then add mods."; return }
+        guard installed else { status = "Install NightCity Console first, then add mods."; return }
         guard nctoolPath() != nil else { status = "nctool helper missing from the app bundle."; return }
         let destination = gamePath
         let workspace = FileManager.default.temporaryDirectory.appendingPathComponent("nightcity-import-\(UUID().uuidString)", isDirectory: true)
@@ -1078,6 +1090,16 @@ final class Model: ObservableObject {
         busy = true; progress = 0; busyDetail = "Preparing import preview…"; status = "Checking mods. Your game files are unchanged."
         DispatchQueue.global(qos: .userInitiated).async {
             do {
+                if self.nativeRuntime25, let resources = Bundle.main.resourceURL {
+                    guard try NativeRuntimeInstallation.current(gameRoot: URL(fileURLWithPath: destination), resources: resources) else { throw NativeRuntimeError(message: "Reinstall the current native runtime before importing mods.") }
+                    if let review = try NativeModPackages.prepare(sources: urls, gameRoot: URL(fileURLWithPath: destination), resources: resources, gameClosed: Self.nativeGameClosed) {
+                        DispatchQueue.main.async {
+                            self.importWorkspaceRoot = nil; self.busy = false; self.busyDetail = ""; self.progress = 0
+                            self.nativeModPreview = review; self.status = "Review the original native mods before installing."
+                        }
+                        return
+                    }
+                }
                 try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: false)
                 var prepared: [ModPreparedImport] = []
                 var approvals: [ModImportApproval] = []
@@ -1120,6 +1142,39 @@ final class Model: ObservableObject {
                     self.status = "Import preview failed: \(error.localizedDescription)"
                 }
             }
+        }
+    }
+
+    private func validateNativeModScripts(root: URL, resources: URL) throws {
+        let refused = try stageNativePluginScripts()
+        guard refused.isEmpty else { throw NativeRuntimeError(message: "Plugin verification refused: \(refused.joined(separator: ", "))") }
+        try NativeRuntimeLaunch.compile(gameRoot: root, resources: resources, inherited: ProcessInfo.processInfo.environment)
+    }
+    func confirmNativeModImport(_ review: NativeModPackages.Review) {
+        guard nativeModPreview?.id == review.id, canChangeGameFiles(), gamePath == review.gameRoot.path else { return }
+        busy = true; busyDetail = "Revalidating and installing original mods…"; status = busyDetail
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try NativeModPackages.apply(review, gameClosed: Self.nativeGameClosed,
+                    validateScripts: { try self.validateNativeModScripts(root: review.gameRoot, resources: review.resources) })
+                DispatchQueue.main.async { self.busy = false; self.nativeModPreview = nil; self.refreshMods(); self.status = "Original mods installed. Click Play to load the selected native revision." }
+            } catch { DispatchQueue.main.async { self.busy = false; self.nativeModPreview = nil; self.status = "Native mod install stopped: \(error.localizedDescription). Prepared evidence was kept." } }
+        }
+    }
+    func cancelNativeModImport() {
+        guard !busy else { return }
+        nativeModPreview = nil; status = "Import cancelled. Game mod files were unchanged."
+    }
+    func restoreNativeMods() {
+        guard canChangeGameFiles(), nativeCanRestore, let resources = Bundle.main.resourceURL else { return }
+        let root = URL(fileURLWithPath: gamePath)
+        busy = true; busyDetail = "Restoring the previous native mod selection…"; status = busyDetail
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                try NativeModPackages.restorePrevious(gameRoot: root, gameClosed: Self.nativeGameClosed,
+                    validateScripts: { try self.validateNativeModScripts(root: root, resources: resources) })
+                DispatchQueue.main.async { self.busy = false; self.refreshMods(); self.status = "Previous native mod selection restored. Settings, saves and Creator definitions were kept." }
+            } catch { DispatchQueue.main.async { self.busy = false; self.status = "Native mod restore stopped: \(error.localizedDescription)" } }
         }
     }
 
@@ -1266,7 +1321,7 @@ struct ContentView: View {
     @State private var showModGuide = false
     @State private var resolvingDrop = false
 
-    private var changesDisabled: Bool { m.busy || m.gameIsRunning || resolvingDrop || m.importPreview != nil }
+    private var changesDisabled: Bool { m.busy || m.gameIsRunning || resolvingDrop || m.importPreview != nil || m.nativeModPreview != nil }
 
     var versionMismatch: Bool {
         guard let v = m.gameVersion else { return false }
@@ -1357,6 +1412,7 @@ struct ContentView: View {
                 Button("Guide") { showModGuide = true }
                 Button("Optional Mods…") { showOptionalMods = true }
                     .disabled(resolvingDrop)
+                if m.nativeCanRestore { Button("Restore previous") { m.restoreNativeMods() }.disabled(changesDisabled) }
                 Button("Add Mod…") { addMod() }.disabled(!m.installed || changesDisabled)
             }
             modDropZone
@@ -1393,6 +1449,9 @@ struct ContentView: View {
         .frame(width: 620, height: 640)
         .sheet(isPresented: $showOptionalMods) { OptionalModsView(model: m) }
         .sheet(isPresented: $showModGuide) { ModInstallationGuide() }
+        .sheet(item: $m.nativeModPreview) { review in
+            NativeModPreviewView(model: m, review: review)
+        }
         .sheet(item: $m.importPreview, onDismiss: { m.cancelModImportPreview() }) { session in
             ModImportPreviewView(model: m, session: session)
         }
@@ -1447,11 +1506,15 @@ struct ContentView: View {
     }
 
     @ViewBuilder var modsList: some View {
-        if m.mods.isEmpty {
+        if m.mods.isEmpty && m.nativeModLabels.isEmpty {
             Text("No mods installed yet.").font(.caption).foregroundColor(.secondary)
         } else {
             ScrollView {
                 VStack(spacing: 1) {
+                    ForEach(m.nativeModLabels, id: \.self) { label in
+                        HStack { Image(systemName: "shippingbox.fill").foregroundColor(.secondary); Text(label).font(.callout); Spacer(); Text("Native").font(.caption2).foregroundColor(.secondary) }
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                    }
                     ForEach(m.mods) { mod in
                         HStack(spacing: 8) {
                             Image(systemName: "shippingbox.fill").foregroundColor(.secondary).font(.caption)

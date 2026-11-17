@@ -1,0 +1,10 @@
+#!/bin/bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+TEST_DIR="$(mktemp -d)"
+trap 'rm -rf "$TEST_DIR"' EXIT
+swiftc launcher/Sources/NativeRuntimeManifest.swift launcher/Sources/NativeRuntimeInstallation.swift \
+  launcher/Sources/NativeRuntimeCommand.swift launcher/Sources/NativeRuntimeLaunch.swift launcher/Sources/PluginScriptStager.swift \
+  launcher/Sources/NativePackageProfiles.swift launcher/Sources/NativeModFiles.swift launcher/Sources/NativeModPackages.swift \
+  tests/NativeModImportIntegrationTests.swift -o "$TEST_DIR/native-mod-import-tests"
+"$TEST_DIR/native-mod-import-tests" "$@"
