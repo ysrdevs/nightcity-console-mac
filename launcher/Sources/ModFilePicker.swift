@@ -6,7 +6,7 @@ enum ModFilePicker {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = true
-        panel.allowedContentTypes = [.zip]
+        panel.allowedContentTypes = [.zip, .folder]
         panel.allowsMultipleSelection = multiple
         panel.prompt = "Import"
         panel.message = message
