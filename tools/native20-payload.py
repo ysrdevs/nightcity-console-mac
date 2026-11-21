@@ -8,9 +8,12 @@ import argparse
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
+import runpy
 import shutil
 import stat
 import tempfile
+
+UPGRADES = runpy.run_path(str(Path(__file__).with_name('native20-upgrade-history.py')))
 
 
 def digest(path):
@@ -66,6 +69,9 @@ def verify(root, signing=False):
     if manifest_path.stat().st_size > 2 * 1024 * 1024:
         raise ValueError('Native manifest exceeds its bound')
     manifest = json.loads(manifest_path.read_text())
+    # Signing changes whole-file identities. Every release must retain the exact
+    # published upgrade history, including the compiler outside red4ext/.
+    UPGRADES['check_history'](manifest, UPGRADES['load_registry']())
     if manifest.get('schema') != 1 or manifest.get('backend') != 'native2.5' or manifest.get('gameVersion') != '2.5.0':
         raise ValueError('Unsupported native release payload')
     if manifest.get('environment') != {'NCC_RUNTIME_PROFILE': 'native20-release',

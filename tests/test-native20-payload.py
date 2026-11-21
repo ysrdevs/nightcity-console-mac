@@ -43,8 +43,10 @@ class PayloadTests(unittest.TestCase):
         self.manifest = {'schema': 1, 'backend': 'native2.5', 'gameVersion': '2.5.0',
                          'environment': {'NCC_RUNTIME_PROFILE': 'native20-release',
                          'NIGHTCITY_RUNTIME_PROBE': 'release20', 'NCC_DISABLE_LEGACY_LUA': '1'},
+                         'previousFiles': {}, 'retiredFiles': {},
                          'files': entries, 'bundleFiles': {'helpers/NightCityModPrepare': P.digest(helper),
                          'mod-import.json': P.digest(self.root / 'mod-import.json')}}
+        self.manifest = P.UPGRADES['merge_history'](self.manifest, P.UPGRADES['load_registry']())
         self.write_manifest()
 
     def write_manifest(self):
@@ -97,6 +99,19 @@ class PayloadTests(unittest.TestCase):
         self.manifest['environment']['NIGHTCITY_RUNTIME_PROBE'] = 'probe76'
         self.write_manifest()
         with self.assertRaises(ValueError): P.verify(self.root)
+
+    def test_published_compiler_history_required_before_signing(self):
+        for name in ('engine/tools/scc', 'engine/tools/libscc_lib.dylib'):
+            original = copy.deepcopy(self.manifest)
+            self.manifest['previousFiles'].pop(name)
+            self.write_manifest()
+            before = (self.root / 'manifest.json').read_bytes()
+            with self.subTest(path=name):
+                with self.assertRaises(ValueError): P.verify(self.root)
+                with self.assertRaises(ValueError): P.verify(self.root, signing=True)
+                self.assertEqual((self.root / 'manifest.json').read_bytes(), before)
+            self.manifest = original
+            self.write_manifest()
 
 
 if __name__ == '__main__': unittest.main()

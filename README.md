@@ -30,7 +30,11 @@ A native Apple Silicon in-game console, cheat menu, and item browser for Cyberpu
 
 ## Status
 
-**Version 2.0.0 supports Cyberpunk 2077 2.5.0, native macOS Steam.**
+**Version 2.0.1 supports Cyberpunk 2077 2.5.0, native macOS Steam.**
+2.0.1 fixes installation over earlier Console releases, including the
+`engine/tools/libscc_lib.dylib` and `scc` upgrade refusal. Replace the launcher
+and click Install, then Play. Do not delete compiler files or uninstall your mods.
+See the [2.0.1 hotfix notes](docs/RELEASE-2.0.1-PUBLIC.md).
 The 2.5 Console now uses a native runtime without Frida Gadget. Items, money,
 Creator, gameplay controls, saved locations and noclip have passed private
 player tests, including save/relaunch. The signed player installer has also
@@ -110,9 +114,8 @@ No Terminal, no file editing. The app finds your game, installs the runtime file
 
 Updating from an older version: quit the game and the older launcher, replace the app, then click Install once (it reads "Reinstall NightCity Console") and Play. This installs the updated runtime and the flight scripts on supported 2.5 games, while retaining the 1.7.1 loading fix. No need to uninstall first.
 
-The 2.0.0 app and DMG are Developer ID signed, notarized by Apple and stapled.
-The signed app passed the final player checks before packaging. The ZIP
-contains the same stapled app, without nested ZIP files.
+The release app and DMG are Developer ID signed, notarized by Apple and stapled.
+The ZIP contains the same stapled app, without nested ZIP files.
 
 ### Virtual Atelier, Cyberware-EX and Equipment-EX on 2.5
 
