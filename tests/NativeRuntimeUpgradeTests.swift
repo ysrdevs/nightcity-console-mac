@@ -191,6 +191,25 @@ import Darwin
         try check(read(completed.game, NativeRuntimeInstallation.pendingPath) == nil, "Successful upgrade left a pending journal")
         try fm.removeItem(at: completed.game)
 
+        // Match the reported player workaround: both compiler files were
+        // deleted, while the rest of the published legacy runtime remained.
+        let missingCompilers = try Fixture(parent: parent, name: "deleted-compilers", legacy: legacy, inventory: inventory)
+        for path in compilerPaths {
+            try fm.removeItem(at: NativeRuntimeFiles.checked(missingCompilers.game, path))
+            try check(read(missingCompilers.game, path) == nil, "Compiler-deletion fixture is not missing \(path)")
+        }
+        try NativeRuntimeInstallation.install(gameRoot: missingCompilers.game, resources: resources, gameClosed: { true })
+        for path in compilerPaths {
+            try check(read(missingCompilers.game, path).map(NativeRuntimeFiles.hash) == desired[path], "Deleted compiler was not restored: \(path)")
+        }
+        try check(NativeRuntimeInstallation.current(gameRoot: missingCompilers.game, resources: resources), "Compiler repair left an incomplete runtime")
+        for file in inventory.files where desired[file.path] == nil {
+            try check(read(missingCompilers.game, file.path) == nil, "Compiler repair left a retired runtime file: \(file.path)")
+        }
+        try check(read(missingCompilers.game, NativeRuntimeInstallation.pendingPath) == nil, "Compiler repair left a pending journal")
+        try missingCompilers.verifyUsers()
+        try fm.removeItem(at: missingCompilers.game)
+
         // Interrupt after the final receipt write. Recovery must undo every
         // replacement, deletion and new file, including the receipt itself.
         let interrupted = try Fixture(parent: parent, name: "interrupted-upgrade", legacy: legacy, inventory: inventory)
@@ -221,6 +240,7 @@ import Darwin
             "candidateManifestSHA256": candidateDigest, "candidateFiles": candidate.files.count,
             "omittedCompilerHistoryRefusedBeforeApply": true, "completeUpgradePassed": true,
             "exactLegacyBackupsPassed": true, "userDataPreserved": true, "finalWriteRollbackPassed": true,
+            "deletedCompilerRepairPassed": true,
             "retryAfterRollbackPassed": true, "checks": checks, "gameLaunched": false
         ]
         try fm.createDirectory(at: resultURL.deletingLastPathComponent(), withIntermediateDirectories: true)
