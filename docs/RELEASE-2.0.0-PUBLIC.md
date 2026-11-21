@@ -70,5 +70,5 @@ and **Play**. The supported 2.5 installation uses the native backend and removes
 known previous Console injection files through the managed upgrade transaction.
 Keep a separate manual save when adding gameplay mods.
 
-See the [mod guide](MOD-INSTALLATION.md),
-[compatibility list](MOD-COMPATIBILITY.md) and [noclip guide](EXPLORATION.md).
+See the [mod guide](https://github.com/ysrdevs/nightcity-console-mac/blob/v2.0.0/docs/MOD-INSTALLATION.md),
+[compatibility list](https://github.com/ysrdevs/nightcity-console-mac/blob/v2.0.0/docs/MOD-COMPATIBILITY.md) and [noclip guide](https://github.com/ysrdevs/nightcity-console-mac/blob/v2.0.0/docs/EXPLORATION.md).
