@@ -11,6 +11,8 @@ The earlier compiler correction resolved a forward-declaration compilation error
 
 No mod scripts are rewritten or rearranged. The native gameplay runtime, frontend and framework payloads are unchanged from 2.0.2.
 
+The app and DMG are Developer ID signed, notarized by Apple and stapled. The ZIP contains the stapled app.
+
 ## Updating
 
 Quit Cyberpunk and the old launcher. Replace **NightCity Console** in Applications with the app from the new DMG or ZIP. Open it, confirm the selected game folder, click **Install / Reinstall NightCity Console**, then **Play**. Reinstall updates the compiler, and Play recompiles scripts with the correction.

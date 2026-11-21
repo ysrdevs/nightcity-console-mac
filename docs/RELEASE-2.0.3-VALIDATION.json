@@ -1,0 +1,50 @@
+{
+  "version": "2.0.3",
+  "bundleIdentifier": "dev.ysr.nightcityconsole",
+  "compilerFixCommit": "c94b311",
+  "changedInstalledPayloads": [
+    "engine/tools/scc",
+    "engine/tools/libscc_lib.dylib"
+  ],
+  "compilerRegressionTests": 77,
+  "signedUpgradePreparationAssertions": 71,
+  "localCrashReproduction": {
+    "scriptCount": 52,
+    "priorExit": -11,
+    "priorGameOffset": "0x1111098",
+    "priorFaultAddress": "0x28",
+    "correctedExit": 0,
+    "correctedSignedCacheSHA256": "799b0e1ee6719d5a53dbf0bfdea76fa6664353d280f29f4027e6b7091ba19ecc"
+  },
+  "signedProductionPreparation": {
+    "normalScripts": 217,
+    "separateRuntimeScripts": 17,
+    "cacheSHA256": "ae645852d9a4c83dea4d1e9986f6b36f7c4b2ff265fb474306b4fb118ce11bf3",
+    "realGameReachedMainMenu": true,
+    "f1ConsoleVisible": true,
+    "gameExit": 0,
+    "saveLoaded": false
+  },
+  "artifacts": {
+    "NightCity-Console-for-Mac.dmg": {
+      "sha256": "a764bbf89027a2a1dec4a7edb6d243d7eebb9240c237a70ea94e23893d0d1a22"
+    },
+    "NightCity-Console-for-Mac.zip": {
+      "sha256": "34a603fc197d2bb932b4ecae163b4db76572712196cedcc496fa108809dd369c"
+    }
+  },
+  "limits": [
+    "Installation and rollback fixture uses synthetic executable identity; actual game startup is separate",
+    "Affected player recovery and gameplay have not yet been confirmed",
+    "No claim of universal mod compatibility",
+    "No release pushed or uploaded"
+  ],
+  "appNotarization": {
+    "id": "59918dec-32db-4eea-8dee-10dd649ac41a",
+    "status": "Accepted"
+  },
+  "dmgNotarization": {
+    "id": "82ee5e55-bea8-48ff-8de5-3be4b2a55624",
+    "status": "Accepted"
+  }
+}
