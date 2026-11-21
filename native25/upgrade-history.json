@@ -2214,6 +2214,553 @@
       ],
       "sha256": "582e2cd04f98b3f967fe20304fa7e516b6e6d1397468249cf89365494a24dd15",
       "version": "1.9.0"
+    },
+    {
+      "artifact": "NightCity-Console-for-Mac.zip",
+      "files": [
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/engine/tools/libscc_lib.dylib",
+          "path": "engine/tools/libscc_lib.dylib",
+          "sha256": "ac7dfa090f71c1635ac54b7f9d3366225beddd7f5b5ca0960fae0ca57881b58a"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/engine/tools/scc",
+          "path": "engine/tools/scc",
+          "sha256": "69dc127ef1b14bd414c04132085b052dbe9fb57db86ce068ec927bad4f849998"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/NightCityFrontend.dylib",
+          "path": "red4ext/NightCityFrontend.dylib",
+          "sha256": "6d841a0bb24a28e7404eea337ed118e60e5f35c8eeecce93d16cbeebffd36adb"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/RED4ext.dylib",
+          "path": "red4ext/RED4ext.dylib",
+          "sha256": "e1c332bfc97bd5d85a09307c5aa9cde46c23221fd2dbd14712cf419472d2b723"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/bin/red4ext_plugin_check",
+          "path": "red4ext/bin/red4ext_plugin_check",
+          "sha256": "823065f0ac591ff4e38a2583965060a6b0a27e36b20ea74895f8366d36850b17"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/bin/x64/cyberpunk2077_addresses.json",
+          "path": "red4ext/bin/x64/cyberpunk2077_addresses.json",
+          "sha256": "193c45e09bc6a7a504a8a7117d65d06b57bfc87f142262862c0efa4eccf610ac"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/config.ini",
+          "path": "red4ext/config.ini",
+          "sha256": "8eca7774a3348b2c670da5eaf4007f62b26d27fed15a3743f7d6917e9c3cad95"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/ArchiveXL.dylib",
+          "path": "red4ext/plugins/ArchiveXL/ArchiveXL.dylib",
+          "sha256": "d04e3f02157bc36c2a1697f8ddeb53070daa36bf7bcb2aac3272904502b9d6da"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/ArchiveXL.archive",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/ArchiveXL.archive",
+          "sha256": "70b2967832555292712cc583753da4823113dc7a3f388030b45c6966909241d3"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/Migration.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/Migration.xl",
+          "sha256": "830883ea3d5e50746ea698429dc51f5971e079a588c48e8fe097e90c6c25ca68"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/ModSettings.archive",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/ModSettings.archive",
+          "sha256": "f4d68f683c8afb2b34ef3c03d18607c1757fb21604fef76aa1d84adf4cf4ad53"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/ModSettings.archive.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/ModSettings.archive.xl",
+          "sha256": "812b61f78f917845c538d2781cfa54a432444ea1edf886807ac729f591660ece"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/PhotoModeScope.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/PhotoModeScope.xl",
+          "sha256": "77c10d76a8ae8ca696b63e3930fd1d4b3b14fa410ce90e4f95ab665826a82264"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/PlayerBaseScope.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/PlayerBaseScope.xl",
+          "sha256": "fac81f0618a074b06472b5574aeefa4dde16bc935abe0416ac23121ec7a3ee2f"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationBeardFix.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationBeardFix.xl",
+          "sha256": "c3145023b30c0d0d2533af4c9d48c306aa4d868016e3de54ece46509ba40ff39"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationBeardScope.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationBeardScope.xl",
+          "sha256": "e65cfcdc09ce84768fc59a0646b6f90df5cb2b07637903bb57b834159494e94e"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationBrowsFix.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationBrowsFix.xl",
+          "sha256": "458fc4337ff99efe58d3bd69ab5fd0aed7a35006b8ff65bff97c948cba11c856"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationBrowsPatch.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationBrowsPatch.xl",
+          "sha256": "482a99c243bc49196e356615f3eb9bcc4f29458496940e600891e03f75337595"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationBrowsScope.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationBrowsScope.xl",
+          "sha256": "afd084003d5bfcf147026cfc6f115d41153be7d982642372859ce19cd951d2c5"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationEyesFix.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationEyesFix.xl",
+          "sha256": "f2fc3657f8620f81fe58049bc2dbca13534c8a8a6da299bda70914b070854c39"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationEyesPatch.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationEyesPatch.xl",
+          "sha256": "2b1e3736764b4de5aea6d55120703fcf5bc0249441851fc8dbee489df013c527"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationEyesScope.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationEyesScope.xl",
+          "sha256": "58d06e94151cb49de1004bee265f3dbf7e189a3a15de495a01129740bc06dbd6"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationHairFix.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationHairFix.xl",
+          "sha256": "89b1aa14295f189e342b8ce69a8a533c43bc724299998f9b7b86a8ceecd20e73"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationHairPatch.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationHairPatch.xl",
+          "sha256": "fd7807f3f244be977aac3d4296108619743e04ef80652da75702810e5a7377b9"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationHairScope.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationHairScope.xl",
+          "sha256": "dda4815b94cfdc17a99a6d25f54ab79f650551589c4b282dd093b54b51b26946"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationLashesFix.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationLashesFix.xl",
+          "sha256": "6d2b14f747e1f99544ae9de68dcb16424ae046399a71fc810a2725891cab7e70"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationLashesPatch.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationLashesPatch.xl",
+          "sha256": "f762902023eebbb44005525ae6d290d6a28af92f784192c04dad97c373bbb79b"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationLashesScope.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationLashesScope.xl",
+          "sha256": "c299cc8843fb8adefd471e202c53452c3f6e9087f521f27c7f9153c66928e990"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationScope.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/PlayerCustomizationScope.xl",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/QuestBaseScope.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/QuestBaseScope.xl",
+          "sha256": "f56ceacafdf303062913e5cff589d27098a67cdf0c874d11269da4887ae23789"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Bundle/VisualTags.xl",
+          "path": "red4ext/plugins/ArchiveXL/Bundle/VisualTags.xl",
+          "sha256": "8f1d9628212514a5080b3f42c068a1092942346bf20416d51472f068e5b75020"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/LICENSE",
+          "path": "red4ext/plugins/ArchiveXL/LICENSE",
+          "sha256": "dcd5cfc3e620a938b674b5b74a18bba24ac1d8c1353271dac8599b0620238629"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Scripts/DynamicAppearance.reds",
+          "path": "red4ext/plugins/ArchiveXL/Scripts/DynamicAppearance.reds",
+          "sha256": "ba3dd59574ef76e511893120578bc186b0ff0855bd6245e2c7ed5e9225f146ee"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Scripts/Facade.reds",
+          "path": "red4ext/plugins/ArchiveXL/Scripts/Facade.reds",
+          "sha256": "4fe5429b3738e2fe3023767eaf6898335c706b51e7755352ab8151510bb5dab5"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/Scripts/Module.reds",
+          "path": "red4ext/plugins/ArchiveXL/Scripts/Module.reds",
+          "sha256": "8bab26e52bab8ee886c5315985e256f1c21be9ec412863baa87b79526006c795"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ArchiveXL/THIRD_PARTY_LICENSES",
+          "path": "red4ext/plugins/ArchiveXL/THIRD_PARTY_LICENSES",
+          "sha256": "ed196638202f571f23e55df2a51b160273f10235fe5ac2573920a1f234c6a2cf"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/Codeware/Codeware.dylib",
+          "path": "red4ext/plugins/Codeware/Codeware.dylib",
+          "sha256": "74b21ca6c55832ea3fd1c1ed0a816a852735ed7a8aac7d6bcb6f5cd5b5e2f12c"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/Codeware/LICENSE",
+          "path": "red4ext/plugins/Codeware/LICENSE",
+          "sha256": "ebfd5f05db59b0d8d233c10967a546a3ee7635ff339be7a6688154cbf6215855"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/Codeware/Scripts/Codeware.ComponentApi.reds",
+          "path": "red4ext/plugins/Codeware/Scripts/Codeware.ComponentApi.reds",
+          "sha256": "0097ec0e22b3c1f629bfcf4d22a519ef480b1799eaf7447a0a2b7c4674757637"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/Codeware/Scripts/Codeware.Global.reds",
+          "path": "red4ext/plugins/Codeware/Scripts/Codeware.Global.reds",
+          "sha256": "a17ccf1642144e923e506dff7531d6fb3a781b69c977c2d47d242a7375d025ac"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/Codeware/Scripts/Codeware.Localization.reds",
+          "path": "red4ext/plugins/Codeware/Scripts/Codeware.Localization.reds",
+          "sha256": "3433210c3798a74e22497c53c6641b1e87464ebf8e49fe4a1b05adf5b15dfbde"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/Codeware/Scripts/Codeware.UI.TextInput.reds",
+          "path": "red4ext/plugins/Codeware/Scripts/Codeware.UI.TextInput.reds",
+          "sha256": "b8d310dfb14786202e948c71f842e0c1132719cd6334b79c25d83a0635610bcc"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/Codeware/Scripts/Codeware.UI.reds",
+          "path": "red4ext/plugins/Codeware/Scripts/Codeware.UI.reds",
+          "sha256": "f95d440d0b477bfc54f3036ba9aef1f5c14d0aa568d7d1dd32d8acbe7f473112"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/Codeware/Scripts/Codeware.reds",
+          "path": "red4ext/plugins/Codeware/Scripts/Codeware.reds",
+          "sha256": "6e7403e74914e1226d181a83c6bfa0c525e90c9de115ec06b05cb33f7847babd"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ModSettings/LICENSE.md",
+          "path": "red4ext/plugins/ModSettings/LICENSE.md",
+          "sha256": "114c6fcf76d7200bbeedc904cfc5a10166994c7c6a36b22ae90bddc90e87197d"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ModSettings/ModSettings.dylib",
+          "path": "red4ext/plugins/ModSettings/ModSettings.dylib",
+          "sha256": "e654819b769bb8542cc0301c676e18cefd33a3bd32309e5fee96f02b560f4115"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ModSettings/Scripts/Module.reds",
+          "path": "red4ext/plugins/ModSettings/Scripts/Module.reds",
+          "sha256": "57a058b023a82207a24f4a8c46dc1a25b1e5fff97713b61b811dd83d565be177"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ModSettings/Scripts/mod_settings/Extensions/ActionName.reds",
+          "path": "red4ext/plugins/ModSettings/Scripts/mod_settings/Extensions/ActionName.reds",
+          "sha256": "637a4a859432cd0977d4166eea4775de2298778e567ce76c115456cf4baabb4e"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ModSettings/Scripts/mod_settings/Extensions/MenuItemListGameController.reds",
+          "path": "red4ext/plugins/ModSettings/Scripts/mod_settings/Extensions/MenuItemListGameController.reds",
+          "sha256": "b93b3ce713ab6a1617c83c13ad489f2b771390c2f43f1e364e768fda70e3c130"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ModSettings/Scripts/mod_settings/Extensions/MenuScenario_DeathMenu.reds",
+          "path": "red4ext/plugins/ModSettings/Scripts/mod_settings/Extensions/MenuScenario_DeathMenu.reds",
+          "sha256": "d70a014190ec96e4e376fb06f8a393094da5c99a41dfb1dee7491096fc590d51"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ModSettings/Scripts/mod_settings/Extensions/MenuScenario_PauseMenu.reds",
+          "path": "red4ext/plugins/ModSettings/Scripts/mod_settings/Extensions/MenuScenario_PauseMenu.reds",
+          "sha256": "2f204ae0438e51cfdc632618347d4ee7484594f5a8065e9d8e814525c3e259ab"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ModSettings/Scripts/mod_settings/Extensions/MenuScenario_SingleplayerMenu.reds",
+          "path": "red4ext/plugins/ModSettings/Scripts/mod_settings/Extensions/MenuScenario_SingleplayerMenu.reds",
+          "sha256": "a4b888728a9198b7327128e3e313a7febce3cf1395008d19aa55a1c06a287e59"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ModSettings/Scripts/mod_settings/Extensions/SettingsCategoryController.reds",
+          "path": "red4ext/plugins/ModSettings/Scripts/mod_settings/Extensions/SettingsCategoryController.reds",
+          "sha256": "fe875d657f2fc1403a9376fbc061beba9b2612f2489c07470c124cbc5ba23e4a"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ModSettings/Scripts/mod_settings/Extensions/SettingsSelectorControllers.reds",
+          "path": "red4ext/plugins/ModSettings/Scripts/mod_settings/Extensions/SettingsSelectorControllers.reds",
+          "sha256": "2eea4850e527c10fe9945b6104ef04a152fc12fdddda99f3315b7597b63abc9b"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ModSettings/Scripts/mod_settings/MenuScenario_ModSettings.reds",
+          "path": "red4ext/plugins/ModSettings/Scripts/mod_settings/MenuScenario_ModSettings.reds",
+          "sha256": "e7268de71d236726689ed68aaa0b8a08b80b0b4367c77d13fa643397f6c91765"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ModSettings/Scripts/mod_settings/ModSettings.reds",
+          "path": "red4ext/plugins/ModSettings/Scripts/mod_settings/ModSettings.reds",
+          "sha256": "787f94b092b13c0e27f836b3bdc5e99100a100be1f910ceaf4011804c2bfbe86"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ModSettings/Scripts/mod_settings/ModSettingsMainGameController.reds",
+          "path": "red4ext/plugins/ModSettings/Scripts/mod_settings/ModSettingsMainGameController.reds",
+          "sha256": "e7c0ef12b098c8abaeb213bd611a9cfdfdaf2a3ad867b3980251e5e4dac6594b"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ModSettings/Scripts/mod_settings/ModSettingsNotificationListener.reds",
+          "path": "red4ext/plugins/ModSettings/Scripts/mod_settings/ModSettingsNotificationListener.reds",
+          "sha256": "15cc7b76cdfd7c06f495cae6dea8685194d3a65b1d064dcdfa06ce549af6f626"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ModSettings/Scripts/mod_settings/SelectorControllers/ModStngsSelectorControllerBool.reds",
+          "path": "red4ext/plugins/ModSettings/Scripts/mod_settings/SelectorControllers/ModStngsSelectorControllerBool.reds",
+          "sha256": "373179d3c6d44db2dc16f3b48563a06552b4bf29785c0ffa130cc9f539754a32"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ModSettings/Scripts/mod_settings/SelectorControllers/ModStngsSelectorControllerFloat.reds",
+          "path": "red4ext/plugins/ModSettings/Scripts/mod_settings/SelectorControllers/ModStngsSelectorControllerFloat.reds",
+          "sha256": "cbb8052a086eb0890e1bf799dcebcb8a5cf9e2b6656131223ffaa1cb559db769"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ModSettings/Scripts/mod_settings/SelectorControllers/ModStngsSelectorControllerInt.reds",
+          "path": "red4ext/plugins/ModSettings/Scripts/mod_settings/SelectorControllers/ModStngsSelectorControllerInt.reds",
+          "sha256": "d7596bcb1d9f34e5f554419e63cf167736e3a119ac98818dbec172df35d7b6f6"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ModSettings/Scripts/mod_settings/SelectorControllers/ModStngsSelectorControllerKeyBinding.reds",
+          "path": "red4ext/plugins/ModSettings/Scripts/mod_settings/SelectorControllers/ModStngsSelectorControllerKeyBinding.reds",
+          "sha256": "af7145f438b60d0b6a86ceb022f53d6feafab53fddef770c382392165c41c055"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/ModSettings/Scripts/mod_settings/SelectorControllers/ModStngsSelectorControllerListInt.reds",
+          "path": "red4ext/plugins/ModSettings/Scripts/mod_settings/SelectorControllers/ModStngsSelectorControllerListInt.reds",
+          "sha256": "17d03279990cfc90f6144ba40a0b859d5c72bda9a2fabcbb8bf0d1ece75b566f"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/NightCityRuntime.dylib",
+          "path": "red4ext/plugins/NightCityRuntime/NightCityRuntime.dylib",
+          "sha256": "efd9d17cdecaff72a81e6695017d573603c9aeb05241ab518dcefe92b072c62e"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/licenses/Dear-ImGui-LICENSE.txt",
+          "path": "red4ext/plugins/NightCityRuntime/licenses/Dear-ImGui-LICENSE.txt",
+          "sha256": "173506a2d6f7fb67990d257fb2507f188690eca39060c39469ae7bef43aae2a3"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/licenses/LICENSE.md",
+          "path": "red4ext/plugins/NightCityRuntime/licenses/LICENSE.md",
+          "sha256": "5ca30f2a0a632d852865bd0b1a047c25e9db5d99543725324b5d378e90244d65"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/licenses/NightCity-Frontend-LICENSE.txt",
+          "path": "red4ext/plugins/NightCityRuntime/licenses/NightCity-Frontend-LICENSE.txt",
+          "sha256": "3ee897a551ec220bdcc3dcea784c97c5c04448ca02b16712d0968e25c87d4570"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/licenses/RED4ext.SDK-LICENSE.md",
+          "path": "red4ext/plugins/NightCityRuntime/licenses/RED4ext.SDK-LICENSE.md",
+          "sha256": "5ca30f2a0a632d852865bd0b1a047c25e9db5d99543725324b5d378e90244d65"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/licenses/THIRD_PARTY_LICENSES.md",
+          "path": "red4ext/plugins/NightCityRuntime/licenses/THIRD_PARTY_LICENSES.md",
+          "sha256": "d869a87454393f14ac6c0570caf6e89ecdd4b1ac9a4af6f7803b2eafd0c1e666"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/scripts/NativeSessionProbe/NativeSessionProbe.reds",
+          "path": "red4ext/plugins/NightCityRuntime/scripts/NativeSessionProbe/NativeSessionProbe.reds",
+          "sha256": "ea3febf30a2c6b2a5f858968484f39d28f2dd8b01bbcf2a7ad50ce0b9d6981cc"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/scripts/NightCityExploration/NCCCollisionFlightProbe.reds",
+          "path": "red4ext/plugins/NightCityRuntime/scripts/NightCityExploration/NCCCollisionFlightProbe.reds",
+          "sha256": "262ffc7b37bd71fe70dbc8966c4d79422f004251f9114d64a249b52989cb418a"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/scripts/NightCityExploration/NCCFlightClearance.reds",
+          "path": "red4ext/plugins/NightCityRuntime/scripts/NightCityExploration/NCCFlightClearance.reds",
+          "sha256": "e5e5eb57a35fb0bb2168c63e4d654a89b8fb4b009dd4b20d467196ecb800b547"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/scripts/NightCityGameplayControls/NCCGameplayControls.reds",
+          "path": "red4ext/plugins/NightCityRuntime/scripts/NightCityGameplayControls/NCCGameplayControls.reds",
+          "sha256": "8c6bb539dca1008eaeb266ed38054ce6949e87203adbb0536ee5b686372e533c"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/scripts/NightCityItemNotifications/NCCItemNotifications.reds",
+          "path": "red4ext/plugins/NightCityRuntime/scripts/NightCityItemNotifications/NCCItemNotifications.reds",
+          "sha256": "afa39ab7a902f9ec235067bb2a81f57e3a94bddd553835d7ffd0897a7e68ab90"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/scripts/NightCityMansionPose/NCCMansionPlayerPose.reds",
+          "path": "red4ext/plugins/NightCityRuntime/scripts/NightCityMansionPose/NCCMansionPlayerPose.reds",
+          "sha256": "b5fc7843cf1c71c9b5ee3f3c471a6999cfe5140e44e6a88716da57172cc0465d"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/scripts/NightCityMenuState/NCCMenuStateBridge.reds",
+          "path": "red4ext/plugins/NightCityRuntime/scripts/NightCityMenuState/NCCMenuStateBridge.reds",
+          "sha256": "d6809759566c2152f6e2911fb8c4b983f3a819ddd875a50dbadeca10c1d72c2c"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/scripts/NightCityModuleMoney/NCCModuleMoney.reds",
+          "path": "red4ext/plugins/NightCityRuntime/scripts/NightCityModuleMoney/NCCModuleMoney.reds",
+          "sha256": "dd9078e5fc0525f484fd60b03e84ab70197af287eae4344e64348603766e16aa"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/scripts/NightCityNativeSettingsFactories/NCCNativeSettingsFactories.reds",
+          "path": "red4ext/plugins/NightCityRuntime/scripts/NightCityNativeSettingsFactories/NCCNativeSettingsFactories.reds",
+          "sha256": "72920063a48722f66e205d8e9f99b211e11a7538581bf954d79a70fa9fa5d9a1"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/scripts/NightCityNativeSettingsShims/NCCNativeSettingsShims.reds",
+          "path": "red4ext/plugins/NightCityRuntime/scripts/NightCityNativeSettingsShims/NCCNativeSettingsShims.reds",
+          "sha256": "ce342b436866bb9cfd34c09ba70a20f19906d83efdc3f05d1d03b020ae149a95"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/scripts/NightCityNativeSettingsWidgets/NCCNativeSettingsWidgets.reds",
+          "path": "red4ext/plugins/NightCityRuntime/scripts/NightCityNativeSettingsWidgets/NCCNativeSettingsWidgets.reds",
+          "sha256": "86d3ef2f9a5bfce7f207ea662c60b0cf685040cd8990211430574b20aa4322c0"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/scripts/NightCityNavigation/NCCNavigation.reds",
+          "path": "red4ext/plugins/NightCityRuntime/scripts/NightCityNavigation/NCCNavigation.reds",
+          "sha256": "10dee019e9503c1af8bba375e842bf5acabcd221d3b3fad21da35b2f069520b1"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/scripts/NightCityPlayerActions/NCCPlayerActions.reds",
+          "path": "red4ext/plugins/NightCityRuntime/scripts/NightCityPlayerActions/NCCPlayerActions.reds",
+          "sha256": "33b8b1240197399374e3850ca7c54bdedcaf1139f24a76eea3a92cd984876527"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/scripts/NightCityPlayerAnimation/NCCPlayerAnimationBridge.reds",
+          "path": "red4ext/plugins/NightCityRuntime/scripts/NightCityPlayerAnimation/NCCPlayerAnimationBridge.reds",
+          "sha256": "0668ba524360989fe47d92b7ee0aadb0e6bd0e4b2b722449e1414a575d9fd909"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/scripts/NightCityPlayerControls/NCCPlayerControls.reds",
+          "path": "red4ext/plugins/NightCityRuntime/scripts/NightCityPlayerControls/NCCPlayerControls.reds",
+          "sha256": "6095ddb737b7d2f5f074b86bfad7a9a8aa67e7abd947e6b2bcda80452053f840"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/scripts/NightCityPlayerEquipment/NCCPlayerEquipmentBridge.reds",
+          "path": "red4ext/plugins/NightCityRuntime/scripts/NightCityPlayerEquipment/NCCPlayerEquipmentBridge.reds",
+          "sha256": "b14355096c78195a45f114a851d89dc8ba80a9ba69d7df473095b60b4f4a7405"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/scripts/NightCityUtility/NCCUtility.reds",
+          "path": "red4ext/plugins/NightCityRuntime/scripts/NightCityUtility/NCCUtility.reds",
+          "sha256": "8e3b55b34c8fda2b0de2df4c0aba24a25d4c96582dd5809b814a2927ca268aea"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/support/mansion_reference/reference.nccref",
+          "path": "red4ext/plugins/NightCityRuntime/support/mansion_reference/reference.nccref",
+          "sha256": "e2d0d366d5cfb102dbe063dc3fe535d6f41f7e808457845dc6e017c4b20fc010"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/NightCityRuntime/support/native_settings_reference/reference.nccref",
+          "path": "red4ext/plugins/NightCityRuntime/support/native_settings_reference/reference.nccref",
+          "sha256": "e2d0d366d5cfb102dbe063dc3fe535d6f41f7e808457845dc6e017c4b20fc010"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/TweakXL/Data/ExtraFlats.dat",
+          "path": "red4ext/plugins/TweakXL/Data/ExtraFlats.dat",
+          "sha256": "58a1df4c83feedc3bda63e22230e6d8a088321aa832c76b0203bc3538f1a0417"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/TweakXL/Data/ExtraFlats.yaml",
+          "path": "red4ext/plugins/TweakXL/Data/ExtraFlats.yaml",
+          "sha256": "8e18180e8bdd580d4e562552f8989825a760d27ce8f0a38eb6c4bbf82f2fc413"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/TweakXL/Data/InheritanceMap.dat",
+          "path": "red4ext/plugins/TweakXL/Data/InheritanceMap.dat",
+          "sha256": "46315fe35bab47fa047bc0dc6b8e027032406e3f92cb9bd22b01bd96153e544b"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/TweakXL/Data/InheritanceMap.yaml",
+          "path": "red4ext/plugins/TweakXL/Data/InheritanceMap.yaml",
+          "sha256": "c0fea90fb70f605ee1078476093016070eb249e1816e2871a811f2310a2e987a"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/TweakXL/LICENSE",
+          "path": "red4ext/plugins/TweakXL/LICENSE",
+          "sha256": "ebfd5f05db59b0d8d233c10967a546a3ee7635ff339be7a6688154cbf6215855"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/TweakXL/Scripts/HotReload.reds",
+          "path": "red4ext/plugins/TweakXL/Scripts/HotReload.reds",
+          "sha256": "10e67fc583913fff94c7a9d2a532b7f4986ce66992eb9b58baf9fabb0a0b09fe"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/TweakXL/Scripts/Module.reds",
+          "path": "red4ext/plugins/TweakXL/Scripts/Module.reds",
+          "sha256": "a2c1fb466aeb6bc43bb2b93f3718583494575c54bb598a2bdd1c58c34f33e774"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/TweakXL/Scripts/ScriptableTweak.reds",
+          "path": "red4ext/plugins/TweakXL/Scripts/ScriptableTweak.reds",
+          "sha256": "c0eba073171282fd8a60a525649446c944b97ca8b1cd093475be47b92279adbd"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/TweakXL/Scripts/StatusEffect.reds",
+          "path": "red4ext/plugins/TweakXL/Scripts/StatusEffect.reds",
+          "sha256": "0d956c72dc19537f8324f6273359b0d44ede01d43eb5e234165ee8f9fe24e95f"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/TweakXL/Scripts/TweakDBBatch.reds",
+          "path": "red4ext/plugins/TweakXL/Scripts/TweakDBBatch.reds",
+          "sha256": "a5f5e20234a98801852eb7959bf34825a1806617b0ec7e1cb6420c5a71cf37cc"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/TweakXL/Scripts/TweakDBInterface.reds",
+          "path": "red4ext/plugins/TweakXL/Scripts/TweakDBInterface.reds",
+          "sha256": "3d759ea6aa3a2d19b6a0ebf306315bac06828925dee1532f1ea6777598cd2afa"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/TweakXL/Scripts/TweakDBManager.reds",
+          "path": "red4ext/plugins/TweakXL/Scripts/TweakDBManager.reds",
+          "sha256": "7f15faa7aeb298a5c9a909c7905e82651645d4ba864da82c0107bd9db8183f84"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/TweakXL/Scripts/TweakXL.reds",
+          "path": "red4ext/plugins/TweakXL/Scripts/TweakXL.reds",
+          "sha256": "40035e29de0d0b43598a941f033c995b39835d0d8234887943bdeacec02840a7"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/TweakXL/Scripts/VehicleScanner.reds",
+          "path": "red4ext/plugins/TweakXL/Scripts/VehicleScanner.reds",
+          "sha256": "45136f64d5421065b2fb2452200f24a7da754be40d56f495821ee44abe187c3b"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/TweakXL/THIRD_PARTY_LICENSES",
+          "path": "red4ext/plugins/TweakXL/THIRD_PARTY_LICENSES",
+          "sha256": "cd32fbf41ac0a2bcd8981a5eb785d5c3853f986c3fb2f6acf6e14bc9f68e54d3"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/TweakXL/TweakXL.dylib",
+          "path": "red4ext/plugins/TweakXL/TweakXL.dylib",
+          "sha256": "4787013b762b1c3149ce694a77fd8add3f44e5cb8b7c4f6ed236a3a792b1edd0"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/input_loader/LICENSES/pugixml.txt",
+          "path": "red4ext/plugins/input_loader/LICENSES/pugixml.txt",
+          "sha256": "973d2990c0c647e221d2418227bc421f9f81771e75d3c83adc055ee55a3d64c7"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/input_loader/LICENSES/spdlog.txt",
+          "path": "red4ext/plugins/input_loader/LICENSES/spdlog.txt",
+          "sha256": "a7241a379cb98d37788f82c2fc2e484c3ae85dae881fd3406f0637644850926f"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/input_loader/input_loader.dylib",
+          "path": "red4ext/plugins/input_loader/input_loader.dylib",
+          "sha256": "5abac829a9ea80fb8b6f5db9181b33506e24e531a0abd8873edb1db8964dec5a"
+        },
+        {
+          "archiveEntry": "NightCity Console.app/Contents/Resources/native20/payload/red4ext/plugins/input_loader/license.md",
+          "path": "red4ext/plugins/input_loader/license.md",
+          "sha256": "114c6fcf76d7200bbeedc904cfc5a10166994c7c6a36b22ae90bddc90e87197d"
+        }
+      ],
+      "sha256": "5fbea790d5223fda66c12e9eaebad3e0a4f9cd0efce1ed88ba5167ea1467775b",
+      "version": "2.0.2"
     }
   ],
   "schema": 1

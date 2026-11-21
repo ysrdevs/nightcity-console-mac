@@ -30,10 +30,13 @@ A native Apple Silicon in-game console, cheat menu, and item browser for Cyberpu
 
 ## Status
 
-**Version 2.0.2 supports Cyberpunk 2077 2.5.0, native macOS Steam.**
-2.0.2 corrects a native preparation timeout and an order-dependent script compiler
-failure, and expands support diagnostics. It retains the earlier upgrade fixes.
-See the [2.0.2 hotfix notes](docs/RELEASE-2.0.2-PUBLIC.md).
+**Version 2.0.3 targets Cyberpunk 2077 2.5.0, native macOS Steam.**
+2.0.3 corrects a reproduced startup crash in 2.0.2: the compiler could write
+native fields before their parent classes when scripts were discovered in a
+different order. It retains the preparation, upgrade and diagnostics fixes.
+The failing script order and the full local configuration now pass startup;
+recovery on the affected player's Mac remains unconfirmed.
+See the [2.0.3 correction notes](docs/RELEASE-2.0.3-PUBLIC.md).
 The 2.5 Console now uses a native runtime without Frida Gadget. Items, money,
 Creator, gameplay controls, saved locations and noclip have passed private
 player tests, including save/relaunch. The signed player installer has also
