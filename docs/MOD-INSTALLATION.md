@@ -80,8 +80,13 @@ or copy their DLLs over the bundled macOS frameworks.
 Use the separate **MODS** entry for Native Settings pages. **MOD SETTINGS** is
 the other framework, and **MOD.IO** is the game's own mod service.
 
-ITP settings control camera distance and height. F1 → Exploration → Camera
-also offers **Toggle third person**, or type `thirdperson` in Console. Drawing
+Open **MODS → Immersive Third Person → Keys** and assign the camera-toggle key.
+**F10** is the tested binding; the launcher does not force a default. Close the
+settings page before using the key. The binding persists after relaunch.
+
+ITP settings also control camera distance and height. F1 → Exploration → Camera
+offers **Toggle third person**, or type `thirdperson` in Console. Wait for the
+response, then close F1 so ITP can apply the camera change. Drawing
 a weapon switches to first person for aiming; holstering returns to third
 person when ITP owns that mode. Manual first person stays first person.
 

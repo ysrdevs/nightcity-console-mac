@@ -5,7 +5,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Status](https://img.shields.io/badge/status-Steam%20supported-green)
 
-A native Apple Silicon in-game console, cheat menu, and item browser for Cyberpunk 2077 on macOS. Think Cyber Engine Tweaks, rebuilt from scratch for the native macOS/Apple Silicon build of the game: inject into the running process, resolve REDengine's runtime type system, call game functions with real typed arguments, and draw a console on the live frame with a Metal overlay you drive from the keyboard.
+A native Apple Silicon in-game console, cheat menu, and item browser for Cyberpunk 2077 on macOS. Think Cyber Engine Tweaks, rebuilt from scratch for the native macOS/Apple Silicon build of the game: inject into the running process, resolve REDengine's runtime type system, call game functions with real typed arguments, and draw a console on the live frame with a Metal overlay you control with your mouse or keyboard.
 
 > Renamed from "CET Mac" to "NightCity Console for Mac" to avoid confusion with Cyber Engine Tweaks. This is an independent, macOS-native project and is not affiliated with CET, WolvenKit, REDmod, CD PROJEKT RED, or Cyberpunk 2077. Single-player, personal use, on your own legally-owned copy. Back up your saves before using it.
 
@@ -30,17 +30,20 @@ A native Apple Silicon in-game console, cheat menu, and item browser for Cyberpu
 
 ## Status
 
-**2.0.0 is being prepared for Cyberpunk 2077 2.5.0, native macOS Steam.**
+**Version 2.0.0 supports Cyberpunk 2077 2.5.0, native macOS Steam.**
 The 2.5 Console now uses a native runtime without Frida Gadget. Items, money,
 Creator, gameplay controls, saved locations and noclip have passed private
-player tests, including save/relaunch. The complete player installer and final
-signed release are still undergoing acceptance. See the
+player tests, including save/relaunch. The signed player installer has also
+passed the final ITP camera/binding, flight and Mansion activity checks,
+including relaunch. See the
 [2.0 release notes](docs/RELEASE-2.0.0-PUBLIC.md).
 
 2.0 adds support for specific original Lua mods: Vehicle Call Cost,
 V's Edgerunners Mansion and Immersive Third Person. ITP's original Lua and
 REDscripts are unchanged. Its smooth camera, weapon draw/holster transitions,
 distance/height controls and settings-page navigation have passed player tests.
+The final installer also passed a player-selected F10 camera binding, the
+Console toggle and binding persistence after relaunch.
 Mansion ownership, elevator travel, sleeping and drinks have passed relaunch
 checks. These results do not establish universal CET compatibility.
 
@@ -75,7 +78,6 @@ AudioXL and arbitrary Windows native DLLs are outside the 2.0 support claim.
 - Supported console commands and quest-fact editing. The native backend exposes reviewed operations; arbitrary game-method calls and unrestricted Lua evaluation are not supported.
 - Action results distinguish pending requests, verified changes, refusals and uncertain outcomes. Do not repeat a grant while its result is pending or unknown.
 - Iconic Weapon Creator with 37 base-game weapons, nine categories and search by name or weapon type. Custom names, descriptions and effects persist after saving and reloading. Creation checks the selected base and required Iconic records before writing files; Phantom Liberty is not required for these weapon choices.
-- Native Mods tab that lists, enables, and disables loose `.archive` mods by renaming `.archive` to `.archive.off`.
 - Add Mod installs supported ZIPs or folders, including multiple selections, and prepares script mods for the selected game version.
 - Optional Mods offers Equipment-EX and Cyberware-EX, plus an official Virtual Atelier download link and import button. The built-in Mod Guide explains installation and file locations.
 - Export Diagnostics saves a local support ZIP with an on-demand game thread sample, bounded logs, runtime and script integrity checks, version information, installed mod inventory and optional performance telemetry.
@@ -108,9 +110,9 @@ No Terminal, no file editing. The app finds your game, installs the runtime file
 
 Updating from an older version: quit the game and the older launcher, replace the app, then click Install once (it reads "Reinstall NightCity Console") and Play. This installs the updated runtime and the flight scripts on supported 2.5 games, while retaining the 1.7.1 loading fix. No need to uninstall first.
 
-The published 1.9.0 and candidate 2.0.0 app and DMG are Developer ID signed,
-notarized by Apple and stapled. The 2.0 candidate still awaits final installer
-gameplay acceptance. Release packaging retains the app-only ZIP layout without nested ZIP files.
+The 2.0.0 app and DMG are Developer ID signed, notarized by Apple and stapled.
+The signed app passed the final player checks before packaging. The ZIP
+contains the same stapled app, without nested ZIP files.
 
 ### Virtual Atelier, Cyberware-EX and Equipment-EX on 2.5
 

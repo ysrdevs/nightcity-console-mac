@@ -1,8 +1,9 @@
 # NightCity Console for Mac 2.0.0
 
-Candidate notes. The app and DMG are Developer ID signed, notarized by Apple
-and stapled. Final installer gameplay acceptance is pending; 2.0 has not been
-published yet.
+The app and DMG are Developer ID signed, notarized by Apple and stapled.
+The signed player installer passed its final camera, keybinding, flight and
+Mansion activity checks, including relaunch. The ZIP contains the same
+stapled app without nested ZIP files.
 
 ## A native runtime for Cyberpunk 2077 2.5
 
@@ -21,7 +22,9 @@ travel, Stop here, pause/resume and optional Return to start.
   and REDscripts run unchanged. Smooth mouse look, adjustable distance/height,
   movement and switching between first and third person have passed testing.
   Weapon drawing uses first person for aiming, with third person restored on
-  holstering when appropriate. F1 includes a camera toggle.
+  holstering when appropriate. Bind the camera key under MODS → Immersive Third
+  Person → Keys; F10 and its save/relaunch persistence passed the final installer
+  check. F1 includes a camera toggle, and Console accepts `thirdperson`.
 - **V's Edgerunners Mansion 2.0 with Native Interactions Framework 1.1.5:**
   purchase/ownership, elevator travel and apartment interactions, including
   sleeping and drinks. Ownership and tested activities survive save/relaunch.

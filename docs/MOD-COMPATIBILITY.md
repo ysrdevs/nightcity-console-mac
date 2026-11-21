@@ -6,17 +6,21 @@ The final signed 1.9.0 build passed player compatibility and save/relaunch check
 with the combination below. Limited HUD's F7 binding and minimap opacity also
 persisted after relaunch. Testing was performed on macOS 27.
 
-The isolated 2.0 native runtime has also passed the existing mod checks during
-its migration. Final complete-installer acceptance is tracked separately.
+The isolated 2.0 native runtime also passed the existing mod checks during
+its migration. The final signed 2.0 installer passed ITP's player-selected F10
+binding, Console toggle, smooth camera and weapon transitions, plus flight and
+Mansion sleeping/coffee. The camera binding and tested features also passed
+relaunch. Earlier baseline results below retain their original scope; this
+does not claim every mod feature was retested in the final installer.
 
 ## New Lua mod support
 
-| Mod | Reviewed version | Player-confirmed checks | Remaining final-candidate checks |
+| Mod | Reviewed version | Player-confirmed checks | Complete installer coverage |
 | --- | --- | --- | --- |
-| Native Settings | 1.97 | Menu construction, controls, reopening, ordinary keybindings roundtrip, saved Vehicle Call Cost settings | Complete installer import and selected-profile launch |
-| Vehicle Call Cost | Retained original package | Enabled/disabled charging, exact configured price, vehicle arrival and save/relaunch | Complete installer import |
-| V's Edgerunners Mansion | Apartment DLC 2.0 with Native Interactions Framework 1.1.5 | Purchase/ownership, elevator both ways, bed prompts, sleeping/getting up, coffee/tea and save/relaunch | Complete installer import and final combined check |
-| Immersive Third Person: Best Of Both Worlds V2 | 2.0.1 | Smooth horizontal/vertical camera, walking/sprinting/crouching, F1 toggle, automatic first person when drawing a weapon and third person after holstering, manual first person, Distance/Height and persistent settings-page availability | Player-selected binding and final relaunch persistence in the complete installer |
+| Native Settings | 1.97 | Menu construction, controls, reopening, ordinary keybindings roundtrip, saved Vehicle Call Cost settings | Original package import and selected-profile launch; ITP key selection and persistence |
+| Vehicle Call Cost | Retained original package | Enabled/disabled charging, exact configured price, vehicle arrival and save/relaunch | Original package import and module startup; gameplay checks are from the earlier native builds |
+| V's Edgerunners Mansion | Apartment DLC 2.0 with Native Interactions Framework 1.1.5 | Purchase/ownership, elevator both ways, bed prompts, sleeping/getting up, coffee/tea and save/relaunch | Original package import, sleeping/coffee and relaunch |
+| Immersive Third Person: Best Of Both Worlds V2 | 2.0.1 | Smooth horizontal/vertical camera, walking/sprinting/crouching, F1 toggle, automatic first person when drawing a weapon and third person after holstering, manual first person, Distance/Height and persistent settings-page availability | Original package import, player-selected F10 binding, Console toggle, smooth camera, weapon transitions and relaunch persistence |
 
 These packages are downloaded separately. Original ITP Lua and REDscripts are
 not rewritten. The native bridge supplies the engine operations used by that

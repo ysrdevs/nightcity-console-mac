@@ -5,9 +5,8 @@ and press **Enter**. Command names are case-sensitive. Use Up/Down for history
 and Cmd+V to paste. Type `help` for the commands in your running backend.
 
 The first section documents the **2.0 native backend for Cyberpunk 2077 2.5.0**.
-The separate **legacy 2.3.1 backend** is described at the end. The 2.0 release
-candidate still requires final complete-installer acceptance; see the
-[release notes](RELEASE-2.0.0-PUBLIC.md).
+The separate **legacy 2.3.1 backend** is described at the end. See the
+[2.0 release notes](RELEASE-2.0.0-PUBLIC.md) for the supported features and mods.
 
 Single-player only. Keep a separate manual save before changing your character,
 quest facts or installed gameplay mods.
