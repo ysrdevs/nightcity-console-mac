@@ -164,7 +164,10 @@ enum NativeRuntimeLaunch {
     static func compile(gameRoot: URL, resources: URL, inherited: [String: String]) throws {
         let (manifest, _) = try NativeRuntimeManifest.load(resources: resources)
         let environment = try cleanEnvironment(inherited)
-        try NativeRuntimeSidecars.removeRecognized(gameRoot: gameRoot, relativeRoots: ["r6/scripts"] + manifest.scriptRoots)
+        // SCC also reads *.toml from redsUserHints when explaining a compile
+        // failure. Binary AppleDouble copies there can obscure the real error.
+        try NativeRuntimeSidecars.removeRecognized(gameRoot: gameRoot,
+            relativeRoots: ["r6/scripts", "r6/config/redsUserHints"] + manifest.scriptRoots)
         let sources = try NativeRuntimeFiles.checked(gameRoot, "r6/scripts")
         try FileManager.default.createDirectory(at: sources, withIntermediateDirectories: true)
         let cache = try NativeRuntimeFiles.checked(gameRoot, NativeRuntimeManifest.cachePath)

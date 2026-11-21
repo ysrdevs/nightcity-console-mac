@@ -108,6 +108,16 @@ import Foundation
         try check(try NativeRuntimeFiles.read(metadataTarget) == metadata, "Linked metadata target changed")
         try check(FileManager.default.fileExists(atPath: sidecars.appendingPathComponent("r6/scripts/._linked.reds").path), "Metadata symlink was removed")
 
+        let hints = unchanged.0.appendingPathComponent("r6/config/redsUserHints")
+        let hintText = Data("# Player's compiler hints must remain unchanged.\n".utf8)
+        try write(hintText, hints.appendingPathComponent("player.toml"))
+        try write(metadata, hints.appendingPathComponent("._player.toml"))
+        try write(hintText, hints.appendingPathComponent("._intentional.toml"))
+        try NativeRuntimeLaunch.compile(gameRoot: unchanged.0, resources: unchanged.1, inherited: [:])
+        try check(!FileManager.default.fileExists(atPath: hints.appendingPathComponent("._player.toml").path), "Compiler hint metadata sidecar survived preparation")
+        try check(try NativeRuntimeFiles.read(hints.appendingPathComponent("player.toml")) == hintText, "Primary compiler hints changed")
+        try check(try NativeRuntimeFiles.read(hints.appendingPathComponent("._intentional.toml")) == hintText, "Named player hint content changed")
+
         let arguments = Array(CommandLine.arguments.dropFirst())
         if !arguments.isEmpty {
             guard arguments.count == 2 else { throw NativeRuntimeError(message: "Optional arguments: signed-app-resources known-vanilla-final.redscripts") }

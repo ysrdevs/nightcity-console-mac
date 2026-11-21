@@ -4,7 +4,9 @@ import UniformTypeIdentifiers
 import CryptoKit
 
 enum Const {
-    static let appVersion = "2.0.0"
+    // Use the version of the running signed app for update checks and support
+    // exports. A source constant misreported the 2.0.1 hotfix as 2.0.0.
+    static let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
     static let supportedGameVersions = ["2.3.1", "2.5.0"]
     // Payload files that only work on game 2.3.1: the RED4ext AddressLib is a 2.3.1 address list, and on any
     // other version RED4ext would resolve its hashes to the wrong code.
