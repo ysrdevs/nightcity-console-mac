@@ -303,6 +303,16 @@ final class DiagnosticsCollector {
             "limits": ["text_bytes_per_file": limits.textBytes, "total_text_bytes": limits.totalBytes,
                        "thread_sample_bytes": limits.threadSampleBytes, "collection_seconds": limits.seconds,
                        "max_files": limits.files, "recent_days": limits.recentDays]]
+        // Record the real installed bundle independently of any UI/version
+        // constant. This catches stale display strings in support reports.
+        if hasTime, let app = DiagnosticsDirectory(snapshot.appBundle),
+           let data = app.read("Contents/Info.plist", maximum: 32 * 1024, tail: false),
+           let info = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] {
+            for (key, field) in [("CFBundleShortVersionString", "launcher_bundle_version"), ("CFBundleVersion", "launcher_bundle_build")] {
+                if let version = info[key] as? String, version.utf8.count <= 96,
+                   version.range(of: #"^[A-Za-z0-9][A-Za-z0-9._-]*$"#, options: .regularExpression) != nil { summary[field] = version }
+            }
+        }
         if snapshot.includeSystemInformation { summary["system"] = Self.systemInformation(); summary["launcher_signature"] = Self.signature(snapshot.appBundle) }
         json("summary.json", summary)
         if hasTime {
@@ -330,6 +340,9 @@ final class DiagnosticsCollector {
             collectBuildMetadata(app, path: "Contents/Resources/exploration/manifest.json", name: "metadata/bundled-exploration.json")
         }
         if let game = DiagnosticsDirectory(snapshot.gameRoot) {
+            // Native frontend/preparation failures live in launcher-owned stdout
+            // logs, separately from the runtime plugin log. Collect these early.
+            collectNativeLaunchLogs(game)
             collectLogs(game, directory: "red4ext/logs", prefix: "red4ext", label: "loader")
             for plugin in ["Codeware", "ArchiveXL", "TweakXL", "input_loader", "ModSettings"] {
                 collectLogs(game, directory: "red4ext/plugins/\(plugin)", prefix: plugin, label: plugin)
@@ -358,9 +371,16 @@ final class DiagnosticsCollector {
             collectExplorationIntegrity(game)
             var caches: [[String: Any]] = []
             for path in ["r6/cache/final.redscripts", "r6/cache/modded/final.redscripts", "r6/cache/native20/final.redscripts", "r6/cache/final.redscripts.bk"] {
-                if let info = game.information(path) { caches.append(fileDetails(info)) }
+                var entry: [String: Any] = ["source": path, "contents_omitted": true]
+                if let info = game.information(path) {
+                    entry.merge(fileDetails(info)) { current, _ in current }
+                    if let (hash, _) = measuredHash(game, path) { entry["sha256"] = hash; entry["status"] = "hashed" }
+                    else { entry["status"] = "size_or_time_budget" }
+                } else { entry["status"] = "missing_or_not_regular" }
+                caches.append(entry)
             }
             json("script-caches.json", caches)
+            collectScriptHints(game)
             collectConfiguration(game)
             collectInputConfiguration(game)
             collectInventory(game)
@@ -428,11 +448,17 @@ final class DiagnosticsCollector {
                 "modified_unix": entry.modified,
                 "session_relation": start.map { entry.modified < $0 ? "predates_sampled_process" : "modified_since_process_start_not_proof_of_same_session" } ?? "unknown_no_sampled_process"]
     }
-    private func collectLogs(_ root: DiagnosticsDirectory, directory: String, prefix: String, label: String) {
-        guard hasTime else { return }
+    @discardableResult
+    private func collectLogs(_ root: DiagnosticsDirectory, directory: String, prefix: String, label: String,
+                             filenameAllowed: ((String) -> Bool)? = nil) -> [DiagnosticsDirectory.Entry] {
+        guard hasTime else { return [] }
         let entries = root.entries(directory, limit: min(500, limits.directoryEntries))
-            .filter { recent($0) && URL(fileURLWithPath: $0.relative).lastPathComponent.hasPrefix(prefix) && $0.relative.hasSuffix(".log") }
-            .sorted { $0.modified > $1.modified }.prefix(2)
+            .filter {
+                let name = URL(fileURLWithPath: $0.relative).lastPathComponent
+                return recent($0) && name.hasPrefix(prefix) && $0.relative.hasSuffix(".log") && (filenameAllowed?(name) ?? true)
+            }
+            .sorted { $0.modified == $1.modified ? $0.relative < $1.relative : $0.modified > $1.modified }.prefix(2)
+        var collected: [DiagnosticsDirectory.Entry] = []
         for (index, entry) in entries.enumerated() where hasTime {
             let name = "logs/\(label)-\(index + 1).txt"
             let split = entry.size > limits.textBytes
@@ -445,8 +471,62 @@ final class DiagnosticsCollector {
                 var metadata = fileDetails(entry)
                 metadata["export"] = name; metadata["truncated"] = split
                 logIndex.append(metadata)
+                collected.append(entry)
             }
         }
+        return collected
+    }
+    private func collectNativeLaunchLogs(_ root: DiagnosticsDirectory) {
+        let directory = "red4ext/nightcity-native20/logs"
+        for (prefix, label) in [("game-", "native-launch"), ("preparation-", "native-preparation")] where hasTime {
+            let logs = collectLogs(root, directory: directory, prefix: prefix, label: label) { name in
+                guard name.hasPrefix(prefix), name.hasSuffix(".log") else { return false }
+                return UUID(uuidString: String(name.dropFirst(prefix.count).dropLast(4))) != nil
+            }
+            // Exit records are tied only to selected recent log names. Never
+            // sweep arbitrary JSON from the module/settings directory.
+            for (index, log) in logs.enumerated() where hasTime {
+                let path = log.relative + ".exit.json"
+                guard let info = root.information(path), recent(info), info.size <= 4096 else { continue }
+                var safe: [String: Any] = ["file": fileDetails(info), "status": "invalid", "unrecognized_fields_omitted": true]
+                if let data = root.read(path, maximum: 4096, tail: false),
+                   let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   value["schema"] as? Int == 1, let pid = value["pid"] as? Int, pid > 0,
+                   let code = value["status"] as? Int, Int32(exactly: code) != nil,
+                   let reason = value["reason"] as? String, ["exit", "signal"].contains(reason) {
+                    safe["status"] = "available"; safe["schema"] = 1; safe["pid"] = pid
+                    safe["exit_status"] = code; safe["reason"] = reason
+                }
+                let name = "logs/\(label)-\(index + 1).exit.json"
+                json(name, safe)
+                var metadata = fileDetails(info); metadata["export"] = name; logIndex.append(metadata)
+            }
+        }
+    }
+    private func collectScriptHints(_ root: DiagnosticsDirectory) {
+        guard hasTime else { return }
+        var entries: [[String: Any]] = [], remaining = min(128, max(0, limits.inventoryEntries))
+        var directories = min(128, max(0, limits.directoryEntries))
+        func append(_ entry: DiagnosticsDirectory.Entry) {
+            guard remaining > 0, hasTime else { return }
+            remaining -= 1
+            var record = fileDetails(entry)
+            // Opening one byte establishes readability without exporting any
+            // hint or source contents, including absolute paths inside them.
+            record["status"] = root.read(entry.relative, maximum: 1, tail: false) == nil ? "unreadable" : "readable"
+            entries.append(record)
+        }
+        func visit(_ relative: String, depth: Int) {
+            guard depth <= 4, remaining > 0, directories > 0, hasTime else { return }
+            directories -= 1
+            for entry in root.entries(relative, limit: min(256, limits.directoryEntries)).sorted(by: { $0.relative < $1.relative }) where remaining > 0 && hasTime {
+                if entry.directory { visit(entry.relative, depth: depth + 1) }
+                else { append(entry) }
+            }
+        }
+        visit("r6/config/redsUserHints", depth: 0)
+        if let entry = root.information("r6/cache/native20/runtime-script-paths.txt") { append(entry) }
+        json("script-hints.json", ["files": entries, "contents_omitted": true, "bounded_listing": true])
     }
     private func measuredHash(_ root: DiagnosticsDirectory, _ path: String) -> (String, Int64)? {
         guard hasTime, hashBytesRemaining > 0,
@@ -470,15 +550,16 @@ final class DiagnosticsCollector {
         guard hasTime else { return }
         var entries: [[String: Any]] = []
         let app = DiagnosticsDirectory(snapshot.appBundle)
-        let paths = ["red4ext/RED4ext.dylib", "red4ext/plugins/Codeware/Codeware.dylib", "red4ext/plugins/ArchiveXL/ArchiveXL.dylib",
+        let paths = ["engine/tools/scc", "engine/tools/libscc_lib.dylib", "red4ext/RED4ext.dylib", "red4ext/plugins/Codeware/Codeware.dylib", "red4ext/plugins/ArchiveXL/ArchiveXL.dylib",
                      "red4ext/plugins/TweakXL/TweakXL.dylib", "red4ext/plugins/input_loader/input_loader.dylib",
                      "red4ext/plugins/ModSettings/ModSettings.dylib", "red4ext/libcyberconsole_overlay.dylib", "red4ext/FridaGadget.dylib",
                      "red4ext/plugins/NightCityRuntime/NightCityRuntime.dylib", "red4ext/NightCityFrontend.dylib"]
         for path in paths where hasTime {
             let native = path == "red4ext/RED4ext.dylib" || path.hasPrefix("red4ext/plugins/")
             let nativePayload = "native20/payload/" + path
-            let bundled = app?.information("Contents/Resources/" + nativePayload) != nil ? nativePayload :
+            let legacyBundle = path.hasPrefix("engine/tools/") ? URL(fileURLWithPath: path).lastPathComponent :
                 (native && snapshot.native25 ? "native25/" : "") + String(path.dropFirst("red4ext/".count))
+            let bundled = app?.information("Contents/Resources/" + nativePayload) != nil ? nativePayload : legacyBundle
             var entry = comparedFile(root, path, bundledPath: bundled, app: app)
             if snapshot.includeSystemInformation { entry["signature"] = Self.signature(root.root.appendingPathComponent(path)) }
             entries.append(entry)

@@ -405,6 +405,89 @@ struct DiagnosticsCollectorTests {
         precondition(!legacyReport.entries.map { String(decoding: $0.data, as: UTF8.self) }.joined().contains("LEGACY_DB_CONTENT_PRIVATE"))
         print("PASS malformed/bounded script integrity and legacy 2.3.1 database identity")
 
+        // Native frontend diagnostics are written to the launcher's stdout log,
+        // not NightCityRuntime.log. Keep exact recent generated filenames only.
+        let nativeLogs = "red4ext/nightcity-native20/logs/"
+        let newestLaunch = nativeLogs + "game-11111111-1111-4111-8111-111111111111.log"
+        let previousLaunch = nativeLogs + "game-22222222-2222-4222-8222-222222222222.log"
+        let thirdLaunch = nativeLogs + "game-33333333-3333-4333-8333-333333333333.log"
+        let oldLaunch = nativeLogs + "game-44444444-4444-4444-8444-444444444444.log"
+        let preparationLog = nativeLogs + "preparation-55555555-5555-4555-8555-555555555555.log"
+        try write(game, newestLaunch, "[NightCityFrontend] Hook preflight refused; frontend inert\n" + privateText +
+            String(repeating: "bounded filler\n", count: 12_000) + "\n[NativePreparation] PREPARATION_FINAL_MARKER\npassword=LAUNCH_PASSWORD_PRIVATE")
+        try write(game, previousLaunch, "[NightCityFrontend] First native Console frame rendered\n")
+        try write(game, thirdLaunch, "THIRD_LAUNCH_NOT_SELECTED")
+        try write(game, oldLaunch, "OLD_LAUNCH_NOT_SELECTED")
+        try write(game, preparationLog, "[NativePreparation] compat25 exceeded its preparation time limit\n" + privateText)
+        try write(game, nativeLogs + "game-settings.log", "ARBITRARY_LAUNCH_FILE_PRIVATE")
+        try write(game, nativeLogs + "preparation-history.log", "ARBITRARY_PREP_FILE_PRIVATE")
+        try write(game, nativeLogs + "settings.json", "SETTINGS_NOT_LOGS_PRIVATE")
+        for (path, secondsAgo) in [(newestLaunch, 0.0), (previousLaunch, 10.0), (thirdLaunch, 20.0), (oldLaunch, 9.0 * 86400)] {
+            try fm.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -secondsAgo)], ofItemAtPath: game.appendingPathComponent(path).path)
+        }
+        try writeJSON(game, newestLaunch + ".exit.json", ["schema": 1, "pid": 7907, "status": 0, "reason": "exit",
+            "unrecognized": "EXIT_UNKNOWN_PRIVATE", "environment": "EXIT_ENVIRONMENT_PRIVATE"])
+        try writeJSON(game, previousLaunch + ".exit.json", ["schema": 1, "pid": 7906, "status": 0, "reason": "UNRECOGNIZED_REASON_PRIVATE"])
+        try writeJSON(game, thirdLaunch + ".exit.json", ["schema": 1, "pid": 7905, "status": 0, "reason": "exit"])
+        try fm.createSymbolicLink(atPath: game.appendingPathComponent(nativeLogs + "game-66666666-6666-4666-8666-666666666666.log").path,
+            withDestinationPath: fixture.appendingPathComponent("outside-secret.txt").path)
+        for path in ["engine/tools/scc", "engine/tools/libscc_lib.dylib"] {
+            try write(game, path, "abc")
+            try write(snapshot.appBundle, "Contents/Resources/native20/payload/" + path, "abc")
+        }
+        try write(game, "r6/cache/final.redscripts", "abc")
+        try write(game, "r6/cache/final.redscripts.bk", "abc")
+        try write(game, "r6/cache/native20/final.redscripts", "CACHE_BYTES_NOT_EXPORTED_PRIVATE")
+        try write(game, "r6/config/redsUserHints/example.hint", "HINT_CONTENT_NOT_EXPORTED_PRIVATE")
+        try write(game, "r6/cache/native20/runtime-script-paths.txt", "PATH_LIST_CONTENT_NOT_EXPORTED_PRIVATE")
+        let bundleInfo = ["CFBundleShortVersionString": "2.0.1", "CFBundleVersion": "2.0.1-hotfix", "private": "BUNDLE_INFO_PRIVATE"]
+        let bundleInfoData = try PropertyListSerialization.data(fromPropertyList: bundleInfo, format: .xml, options: 0)
+        try bundleInfoData.write(to: snapshot.appBundle.appendingPathComponent("Contents/Info.plist"))
+        let nativeSupport = collect()
+        let actualVersion = try object(nativeSupport, "summary.json")
+        precondition(actualVersion["launcher_version"] as? String == "1.7.0.0")
+        precondition(actualVersion["launcher_bundle_version"] as? String == "2.0.1" && actualVersion["launcher_bundle_build"] as? String == "2.0.1-hotfix")
+        let launchEntries = nativeSupport.entries.filter { $0.name.hasPrefix("logs/native-launch-") && $0.name.hasSuffix(".txt") }
+        precondition(launchEntries.count == 2)
+        let launchText = launchEntries.map { String(decoding: $0.data, as: UTF8.self) }.joined()
+        precondition(launchText.contains("Hook preflight refused") && launchText.contains("PREPARATION_FINAL_MARKER") && launchText.contains("Middle of log omitted"))
+        let preparationText = String(decoding: nativeSupport.entries.first { $0.name == "logs/native-preparation-1.txt" }!.data, as: UTF8.self)
+        precondition(preparationText.contains("compat25 exceeded its preparation time limit"))
+        let exitRecord = try object(nativeSupport, "logs/native-launch-1.exit.json")
+        precondition(exitRecord["status"] as? String == "available" && exitRecord["pid"] as? Int == 7907 && exitRecord["exit_status"] as? Int == 0)
+        let invalidExit = try object(nativeSupport, "logs/native-launch-2.exit.json")
+        precondition(invalidExit["status"] as? String == "invalid" && invalidExit["reason"] == nil)
+        let supportIndex = try array(nativeSupport, "logs/log-index.json")
+        precondition(supportIndex.contains { $0["source"] as? String == newestLaunch && $0["truncated"] as? Bool == true })
+        precondition(supportIndex.contains { $0["source"] as? String == preparationLog })
+        let supportBinaries = try array(nativeSupport, "native-binaries.json")
+        for path in ["engine/tools/scc", "engine/tools/libscc_lib.dylib"] {
+            let binary = supportBinaries.first { $0["path"] as? String == "<GAME>/" + path }!
+            precondition(binary["matches_bundled"] as? Bool == true && binary["sha256"] as? String == abcHash)
+        }
+        let caches = try array(nativeSupport, "script-caches.json")
+        precondition(caches.first { $0["source"] as? String == "r6/cache/final.redscripts" }?["sha256"] as? String == abcHash)
+        precondition(caches.first { $0["source"] as? String == "r6/cache/final.redscripts.bk" }?["sha256"] as? String == abcHash)
+        let hints = try object(nativeSupport, "script-hints.json")
+        let hintFiles = hints["files"] as! [[String: Any]]
+        precondition(hints["contents_omitted"] as? Bool == true)
+        precondition(hintFiles.contains { $0["source"] as? String == "r6/config/redsUserHints/example.hint" && $0["status"] as? String == "readable" })
+        precondition(hintFiles.contains { $0["source"] as? String == "r6/cache/native20/runtime-script-paths.txt" && $0["status"] as? String == "readable" })
+        let supportText = nativeSupport.entries.map { String(decoding: $0.data, as: UTF8.self) }.joined()
+        for secret in ["THIRD_LAUNCH_NOT_SELECTED", "OLD_LAUNCH_NOT_SELECTED", "ARBITRARY_LAUNCH_FILE_PRIVATE", "ARBITRARY_PREP_FILE_PRIVATE",
+                       "BUNDLE_INFO_PRIVATE", "SETTINGS_NOT_LOGS_PRIVATE", "EXIT_UNKNOWN_PRIVATE", "EXIT_ENVIRONMENT_PRIVATE", "UNRECOGNIZED_REASON_PRIVATE", "LAUNCH_PASSWORD_PRIVATE",
+                       "CACHE_BYTES_NOT_EXPORTED_PRIVATE", "HINT_CONTENT_NOT_EXPORTED_PRIVATE", "PATH_LIST_CONTENT_NOT_EXPORTED_PRIVATE",
+                       "PRIVATE_PASSWORD", "PRIVATE_TOKEN", "PRIVATE_COMMAND", "person@example.com"] {
+            precondition(!supportText.contains(secret), "Native support collection leaked \(secret)")
+        }
+        var noNativeHashes = DiagnosticsLimits(); noNativeHashes.totalHashBytes = 0
+        let noNativeHashesReport = collect(noNativeHashes)
+        let unHashedCaches = try array(noNativeHashesReport, "script-caches.json")
+        precondition(unHashedCaches.first { $0["source"] as? String == "r6/cache/final.redscripts" }?["status"] as? String == "size_or_time_budget")
+        precondition(unHashedCaches.allSatisfy { $0["sha256"] == nil })
+        print("PASS native launch/preparation excerpts, paired projected exit records, recent-file selection and privacy")
+        print("PASS compiler identities, bounded script-cache hashes and contents-free hint readability")
+
         let zip = fixture.appendingPathComponent("report.zip")
         try report.zipData().write(to: zip)
         let process = Process(); process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
