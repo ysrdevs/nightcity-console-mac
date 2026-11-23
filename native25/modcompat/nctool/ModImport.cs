@@ -207,6 +207,13 @@ public static class ModImport
                      name.EndsWith(".archive", StringComparison.OrdinalIgnoreCase) ? 8 : 0;
         return suffix > 0 && Foundations.Contains(name[..^suffix]);
     }
+    // Some packages ship only "tweaks/", "scripts/" or "input/" at the top (meant to be unpacked into r6/).
+    // If nothing in the package says where the game root is (no r6/, archive/ or red4ext/ anywhere), treat those folders as r6/ ones.
+    static readonly string[] R6Folders = { "tweaks/", "scripts/", "input/" };
+    static bool LacksGameRoot(IEnumerable<SourceFile> files) =>
+        files.Any(f => R6Folders.Any(m => f.Path.StartsWith(m, StringComparison.OrdinalIgnoreCase))) &&
+        !files.Any(f => new[] { "r6/", "archive/", "red4ext/" }.Any(m => Marker(f.Path, m) >= 0));
+    static string ImplicitR6(string rel) => R6Folders.Any(m => rel.StartsWith(m, StringComparison.OrdinalIgnoreCase)) ? "r6/" + rel : rel;
     static bool Native(string rel) => new[] { ".dll", ".dylib", ".so", ".exe", ".asi", ".bundle" }.Contains(Path.GetExtension(rel), StringComparer.OrdinalIgnoreCase);
     static string Destination(string rel, string source)
     {
@@ -254,8 +261,10 @@ public static class ModImport
         report.SourceFiles = Inventory(raw); report.SourceFingerprint = Fingerprint(report.SourceFiles);
         var selected = Path.Combine(workspace, "install-source"); Directory.CreateDirectory(selected);
         var destinations = new HashSet<string>();
-        foreach (var file in report.SourceFiles)
+        var implicitR6 = LacksGameRoot(report.SourceFiles);
+        foreach (var source0 in report.SourceFiles)
         {
+            var file = implicitR6 ? source0 with { Path = ImplicitR6(source0.Path) } : source0; // Path = normalized; source0.Path = where it is on disk
             if (Protected(file.Path)) { report.Skipped.Add(new(file.Path, "NightCity supplies this native foundation; its installed files are preserved.", false)); continue; }
             if (Native(file.Path) || Marker(file.Path, "bin/x64/plugins/cyber_engine_tweaks/") >= 0 || file.Path.EndsWith(".lua", StringComparison.OrdinalIgnoreCase))
             { report.Skipped.Add(new(file.Path, "Native Windows/CET components cannot be installed by this importer.", true)); continue; }
@@ -263,7 +272,7 @@ public static class ModImport
             if (dest.Length == 0) { report.Skipped.Add(new(file.Path, "Not a supported game mod file.", false)); continue; }
             if (!Allowed(dest)) { report.Skipped.Add(new(file.Path, "Protected or unsupported destination.", true)); continue; }
             if (!destinations.Add(Key(dest))) { report.Issues.Add(new("duplicateDestination", "Multiple source files target " + dest, true)); continue; }
-            var output = Checked(selected, file.Path); Directory.CreateDirectory(Path.GetDirectoryName(output)!); File.Copy(Checked(raw, file.Path), output);
+            var output = Checked(selected, file.Path); Directory.CreateDirectory(Path.GetDirectoryName(output)!); File.Copy(Checked(raw, source0.Path), output);
         }
         try
         {
